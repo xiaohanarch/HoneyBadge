@@ -1,0 +1,89 @@
+<h2>Phase 1 整体架构全景</h2>
+<p class="subtitle">基础设施升级 — 核心技术栈切换</p>
+
+<div class="mockup">
+  <div class="mockup-header">Phase 1 系统架构图</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; white-space: pre; padding: 20px; background: #1a1a2e; color: #e0e0e0;">
+<span style="color:#64ffda">┌─────────────────────────────────────────────────────────────────┐</span>
+<span style="color:#64ffda">│</span>                       <span style="color:#ffd700;font-weight:bold">接入层 (Access Layer)</span>                      <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  ┌──────────────┐    ┌────��─────────────────────────────┐      <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │ <span style="color:#81d4fa">Vue 3 前端</span>    │───→│ <span style="color:#81d4fa">Higress 网关</span>                      │      <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │ WebSocket     │    │ • 路由转发                       │      <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │ + HTTP REST   ��    │ • 限流/熔断                      │      <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  └──────────────┘    │ • <span style="color:#ffab40">SSO 预留接口</span> (Phase 1 基础认证) │      <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                      └─────────────┬────────────────────┘      <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">└─────────────────────────────────────┼──��─────────────────────────┘</span>
+                                      │
+<span style="color:#64ffda">┌─────────��───────────────────────────┼──��─────────────────────────┐</span>
+<span style="color:#64ffda">│</span>                       <span style="color:#ffd700;font-weight:bold">编排层 (Orchestration)</span>                    <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                      ┌─────────────▼───────────────┐            <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                      │  <span style="color:#81d4fa">HiClaw Manager</span>              │            <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                      │  (无状态, 2+ Pod)            │            <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                      │  Matrix Protocol             │            <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                      └──┬──────────┬──────────┬─────┘            <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                         │          │          │                   <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                    ┌────▼───┐ ┌───▼────┐ ��──▼─────┐             <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                    │<span style="color:#a5d6a7">Worker</span>  │ │<span style="color:#a5d6a7">Worker</span>  │ │<span style="color:#a5d6a7">Worker</span>  │             <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                    │ 图谱查询│ │ 分析   │ │ MCP    │             <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                    └────┬───┘ └───┬────┘ └──┬─────┘             <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">└─────────────────────────┼─────────┼─────────┼────────────────────┘</span>
+                          │         │         │
+<span style="color:#64ffda">┌─────────────────────────┼─────────┼─────────┼────────────────────┐</span>
+<span style="color:#64ffda">│</span>                   <span style="color:#ffd700;font-weight:bold">核心服务层 (Core Services)</span>                     <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │<span style="color:#ef9a9a">防幻觉框架</span>    │  │<span style="color:#ce93d8">LLM 适配层</span>   │  │<span style="color:#90caf9">审计日志服务</span>        │  <span style="color:#64ffda">���</span>
+<span style="color:#64ffda">│</span>  │ L1 语法校验  │  │ 云端API优先  │  │ trace_id 全链路     │  <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │ L2 Schema   │  │ 统一接口抽象 │  │ PostgreSQL 持久化   │  <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │ L3 <span style="color:#ffab40">权限预留</span>  │  │ 后续切自部署 │  │                    │  <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │ L4 结果直传  │  └──────────────┘  └──────────────────────┘  <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │ L5 审计日志  │                                              <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  └──────────────┘                                              <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">└────────────────────────────────────────────────────────────────────┘</span>
+
+<span style="color:#64ffda">┌────────────────────────────────────────────────────────────────────┐</span>
+<span style="color:#64ffda">│</span>                   <span style="color:#ffd700;font-weight:bold">数据层 (Data Layer)</span>                             <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  ┌──────────┐ ┌──────┐ ┌──────────┐ ┌───────┐ ┌───────┐        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │<span style="color:#a5d6a7">NebulaGraph</span>│ │<span style="color:#ef9a9a">Redis</span> │ │<span style="color:#ce93d8">PostgreSQL</span>│ │<span style="color:#90caf9">Kafka</span>  │ │<span style="color:#ffab40">MinIO</span>  │        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │ 图谱存储  │ │ 缓存 │ │ 审计日志  │ │ 消息  │ │ 对象  │        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  └──────────┘ └──────┘ └──────────┘ └��──────┘ └─���─────┘        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">└─────────────────────────────────────────────────────────────��──────┘</span>
+
+<span style="color:#64ffda">┌────────────────────────────────────────────────────────────────────┐</span>
+<span style="color:#64ffda">│</span>                   <span style="color:#ffd700;font-weight:bold">数据集成层 (Data Integration)</span>                    <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  ┌──────────────────┐    ┌──────────────────────────────┐        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │<span style="color:#ffab40">公司同步工具接口</span>  │───→│ <span style="color:#a5d6a7">ODS→Graph 转换引擎</span>            │        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  │ ERP → ODS (T+1) │    │ • 数据质量校验                │        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  └──────���───────────┘    │ • 图模型转换                  │        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                          │ • NebulaGraph 批量导入        │        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>                          └──────────────────────────────┘        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">└─────────────��──────────────────────────��───────────────────────────┘</span>
+
+<span style="color:#64ffda">┌─���────────────────────────────���─────────────────────────────────────┐</span>
+<span style="color:#64ffda">│</span>                   <span style="color:#ffd700;font-weight:bold">可观测性 (Observability)</span>                        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">│</span>  <span style="color:#90caf9">Prometheus</span> + <span style="color:#a5d6a7">Grafana</span> + <span style="color:#ce93d8">Loki</span> + <span style="color:#ef9a9a">Jaeger</span>                        <span style="color:#64ffda">│</span>
+<span style="color:#64ffda">└───────────────────────────────────────────��────────────────────────┘</span>
+
+<span style="color:#888">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span style="color:#ffab40;font-weight:bold">橙色标注</span> = Phase 1 预留但不实现（SSO、权限注入）
+<span style="color:#888">Phase 1 不含：数据同步工具 | SSO 完整对接 | 权限 MCP Server | Milvus</span>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <h3>Phase 1 模块拆分文档结构</h3>
+  <p class="subtitle">每个模块一个独立 Markdown，加一个总览文档串联</p>
+  <div style="font-family: monospace; font-size: 13px; line-height: 1.8; padding: 16px; background: #1e1e2e; color: #cdd6f4; border-radius: 8px;">
+docs/phase1/
+├── <span style="color:#f9e2af;font-weight:bold">00-overview.md</span>            # 总览：架构全景、模块依赖、里程碑
+├── <span style="color:#89b4fa">01-nebula-schema.md</span>       # NebulaGraph Schema 完整定义
+├── <span style="color:#89b4fa">02-hiclaw-orchestration.md</span> # HiClaw 编排层设计
+���── <span style="color:#89b4fa">03-anti-hallucination.md</span>   # 防幻觉框架 + 审计日志
+├── <span style="color:#89b4fa">04-llm-adapter.md</span>          # LLM 适配层（云端→自部署切换）
+├── <span style="color:#89b4fa">05-frontend.md</span>             # Vue 3 前端 + WebSocket
+├─��� <span style="color:#89b4fa">06-data-pipeline.md</span>        # ETL 数据管道（ODS→Graph）
+├── <span style="color:#89b4fa">07-gateway.md</span>              # Higress 网关 + SSO 预���
+├── <span style="color:#89b4fa">08-observability.md</span>        # 可观测性体系
+├���─ <span style="color:#89b4fa">09-deployment.md</span>           # Docker Compose 开发环境
+└── <span style="color:#89b4fa">10-ontology.md</span>             # 本体模型（PTP+OTC 全流程）
+  </div>
+</div>
