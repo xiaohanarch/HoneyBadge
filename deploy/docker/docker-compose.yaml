@@ -1,0 +1,295 @@
+# HoneyBadge Local Development Infrastructure
+# Docker Compose for Docker Desktop + WSL
+#
+# Services:
+#   - nebula-graphd: NebulaGraph Graph Service (port 9669)
+#   - nebula-storaged: NebulaGraph Storage Service
+#   - nebula-metad: NebulaGraph Metadata Service
+#   - redis: Redis for session/cache (port 6379)
+#   - postgres: PostgreSQL for audit log (port 5432)
+#   - matrix: Matrix homeserver for HiClaw (port 8008)
+#
+# Usage:
+#   docker-compose up -d
+#   docker-compose ps
+#   docker-compose logs -f [service]
+#   docker-compose down (stop)
+#   docker-compose down -v (stop + remove volumes)
+
+services:
+  # =============================================================================
+  # NebulaGraph Cluster (1 metad + 1 storaged + 1 graphd)
+  # =============================================================================
+
+  nebula-metad:
+    image: vesoft/nebula-metad:v3.7.0
+    container_name: honeybadge-nebula-metad
+    hostname: nebula-metad
+    restart: unless-stopped
+    ports:
+      - "9559:9559"  # Meta service port
+      - "9619:9619"  # Meta HTTP port
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - nebula_metad_data:/data/meta
+      - ./nebula-metad.conf:/usr/local/nebula/etc/nebula-metad.conf:ro
+    command:
+      - --flagfile=/usr/local/nebula/etc/nebula-metad.conf
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "nebula-metad", "--flagfile=/usr/local/nebula/etc/nebula-metad.conf"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  nebula-storaged:
+    image: vesoft/nebula-storaged:v3.7.0
+    container_name: honeybadge-nebula-storaged
+    hostname: nebula-storaged
+    restart: unless-stopped
+    ports:
+      - "9779:9779"  # Storage HTTP port
+      - "9780:9780"  # Storage port
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - nebula_storaged_data:/data/storage
+      - ./nebula-storaged.conf:/usr/local/nebula/etc/nebula-storaged.conf:ro
+    command:
+      - --flagfile=/usr/local/nebula/etc/nebula-storaged.conf
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "nebula-storaged", "--flagfile=/usr/local/nebula/etc/nebula-storaged.conf"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  nebula-graphd:
+    image: vesoft/nebula-graphd:v3.7.0
+    container_name: honeybadge-nebula-graphd
+    hostname: nebula-graphd
+    restart: unless-stopped
+    ports:
+      - "9669:9669"  # Graph service port (main)
+      - "19669:19669"  # Graph HTTP port
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./nebula-graphd.conf:/usr/local/nebula/etc/nebula-graphd.conf:ro
+    command:
+      - --flagfile=/usr/local/nebula/etc/nebula-graphd.conf
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+      nebula-storaged:
+        condition: service_healthy
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "nebula-graphd", "--flagfile=/usr/local/nebula/etc/nebula-graphd.conf"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # =============================================================================
+  # NebulaGraph Console (for running .ngql scripts)
+  # =============================================================================
+
+  nebula-console:
+    image: vesoft/nebula-console:v3.7.0
+    container_name: honeybadge-nebula-console
+    hostname: nebula-console
+    profiles:
+      - tools  # Only runs with: docker-compose --profile tools up
+    networks:
+      - honeybadge-net
+    depends_on:
+      nebula-graphd:
+        condition: service_healthy
+    entrypoint: ["nebula-console", "-addr", "nebula-graphd", "-port", "9669", "-user", "root", "-password", "nebula"]
+
+  # =============================================================================
+  # Redis Cache
+  # =============================================================================
+
+  redis:
+    image: redis:7-alpine
+    container_name: honeybadge-redis
+    hostname: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"  # Redis port
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass redis123
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # =============================================================================
+  # PostgreSQL (Audit Log)
+  # =============================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: honeybadge-postgres
+    hostname: postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"  # PostgreSQL port
+    environment:
+      - POSTGRES_USER=honeybadge
+      - POSTGRES_PASSWORD=honeybadge123
+      - POSTGRES_DB=honeybadge_audit
+      - TZ=Asia/Shanghai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U honeybadge -d honeybadge_audit"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # =============================================================================
+  # Matrix Homeserver (for HiClaw Manager-Worker Communication)
+  # =============================================================================
+
+  matrix-synapse:
+    image: matrixdotorg/synapse:v1.99.0
+    container_name: honeybadge-matrix
+    hostname: matrix
+    restart: unless-stopped
+    ports:
+      - "8008:8008"  # Client API
+      - "8448:8448"  # Federation
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - matrix_data:/data
+      - ./homeserver.yaml:/data/homeserver.yaml:ro
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # =============================================================================
+  # Milvus (Vector DB for Phase 2 - Semantic Cache & Ontology)
+  # =============================================================================
+
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: honeybadge-milvus-etcd
+    hostname: milvus-etcd
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - TZ=Asia/Shanghai
+    volumes:
+      - milvus_etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    networks:
+      - honeybadge-net
+
+  milvus-minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: honeybadge-milvus-minio
+    hostname: milvus-minio
+    restart: unless-stopped
+    environment:
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - TZ=Asia/Shanghai
+    volumes:
+      - milvus_minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  milvus:
+    image: milvusdb/milvus:v2.3.3
+    container_name: honeybadge-milvus
+    hostname: milvus
+    restart: unless-stopped
+    ports:
+      - "9091:9091"  # Milvus HTTP port
+    environment:
+      - ETCD_ENDPOINTS=milvus-etcd:2379
+      - MINIO_ADDRESS=milvus-minio:9000
+      - TZ=Asia/Shanghai
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      - milvus-etcd
+      - milvus-minio
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    profiles:
+      - vector  # Only runs with: docker-compose --profile vector up
+
+# =============================================================================
+# Networks & Volumes
+# =============================================================================
+
+networks:
+  honeybadge-net:
+    driver: bridge
+    name: honeybadge-network
+
+volumes:
+  # NebulaGraph
+  nebula_metad_data:
+    name: honeybadge-nebula-metad-data
+  nebula_storaged_data:
+    name: honeybadge-nebula-storaged-data
+
+  # Redis
+  redis_data:
+    name: honeybadge-redis-data
+
+  # PostgreSQL
+  postgres_data:
+    name: honeybadge-postgres-data
+
+  # Matrix
+  matrix_data:
+    name: honeybadge-matrix-data
+
+  # Milvus
+  milvus_etcd_data:
+    name: honeybadge-milvus-etcd-data
+    driver: local
+  milvus_minio_data:
+    name: honeybadge-milvus-minio-data
+    driver: local
+  milvus_data:
+    name: honeybadge-milvus-data

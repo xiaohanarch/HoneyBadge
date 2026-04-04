@@ -1,0 +1,52 @@
+# Matrix Synapse Homeserver Configuration for HoneyBadge
+
+server_name: matrix.local
+pid_file: /data/homeserver.pid
+web_client_location: /usr/local/share/synapse/webclient
+
+listeners:
+  - port: 8008
+    type: http
+    http_options:
+      additional_headers:
+        X-Forwarded-Proto: http
+    x_forwarded: true
+    resources:
+      - names: [client, federation]
+        compress: true
+
+database:
+  name: sqlite
+  args:
+    database: /data/homeserver.db
+
+logging:
+  level: WARNING
+  handlers:
+    file:
+      class: logging.handlers.RotatingFileHandler
+      formatter: precise
+      filename: /data/homeserver.log
+      maxBytes: 104857600
+      backupCount: 10
+  loggers:
+    synapse:
+      level: WARNING
+
+media_store_path: /data/media
+registration_shared_secret: honeybadge_matrix_secret_change_in_production
+report_stats: false
+macaroon_secret_key: honeybadge_macaron_secret_change_in_production
+form_secret: honeybadge_form_secret_change_in_production
+
+enable_registration: true
+enable_set_email_registration: false
+enable_msc3886: false
+allow_guest_access: false
+
+room_prehistory_server_name: matrix.local
+require_keys_for_graphQL: false
+
+# API Configuration
+api_current_version: v2
+max_avatar_size: 10000000
