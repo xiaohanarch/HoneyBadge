@@ -22,7 +22,7 @@ services:
   # =============================================================================
 
   nebula-metad:
-    image: vesoft/nebula-metad:v3.7.0
+    image: vesoft/nebula-metad:nightly
     container_name: honeybadge-nebula-metad
     hostname: nebula-metad
     restart: unless-stopped
@@ -30,22 +30,25 @@ services:
       - "9559:9559"  # Meta service port
       - "9619:9619"  # Meta HTTP port
     environment:
+      - USER=root
       - TZ=Asia/Shanghai
     volumes:
-      - nebula_metad_data:/data/meta
+      - ./data/metad:/data/meta
+      - ./logs/metad:/logs
       - ./nebula-metad.conf:/usr/local/nebula/etc/nebula-metad.conf:ro
     command:
       - --flagfile=/usr/local/nebula/etc/nebula-metad.conf
     networks:
       - honeybadge-net
     healthcheck:
-      test: ["CMD", "nebula-metad", "--flagfile=/usr/local/nebula/etc/nebula-metad.conf"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "curl", "-sf", "http://nebula-metad:9619/status"]
+      interval: 30s
+      timeout: 10s
       retries: 3
+      start_period: 20s
 
   nebula-storaged:
-    image: vesoft/nebula-storaged:v3.7.0
+    image: vesoft/nebula-storaged:nightly
     container_name: honeybadge-nebula-storaged
     hostname: nebula-storaged
     restart: unless-stopped
@@ -53,25 +56,28 @@ services:
       - "9779:9779"  # Storage HTTP port
       - "9780:9780"  # Storage port
     environment:
+      - USER=root
       - TZ=Asia/Shanghai
     volumes:
-      - nebula_storaged_data:/data/storage
+      - ./data/storaged:/data/storage
+      - ./logs/storaged:/logs
       - ./nebula-storaged.conf:/usr/local/nebula/etc/nebula-storaged.conf:ro
     command:
       - --flagfile=/usr/local/nebula/etc/nebula-storaged.conf
     depends_on:
       nebula-metad:
-        condition: service_healthy
+        condition: service_started
     networks:
       - honeybadge-net
     healthcheck:
-      test: ["CMD", "nebula-storaged", "--flagfile=/usr/local/nebula/etc/nebula-storaged.conf"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "curl", "-sf", "http://nebula-storaged:9779/status"]
+      interval: 30s
+      timeout: 10s
       retries: 3
+      start_period: 20s
 
   nebula-graphd:
-    image: vesoft/nebula-graphd:v3.7.0
+    image: vesoft/nebula-graphd:nightly
     container_name: honeybadge-nebula-graphd
     hostname: nebula-graphd
     restart: unless-stopped
@@ -79,30 +85,33 @@ services:
       - "9669:9669"  # Graph service port (main)
       - "19669:19669"  # Graph HTTP port
     environment:
+      - USER=root
       - TZ=Asia/Shanghai
     volumes:
+      - ./logs/graphd:/logs
       - ./nebula-graphd.conf:/usr/local/nebula/etc/nebula-graphd.conf:ro
     command:
       - --flagfile=/usr/local/nebula/etc/nebula-graphd.conf
     depends_on:
       nebula-metad:
-        condition: service_healthy
+        condition: service_started
       nebula-storaged:
-        condition: service_healthy
+        condition: service_started
     networks:
       - honeybadge-net
     healthcheck:
-      test: ["CMD", "nebula-graphd", "--flagfile=/usr/local/nebula/etc/nebula-graphd.conf"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "curl", "-sf", "http://nebula-graphd:19669/status"]
+      interval: 30s
+      timeout: 10s
       retries: 3
+      start_period: 20s
 
   # =============================================================================
   # NebulaGraph Console (for running .ngql scripts)
   # =============================================================================
 
   nebula-console:
-    image: vesoft/nebula-console:v3.7.0
+    image: vesoft/nebula-console:nightly
     container_name: honeybadge-nebula-console
     hostname: nebula-console
     profiles:
@@ -269,8 +278,14 @@ volumes:
   # NebulaGraph
   nebula_metad_data:
     name: honeybadge-nebula-metad-data
+  nebula_metad_logs:
+    name: honeybadge-nebula-metad-logs
   nebula_storaged_data:
     name: honeybadge-nebula-storaged-data
+  nebula_storaged_logs:
+    name: honeybadge-nebula-storaged-logs
+  nebula_graphd_logs:
+    name: honeybadge-nebula-graphd-logs
 
   # Redis
   redis_data:
