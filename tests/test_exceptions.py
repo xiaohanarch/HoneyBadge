@@ -8,6 +8,7 @@ from honeybadge.core.exceptions import (
     LLMError,
     LLMGenerationError,
     LLMTimeoutError,
+    NebulaGraphError,
     PermissionValidationError,
     PostgreSQLError,
     RedisError,

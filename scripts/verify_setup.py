@@ -31,6 +31,7 @@ class Colors:
     RED = "\033[91m"
     YELLOW = "\033[93m"
     BLUE = "\033[94m"
+    BOLD = "\033[1m"
     RESET = "\033[0m"
 
 
@@ -44,7 +45,9 @@ async def verify_minimax() -> bool:
     print(f"\n{Colors.BLUE}[1] Testing MiniMax LLM Connection...{Colors.RESET}")
 
     api_key = os.getenv("LLM_API_KEY", "")
-    endpoint = os.getenv("LLM_ENDPOINT", "https://api.minimax.chat/v1")
+    # Claude Code uses api.minimaxi.com with Anthropic-compatible endpoint
+    # Note: This must NOT have /v1 suffix as adapter appends /v1/messages
+    endpoint = "https://api.minimaxi.com/anthropic"
 
     if not api_key or api_key == "your-api-key-here":
         print_check("LLM_API_KEY not configured", False)
@@ -53,15 +56,17 @@ async def verify_minimax() -> bool:
     adapter = MiniMaxAdapter(api_key=api_key, endpoint=endpoint)
 
     try:
-        # Test with a simple prompt
+        # Test with a simple prompt - Claude Code uses MiniMax-M2.7
         messages = [
             {"role": "user", "content": "请回复'连接成功'，只用中文回答。"}
         ]
 
-        print(f"  Testing with model: MiniMax-Text-01")
+        # Claude Code uses MiniMax-M2.7 model via Anthropic-compatible API
+        model = "MiniMax-M2.7"
+        print(f"  Testing with model: {model}")
         response = await adapter.chat(
             messages=messages,
-            model="MiniMax-Text-01",
+            model=model,
             temperature=0.1,
             max_tokens=100,
         )
@@ -177,7 +182,8 @@ async def test_llm_query() -> bool:
     print(f"\n{Colors.BLUE}[5] Testing LLM nGQL Generation...{Colors.RESET}")
 
     api_key = os.getenv("LLM_API_KEY", "")
-    endpoint = os.getenv("LLM_ENDPOINT", "https://api.minimax.chat/v1")
+    # Claude Code uses api.minimaxi.com with Anthropic-compatible endpoint
+    endpoint = "https://api.minimaxi.com/anthropic"
 
     if not api_key:
         print_check("Skipping - no API key", False)
@@ -211,7 +217,7 @@ Schema:
 
         response = await adapter.chat(
             messages=messages,
-            model="MiniMax-Text-01",
+            model="MiniMax-M2.7",
             temperature=0.1,
             max_tokens=500,
         )

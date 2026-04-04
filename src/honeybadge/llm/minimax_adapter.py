@@ -105,14 +105,14 @@ class MiniMaxAdapter:
 
         try:
             client = await self._get_client()
+            # Use Anthropic-compatible endpoint (/v1/messages) like Claude Code
             response = await client.post(
-                "/chat/completions",
+                "/v1/messages",
                 json={
                     "model": model,
                     "messages": messages,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
-                    "stream": False,
                 },
             )
             response.raise_for_status()
@@ -120,13 +120,21 @@ class MiniMaxAdapter:
 
             latency_ms = int((time.monotonic() - start_time) * 1000)
 
+            # MiniMax API returns content as array with mixed types (thinking, text)
+            # Find the text content
+            text_content = ""
+            for item in data.get("content", []):
+                if item.get("type") == "text":
+                    text_content = item.get("text", "")
+                    break
+
             return MiniMaxResponse(
-                content=data["choices"][0]["message"]["content"],
+                content=text_content,
                 model=data["model"],
-                prompt_tokens=data["usage"]["prompt_tokens"],
-                completion_tokens=data["usage"]["completion_tokens"],
-                total_tokens=data["usage"]["total_tokens"],
-                finish_reason=data["choices"][0]["finish_reason"],
+                prompt_tokens=data["usage"]["input_tokens"],
+                completion_tokens=data["usage"]["output_tokens"],
+                total_tokens=data["usage"]["input_tokens"] + data["usage"]["output_tokens"],
+                finish_reason=data["stop_reason"],
                 latency_ms=latency_ms,
                 success=True,
             )

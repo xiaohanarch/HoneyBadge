@@ -91,8 +91,8 @@ class NgqlValidator:
             tags: List of schema tags
             edges: List of schema edges
         """
-        self._schema_tags = {tag.name: tag for tag in tags}
-        self._schema_edges = {edge.name: edge for edge in edges}
+        self._schema_tags = {tag.name.upper(): tag for tag in tags}
+        self._schema_edges = {edge.name.upper(): edge for edge in edges}
         logger.info("schema_loaded", tag_count=len(tags), edge_count=len(edges))
 
     # =========================================================================
@@ -240,19 +240,22 @@ class NgqlValidator:
         import re
 
         found_tags = set()
+        found_tags_original = {}  # upper -> original
         for pattern in tag_patterns:
             matches = re.finditer(pattern, ngql, re.IGNORECASE)
             for match in matches:
                 if len(match.groups()) >= 2:
                     tag_name = match.group(2)
-                    found_tags.add(tag_name.upper())
+                    tag_upper = tag_name.upper()
+                    found_tags.add(tag_upper)
+                    found_tags_original[tag_upper] = tag_name
 
         # Validate tags exist
         for tag in found_tags:
             if tag not in self._schema_tags:
                 result.add_error(
                     "E101",
-                    f"Tag '{tag}' does not exist in schema",
+                    f"Tag '{found_tags_original[tag]}' does not exist in schema",
                 )
 
         # Extract potential edge references
@@ -261,21 +264,25 @@ class NgqlValidator:
             r"<-\[(\w+)\]-",  # <-[EdgeName]-
             r"(\w+)\s*->",  # EdgeName ->
             r"<\-\s*(\w+)",  # <- EdgeName
+            r"OVER\s+(\w+)",  # OVER EdgeName
         ]
 
         found_edges = set()
+        found_edges_original = {}  # upper -> original
         for pattern in edge_patterns:
             matches = re.finditer(pattern, ngql, re.IGNORECASE)
             for match in matches:
                 edge_name = match.group(1)
-                found_edges.add(edge_name.upper())
+                edge_upper = edge_name.upper()
+                found_edges.add(edge_upper)
+                found_edges_original[edge_upper] = edge_name
 
         # Validate edges exist
         for edge in found_edges:
             if edge not in self._schema_edges:
                 result.add_error(
                     "E102",
-                    f"Edge type '{edge}' does not exist in schema",
+                    f"Edge type '{found_edges_original[edge]}' does not exist in schema",
                 )
 
         # Validate property references
