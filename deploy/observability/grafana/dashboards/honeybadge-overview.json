@@ -1,0 +1,218 @@
+{
+  "title": "HoneyBadge Overview",
+  "uid": "honeybadge-overview",
+  "version": 1,
+  "refresh": "15s",
+  "panels": [
+    {
+      "title": "QPS",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(rate(honeybadge_query_total[5m]))",
+          "legendFormat": "Queries/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Error Rate",
+      "type": "gauge",
+      "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(rate(honeybadge_query_total{status!='success'}[5m])) / sum(rate(honeybadge_query_total[5m])) * 100",
+          "legendFormat": "Error Rate %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 5}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "P50/P95/P99 Latency",
+      "type": "timeseries",
+      "gridPos": {"x": 8, "y": 0, "w": 8, "h": 4},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, rate(honeybadge_query_e2e_duration_seconds_bucket[5m]))",
+          "legendFormat": "P50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(honeybadge_query_e2e_duration_seconds_bucket[5m]))",
+          "legendFormat": "P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(honeybadge_query_e2e_duration_seconds_bucket[5m]))",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          }
+        }
+      }
+    },
+    {
+      "title": "LLM Token Consumption (24h)",
+      "type": "stat",
+      "gridPos": {"x": 16, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(increase(honeybadge_llm_tokens_total[24h]))",
+          "legendFormat": "Tokens"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Active Workers",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 4, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(honeybadge_hiclaw_workers{status='active'})",
+          "legendFormat": "Active Workers"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Active WebSocket Connections",
+      "type": "stat",
+      "gridPos": {"x": 4, "y": 4, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "envoy_http_downstream_cx_active",
+          "legendFormat": "Connections"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Query Status Breakdown",
+      "type": "piechart",
+      "gridPos": {"x": 8, "y": 4, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(honeybadge_query_total[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "title": "Validation Pass Rate",
+      "type": "gauge",
+      "gridPos": {"x": 14, "y": 4, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(rate(honeybadge_validation_total{result='pass'}[15m])) / sum(rate(honeybadge_validation_total[15m])) * 100",
+          "legendFormat": "Pass Rate %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "green", "value": 90}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "LLM Error Rate by Type",
+      "type": "timeseries",
+      "gridPos": {"x": 18, "y": 4, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "sum by (error_type) (rate(honeybadge_llm_errors_total[5m]))",
+          "legendFormat": "{{error_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          }
+        }
+      }
+    }
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["honeybadge", "overview"],
+  "timezone": "browser"
+}

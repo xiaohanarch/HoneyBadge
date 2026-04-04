@@ -1,0 +1,26 @@
+# gateway/config/cors.yaml
+apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: cors
+spec:
+  url: oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/cors:latest
+  config:
+    allow_origins:
+      - "http://localhost:3000"          # 开发环境
+      - "http://localhost:5173"          # Vite dev server
+      - "https://honeybadge.company.com" # 生产环境（Phase 2）
+    allow_methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allow_headers:
+      - Authorization
+      - Content-Type
+      - X-Request-Id
+    expose_headers:
+      - X-Request-Id
+    allow_credentials: true
+    max_age: 86400

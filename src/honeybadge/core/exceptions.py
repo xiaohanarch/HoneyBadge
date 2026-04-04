@@ -114,6 +114,13 @@ class LLMTimeoutError(LLMError):
         super().__init__(message, "LLM_TIMEOUT")
 
 
+class RateLimitExceeded(HoneyBadgeError):
+    """Rate limit exceeded."""
+
+    def __init__(self, message: str = "Rate limit exceeded"):
+        super().__init__(message, "RATE_LIMIT_EXCEEDED")
+
+
 # =============================================================================
 # Worker Errors
 # =============================================================================
