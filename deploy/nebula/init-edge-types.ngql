@@ -1,0 +1,281 @@
+-- =============================================================================
+-- HoneyBadge NebulaGraph Edge Types Initialization Script
+-- Version: v1.0
+-- Date: 2026-04-04
+-- Description: Creates all Edge Types for the HoneyBadge ERP Knowledge Graph
+-- =============================================================================
+
+USE honeybadge;
+
+-- =============================================================================
+-- Section 1: Procurement Domain Edges
+-- =============================================================================
+
+-- PO → Supplier
+CREATE EDGE TYPE IF NOT EXISTS PLACED_WITH (
+  order_date TIMESTAMP,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '采购订单下达给供应商';
+
+-- PO → PO Line
+CREATE EDGE TYPE IF NOT EXISTS HAS_PO_LINE (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '采购订单包含行项目';
+
+-- PO Line → Item
+CREATE EDGE TYPE IF NOT EXISTS ORDERS_ITEM (
+  quantity DOUBLE,
+  unit_price DOUBLE,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = 'PO行订购物料';
+
+-- PR → PO
+CREATE EDGE TYPE IF NOT EXISTS CONVERTS_TO_PO (
+  conversion_date TIMESTAMP,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '采购申请转为采购订单';
+
+-- PR → PR Line
+CREATE EDGE TYPE IF NOT EXISTS HAS_PR_LINE (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '采购申请包含行项目';
+
+-- PO → Receipt
+CREATE EDGE TYPE IF NOT EXISTS HAS_RECEIPT (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '采购订单对应收货';
+
+-- Receipt → Receipt Line
+CREATE EDGE TYPE IF NOT EXISTS HAS_RECEIPT_LINE (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '收货单包含行项目';
+
+-- PO → Invoice (三单匹配)
+CREATE EDGE TYPE IF NOT EXISTS HAS_INVOICE (
+  match_status STRING,
+  match_date TIMESTAMP,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '采购订单对应发票（三单匹配）';
+
+-- PO → Employee (采购员)
+CREATE EDGE TYPE IF NOT EXISTS ORDERED_BY (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '采购订单由采购员创建';
+
+-- Supplier → Qualification
+CREATE EDGE TYPE IF NOT EXISTS HAS_QUALIFICATION (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '供应商持有认证/资质';
+
+-- Supplier → Item (ASL)
+CREATE EDGE TYPE IF NOT EXISTS SUPPLIES_ITEM (
+  priority INT64,
+  unit_price DOUBLE,
+  lead_time_days INT64,
+  status STRING,
+  effective_from TIMESTAMP,
+  effective_to TIMESTAMP,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '供应商供应物料（ASL - Approved Supplier List）';
+
+-- =============================================================================
+-- Section 2: Payable Domain Edges
+-- =============================================================================
+
+-- Invoice → Invoice Line
+CREATE EDGE TYPE IF NOT EXISTS HAS_INVOICE_LINE (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '发票包含行项目';
+
+-- Invoice → Supplier
+CREATE EDGE TYPE IF NOT EXISTS INVOICED_BY (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '发票来自供应商';
+
+-- Payment → Invoice
+CREATE EDGE TYPE IF NOT EXISTS PAYS_INVOICE (
+  paid_amount DOUBLE,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '付款对应发票';
+
+-- Payment → Supplier
+CREATE EDGE TYPE IF NOT EXISTS PAID_TO (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '付款支付给供应商';
+
+-- Payment Batch → Payment
+CREATE EDGE TYPE IF NOT EXISTS CONTAINS_PAYMENT (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '付款批次包含付款';
+
+-- =============================================================================
+-- Section 3: OTC Domain Edges
+-- =============================================================================
+
+-- Sales Order → Customer
+CREATE EDGE TYPE IF NOT EXISTS SOLD_TO (
+  order_date TIMESTAMP,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '销售订单卖给客户';
+
+-- Sales Order → SO Line
+CREATE EDGE TYPE IF NOT EXISTS HAS_SO_LINE (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '销售订单包含行项目';
+
+-- SO Line → Item
+CREATE EDGE TYPE IF NOT EXISTS SELLS_ITEM (
+  quantity DOUBLE,
+  unit_price DOUBLE,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = 'SO行销售物料';
+
+-- Sales Order → Shipment
+CREATE EDGE TYPE IF NOT EXISTS HAS_SHIPMENT (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '销售订单对应发货';
+
+-- Shipment → Shipment Line
+CREATE EDGE TYPE IF NOT EXISTS HAS_SHIPMENT_LINE (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '发货单包含行项目';
+
+-- Sales Order → AR Invoice
+CREATE EDGE TYPE IF NOT EXISTS HAS_AR_INVOICE (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '销售订单应收发票';
+
+-- AR Receipt → Customer
+CREATE EDGE TYPE IF NOT EXISTS RECEIVED_FROM (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '收款来自客户';
+
+-- AR Receipt → AR Invoice
+CREATE EDGE TYPE IF NOT EXISTS APPLIES_TO (
+  applied_amount DOUBLE,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '收款核销应收发票';
+
+-- =============================================================================
+-- Section 4: Master Data / Organization Edges
+-- =============================================================================
+
+-- BOM → Item (父物料)
+CREATE EDGE TYPE IF NOT EXISTS BOM_FOR (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = 'BOM 对应父物料';
+
+-- BOM Component → Item (子物料)
+CREATE EDGE TYPE IF NOT EXISTS USES_COMPONENT (
+  quantity_per DOUBLE,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = 'BOM 使用子物料';
+
+-- Organization Hierarchy
+CREATE EDGE TYPE IF NOT EXISTS PARENT_ORG (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '上级组织';
+
+-- Employee → Organization
+CREATE EDGE TYPE IF NOT EXISTS BELONGS_TO_ORG (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '员工归属组织';
+
+-- Receipt → Warehouse
+CREATE EDGE TYPE IF NOT EXISTS RECEIVED_AT (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '收货入库到仓库';
+
+-- Shipment → Warehouse
+CREATE EDGE TYPE IF NOT EXISTS SHIPPED_FROM (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '从仓库发货';
+
+-- =============================================================================
+-- Section 5: Accounting Domain Edges
+-- =============================================================================
+
+-- XLA Event → Source Document
+CREATE EDGE TYPE IF NOT EXISTS ACCOUNTING_FOR (
+  event_class STRING,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = 'XLA 会计事件对应源单据';
+
+-- Journal Line → GL Account
+CREATE EDGE TYPE IF NOT EXISTS POSTED_TO (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '日记账行记入科目';
+
+-- Journal Entry → Journal Line
+CREATE EDGE TYPE IF NOT EXISTS HAS_JOURNAL_LINE (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '日记账包含行';
+
+-- Accounting Distribution → GL Account
+CREATE EDGE TYPE IF NOT EXISTS DISTRIBUTED_TO (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '会计分配到科目';
+
+-- =============================================================================
+-- Section 6: Approval / Contract Edges
+-- =============================================================================
+
+-- Approval Record → Employee (审批人)
+CREATE EDGE TYPE IF NOT EXISTS APPROVED_BY (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '由审批人审批';
+
+-- Approval Record → Document
+CREATE EDGE TYPE IF NOT EXISTS APPROVAL_FOR (
+  doc_type STRING,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '审批针对的单据';
+
+-- Contract → Party (Supplier/Customer)
+CREATE EDGE TYPE IF NOT EXISTS CONTRACT_WITH (
+  party_type STRING,
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '合同签订方';
+
+-- PO → Contract
+CREATE EDGE TYPE IF NOT EXISTS UNDER_CONTRACT (
+  org_id INT64,
+  dept_id INT64
+) COMMENT = '采购订单基于合同';

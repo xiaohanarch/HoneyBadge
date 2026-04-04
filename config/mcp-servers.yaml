@@ -1,0 +1,58 @@
+# HoneyBadge MCP Servers Configuration
+# Version: v1.0
+# Date: 2026-04-04
+# Description: Configuration for mcporter CLI to spawn MCP servers
+
+servers:
+  # NebulaGraph MCP Server
+  nebula-mcp-server:
+    command: "python"
+    args: ["-m", "honeybadge.mcp.nebula_server"]
+    env:
+      NEBULA_HOST: ${NEBULA_GRAPHD_HOST}
+      NEBULA_PORT: ${NEBULA_GRAPHD_PORT}
+      NEBULA_USER: ${NEBULA_USER}
+      NEBULA_PASSWORD: ${NEBULA_PASSWORD}
+      NEBULA_SPACE: honeybadge
+    tools:
+      - execute_ngql        # Execute nGQL query
+      - get_schema          # Get current schema
+      - validate_ngql       # Validate nGQL syntax
+      - get_tag_properties  # Get tag property definitions
+      - get_edge_properties # Get edge property definitions
+    resources:
+      cpu: "1"
+      memory: "1Gi"
+
+  # LLM MCP Server
+  llm-mcp-server:
+    command: "python"
+    args: ["-m", "honeybadge.mcp.llm_server"]
+    env:
+      LLM_ENDPOINT: ${LLM_ENDPOINT}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL_NAME}
+    tools:
+      - generate_cypher     # Generate nGQL from natural language
+      - summarize_result    # Generate result summary
+      - classify_query      # Classify query type
+    resources:
+      cpu: "1"
+      memory: "1Gi"
+
+  # Redis MCP Server
+  redis-mcp-server:
+    command: "python"
+    args: ["-m", "honeybadge.mcp.redis_server"]
+    env:
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_DB: "0"
+    tools:
+      - get_session         # Get session state
+      - set_session         # Set session state
+      - cache_result        # Cache query result
+      - invalidate_cache    # Invalidate cache
+    resources:
+      cpu: "0.5"
+      memory: "512Mi"

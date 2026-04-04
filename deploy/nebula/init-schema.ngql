@@ -1,0 +1,772 @@
+-- =============================================================================
+-- HoneyBadge NebulaGraph Schema Initialization Script
+-- Version: v1.0
+-- Date: 2026-04-04
+-- Description: Creates Space, Tags for the HoneyBadge ERP Knowledge Graph
+-- =============================================================================
+
+-- Step 1: Create Space
+CREATE SPACE IF NOT EXISTS honeybadge (
+  partition_num = 100,
+  replica_factor = 1,
+  vid_type = FIXED_STRING(64)
+)
+COMMENT = 'HoneyBadge ERP Knowledge Graph - Phase 1';
+
+-- Wait for space creation to propagate
+-- :sleep 10
+
+USE honeybadge;
+
+-- =============================================================================
+-- Section 1: Master Data Tags
+-- =============================================================================
+
+-- 1.1 Supplier
+CREATE TAG IF NOT EXISTS Supplier (
+  supplier_number     STRING NOT NULL,
+  supplier_name       STRING NOT NULL,
+  supplier_type       STRING,
+  status              STRING,
+  country             STRING,
+  city                STRING,
+  address             STRING,
+  contact_person      STRING,
+  contact_phone       STRING,
+  contact_email       STRING,
+  bank_account        STRING,
+  bank_name           STRING,
+  tax_id              STRING,
+  currency            STRING DEFAULT "CNY",
+  payment_terms       STRING,
+  credit_rating       STRING,
+  registration_date   TIMESTAMP,
+  qualification_expiry TIMESTAMP,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '供应商主数据';
+
+-- 1.2 Customer
+CREATE TAG IF NOT EXISTS Customer (
+  customer_number     STRING NOT NULL,
+  customer_name       STRING NOT NULL,
+  customer_type       STRING,
+  status              STRING,
+  country             STRING,
+  city                STRING,
+  address             STRING,
+  contact_person      STRING,
+  contact_phone       STRING,
+  contact_email       STRING,
+  credit_limit        DOUBLE,
+  payment_terms       STRING,
+  tax_id              STRING,
+  currency            STRING DEFAULT "CNY",
+  sales_region        STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '客户主数据';
+
+-- 1.3 Item
+CREATE TAG IF NOT EXISTS Item (
+  item_number         STRING NOT NULL,
+  item_name           STRING NOT NULL,
+  item_description    STRING,
+  item_type           STRING,
+  category            STRING,
+  uom                 STRING,
+  standard_cost       DOUBLE,
+  list_price          DOUBLE,
+  weight              DOUBLE,
+  weight_uom          STRING,
+  lead_time_days      INT64,
+  safety_stock        DOUBLE,
+  min_order_qty       DOUBLE,
+  status              STRING,
+  abc_class           STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '物料主数据';
+
+-- 1.4 Organization
+CREATE TAG IF NOT EXISTS Organization (
+  org_code            STRING NOT NULL,
+  org_name            STRING NOT NULL,
+  org_type            STRING,
+  parent_org_code     STRING,
+  legal_entity        STRING,
+  country             STRING,
+  city                STRING,
+  status              STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '组织结构';
+
+-- 1.5 Employee
+CREATE TAG IF NOT EXISTS Employee (
+  employee_number     STRING NOT NULL,
+  employee_name       STRING NOT NULL,
+  position            STRING,
+  department          STRING,
+  email               STRING,
+  phone               STRING,
+  manager_id          STRING,
+  hire_date           TIMESTAMP,
+  status              STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '员工';
+
+-- 1.6 Warehouse
+CREATE TAG IF NOT EXISTS Warehouse (
+  warehouse_code      STRING NOT NULL,
+  warehouse_name      STRING NOT NULL,
+  warehouse_type      STRING,
+  location            STRING,
+  capacity            DOUBLE,
+  status              STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '仓库';
+
+-- 1.7 BOM
+CREATE TAG IF NOT EXISTS BOM (
+  bom_number          STRING NOT NULL,
+  bom_name            STRING,
+  bom_type            STRING,
+  effective_from      TIMESTAMP,
+  effective_to        TIMESTAMP,
+  quantity            DOUBLE DEFAULT 1.0,
+  uom                 STRING,
+  status              STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '物料清单头';
+
+-- 1.8 BOMComponent
+CREATE TAG IF NOT EXISTS BOMComponent (
+  component_seq       INT64,
+  quantity_per        DOUBLE NOT NULL,
+  uom                 STRING,
+  effective_from      TIMESTAMP,
+  effective_to        TIMESTAMP,
+  yield_rate          DOUBLE DEFAULT 1.0,
+  wip_supply_type     STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = 'BOM 组件行';
+
+-- 1.9 Currency
+CREATE TAG IF NOT EXISTS Currency (
+  currency_code       STRING NOT NULL,
+  currency_name       STRING,
+  symbol              STRING,
+  decimal_places      INT64 DEFAULT 2,
+  is_base_currency    BOOL DEFAULT false,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '币种';
+
+-- 1.10 UOM
+CREATE TAG IF NOT EXISTS UOM (
+  uom_code            STRING NOT NULL,
+  uom_name            STRING,
+  uom_class           STRING,
+  base_uom            STRING,
+  conversion_rate     DOUBLE DEFAULT 1.0,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '计量单位';
+
+-- =============================================================================
+-- Section 2: Procurement Domain (PTP) Tags
+-- =============================================================================
+
+-- 2.1 PurchaseRequisition
+CREATE TAG IF NOT EXISTS PurchaseRequisition (
+  pr_number           STRING NOT NULL,
+  pr_type             STRING,
+  description         STRING,
+  status              STRING,
+  requester           STRING,
+  request_date        TIMESTAMP,
+  need_by_date        TIMESTAMP,
+  total_amount        DOUBLE,
+  currency            STRING DEFAULT "CNY",
+  approval_date       TIMESTAMP,
+  approver            STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '采购申请';
+
+-- 2.2 PurchaseRequisitionLine
+CREATE TAG IF NOT EXISTS PurchaseRequisitionLine (
+  line_number         INT64 NOT NULL,
+  quantity            DOUBLE NOT NULL,
+  unit_price          DOUBLE,
+  amount              DOUBLE,
+  uom                 STRING,
+  need_by_date        TIMESTAMP,
+  suggested_vendor    STRING,
+  status              STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '采购申请行';
+
+-- 2.3 PurchaseOrder
+CREATE TAG IF NOT EXISTS PurchaseOrder (
+  po_number           STRING NOT NULL,
+  po_type             STRING,
+  description         STRING,
+  status              STRING,
+  buyer               STRING,
+  order_date          TIMESTAMP,
+  approved_date       TIMESTAMP,
+  total_amount        DOUBLE NOT NULL,
+  currency            STRING DEFAULT "CNY",
+  exchange_rate       DOUBLE DEFAULT 1.0,
+  payment_terms       STRING,
+  freight_terms       STRING,
+  ship_to_location    STRING,
+  bill_to_location    STRING,
+  close_date          TIMESTAMP,
+  cancel_reason       STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '采购订单';
+
+-- 2.4 PurchaseOrderLine
+CREATE TAG IF NOT EXISTS PurchaseOrderLine (
+  line_number         INT64 NOT NULL,
+  line_type           STRING,
+  quantity            DOUBLE NOT NULL,
+  unit_price          DOUBLE NOT NULL,
+  amount              DOUBLE NOT NULL,
+  uom                 STRING,
+  need_by_date        TIMESTAMP,
+  promised_date       TIMESTAMP,
+  received_quantity   DOUBLE DEFAULT 0,
+  invoiced_quantity   DOUBLE DEFAULT 0,
+  status              STRING,
+  tax_code            STRING,
+  tax_rate            DOUBLE DEFAULT 0,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '采购订单行';
+
+-- 2.5 Receipt
+CREATE TAG IF NOT EXISTS Receipt (
+  receipt_number      STRING NOT NULL,
+  receipt_type        STRING,
+  receipt_date        TIMESTAMP NOT NULL,
+  status              STRING,
+  receiver            STRING,
+  total_quantity      DOUBLE,
+  warehouse           STRING,
+  comments            STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '收货单';
+
+-- 2.6 ReceiptLine
+CREATE TAG IF NOT EXISTS ReceiptLine (
+  line_number         INT64 NOT NULL,
+  received_quantity   DOUBLE NOT NULL,
+  accepted_quantity   DOUBLE,
+  rejected_quantity   DOUBLE DEFAULT 0,
+  uom                 STRING,
+  inspection_status   STRING,
+  lot_number          STRING,
+  sublocation         STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '收货单行';
+
+-- 2.7 SupplierQualification
+CREATE TAG IF NOT EXISTS SupplierQualification (
+  qualification_id    STRING NOT NULL,
+  qualification_type  STRING,
+  status              STRING,
+  issue_date          TIMESTAMP,
+  expiry_date         TIMESTAMP,
+  issuing_body        STRING,
+  scope               STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '供应商认证/资质';
+
+-- =============================================================================
+-- Section 3: Payable Domain Tags
+-- =============================================================================
+
+-- 3.1 Invoice
+CREATE TAG IF NOT EXISTS Invoice (
+  invoice_number      STRING NOT NULL,
+  invoice_type        STRING,
+  invoice_date        TIMESTAMP NOT NULL,
+  due_date            TIMESTAMP,
+  status              STRING,
+  total_amount        DOUBLE NOT NULL,
+  tax_amount          DOUBLE DEFAULT 0,
+  currency            STRING DEFAULT "CNY",
+  exchange_rate       DOUBLE DEFAULT 1.0,
+  payment_method      STRING,
+  description         STRING,
+  gl_date             TIMESTAMP,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '发票（应付）';
+
+-- 3.2 InvoiceLine
+CREATE TAG IF NOT EXISTS InvoiceLine (
+  line_number         INT64 NOT NULL,
+  line_type           STRING,
+  quantity            DOUBLE,
+  unit_price          DOUBLE,
+  amount              DOUBLE NOT NULL,
+  tax_code            STRING,
+  tax_rate            DOUBLE,
+  description         STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '发票行';
+
+-- 3.3 Payment
+CREATE TAG IF NOT EXISTS Payment (
+  payment_number      STRING NOT NULL,
+  payment_type        STRING,
+  payment_date        TIMESTAMP NOT NULL,
+  amount              DOUBLE NOT NULL,
+  currency            STRING DEFAULT "CNY",
+  exchange_rate       DOUBLE DEFAULT 1.0,
+  status              STRING,
+  bank_account        STRING,
+  payment_method      STRING,
+  check_number        STRING,
+  cleared_date        TIMESTAMP,
+  void_date           TIMESTAMP,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '付款';
+
+-- 3.4 PaymentBatch
+CREATE TAG IF NOT EXISTS PaymentBatch (
+  batch_number        STRING NOT NULL,
+  batch_date          TIMESTAMP,
+  total_amount        DOUBLE,
+  payment_count       INT64,
+  status              STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '付款批次';
+
+-- =============================================================================
+-- Section 4: OTC (Order-to-Cash) Domain Tags
+-- =============================================================================
+
+-- 4.1 SalesOrder
+CREATE TAG IF NOT EXISTS SalesOrder (
+  so_number           STRING NOT NULL,
+  order_type          STRING,
+  order_date          TIMESTAMP NOT NULL,
+  status              STRING,
+  total_amount        DOUBLE NOT NULL,
+  currency            STRING DEFAULT "CNY",
+  exchange_rate       DOUBLE DEFAULT 1.0,
+  payment_terms       STRING,
+  ship_to_address     STRING,
+  bill_to_address     STRING,
+  salesperson         STRING,
+  requested_date      TIMESTAMP,
+  scheduled_date      TIMESTAMP,
+  cancel_reason       STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '销售订单';
+
+-- 4.2 SalesOrderLine
+CREATE TAG IF NOT EXISTS SalesOrderLine (
+  line_number         INT64 NOT NULL,
+  quantity            DOUBLE NOT NULL,
+  unit_price          DOUBLE NOT NULL,
+  amount              DOUBLE NOT NULL,
+  uom                 STRING,
+  shipped_quantity    DOUBLE DEFAULT 0,
+  invoiced_quantity   DOUBLE DEFAULT 0,
+  status              STRING,
+  tax_code            STRING,
+  tax_rate            DOUBLE DEFAULT 0,
+  scheduled_ship_date TIMESTAMP,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '销售订单行';
+
+-- 4.3 Shipment
+CREATE TAG IF NOT EXISTS Shipment (
+  shipment_number     STRING NOT NULL,
+  shipment_date       TIMESTAMP NOT NULL,
+  status              STRING,
+  carrier             STRING,
+  tracking_number     STRING,
+  total_quantity      DOUBLE,
+  warehouse           STRING,
+  delivery_date       TIMESTAMP,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '发货单';
+
+-- 4.4 ShipmentLine
+CREATE TAG IF NOT EXISTS ShipmentLine (
+  line_number         INT64 NOT NULL,
+  shipped_quantity    DOUBLE NOT NULL,
+  uom                 STRING,
+  lot_number          STRING,
+  serial_number        STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '发货单行';
+
+-- 4.5 ARInvoice
+CREATE TAG IF NOT EXISTS ARInvoice (
+  invoice_number      STRING NOT NULL,
+  invoice_type        STRING,
+  invoice_date        TIMESTAMP NOT NULL,
+  due_date            TIMESTAMP,
+  status              STRING,
+  total_amount        DOUBLE NOT NULL,
+  tax_amount          DOUBLE DEFAULT 0,
+  currency            STRING DEFAULT "CNY",
+  exchange_rate       DOUBLE DEFAULT 1.0,
+  payment_terms       STRING,
+  gl_date             TIMESTAMP,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '应收发票';
+
+-- 4.6 ARReceipt
+CREATE TAG IF NOT EXISTS ARReceipt (
+  receipt_number      STRING NOT NULL,
+  receipt_type        STRING,
+  receipt_date        TIMESTAMP NOT NULL,
+  amount              DOUBLE NOT NULL,
+  currency            STRING DEFAULT "CNY",
+  status              STRING,
+  payment_method      STRING,
+  bank_account        STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '应收收款';
+
+-- =============================================================================
+-- Section 5: GL/Accounting Domain Tags
+-- =============================================================================
+
+-- 5.1 GLAccount
+CREATE TAG IF NOT EXISTS GLAccount (
+  account_code        STRING NOT NULL,
+  account_name        STRING NOT NULL,
+  account_type        STRING,
+  parent_account      STRING,
+  level               INT64,
+  is_leaf             BOOL DEFAULT true,
+  currency            STRING,
+  status              STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '总账科目';
+
+-- 5.2 GLJournalEntry
+CREATE TAG IF NOT EXISTS GLJournalEntry (
+  journal_number      STRING NOT NULL,
+  journal_name        STRING,
+  journal_source      STRING,
+  journal_category    STRING,
+  period_name         STRING,
+  gl_date             TIMESTAMP NOT NULL,
+  status              STRING,
+  total_debit         DOUBLE,
+  total_credit        DOUBLE,
+  description         STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '日记账分录';
+
+-- 5.3 GLJournalLine
+CREATE TAG IF NOT EXISTS GLJournalLine (
+  line_number         INT64 NOT NULL,
+  debit_amount        DOUBLE DEFAULT 0,
+  credit_amount       DOUBLE DEFAULT 0,
+  description         STRING,
+  reference           STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '日记账行';
+
+-- 5.4 XLAEvent
+CREATE TAG IF NOT EXISTS XLAEvent (
+  event_id            STRING NOT NULL,
+  event_class         STRING,
+  event_type          STRING,
+  event_date          TIMESTAMP NOT NULL,
+  accounting_date     TIMESTAMP,
+  status              STRING,
+  source_doc_type     STRING,
+  source_doc_id       STRING,
+  description         STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = 'XLA 会计事件';
+
+-- 5.5 AccountingDistribution
+CREATE TAG IF NOT EXISTS AccountingDistribution (
+  distribution_id     STRING NOT NULL,
+  line_number         INT64,
+  debit_amount        DOUBLE DEFAULT 0,
+  credit_amount       DOUBLE DEFAULT 0,
+  currency            STRING DEFAULT "CNY",
+  accounting_class    STRING,
+  posted_flag         BOOL DEFAULT false,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '会计分配';
+
+-- =============================================================================
+-- Section 6: Approval Domain Tags
+-- =============================================================================
+
+-- 6.1 ApprovalRecord
+CREATE TAG IF NOT EXISTS ApprovalRecord (
+  approval_id         STRING NOT NULL,
+  doc_type            STRING,
+  doc_number          STRING,
+  approval_action     STRING,
+  approver            STRING,
+  approval_date       TIMESTAMP,
+  comments            STRING,
+  approval_level      INT64,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '审批记录';
+
+-- =============================================================================
+-- Section 7: Contract Domain Tags
+-- =============================================================================
+
+-- 7.1 Contract
+CREATE TAG IF NOT EXISTS Contract (
+  contract_number     STRING NOT NULL,
+  contract_type       STRING,
+  contract_name       STRING,
+  status              STRING,
+  start_date          TIMESTAMP,
+  end_date            TIMESTAMP,
+  total_amount        DOUBLE,
+  currency            STRING DEFAULT "CNY",
+  description         STRING,
+  org_id              INT64,
+  dept_id             INT64,
+  data_scope          STRING,
+  created_at          TIMESTAMP,
+  updated_at          TIMESTAMP,
+  etl_batch_id        STRING,
+  source_system       STRING,
+  is_active           BOOL DEFAULT true
+) COMMENT = '合同';
