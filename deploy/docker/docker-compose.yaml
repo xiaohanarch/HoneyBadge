@@ -70,7 +70,7 @@ services:
     networks:
       - honeybadge-net
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://nebula-storaged:9779/status"]
+      test: ["CMD-SHELL", "echo > /dev/tcp/nebula-storaged/9779"]
       interval: 30s
       timeout: 10s
       retries: 3
