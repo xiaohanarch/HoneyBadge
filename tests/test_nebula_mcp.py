@@ -4,24 +4,28 @@ Tests the _impl functions using mocks for NebulaGraphClient, LLM adapter,
 and NgqlValidator so no external services are needed.
 """
 
+import importlib.util
 import os
 import sys
 
-# Add paths so we can import both honeybadge modules and the MCP server
+# Add src to path for honeybadge modules
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(_project_root, "src"))
-sys.path.insert(0, os.path.join(_project_root, "mcp-servers", "honeybadge-nebula-mcp"))
 
 import pytest
 
 from honeybadge.db.nebula import NebulaQueryResult
 from honeybadge.protocols.validator import NgqlValidator
 
-from server import (  # type: ignore[import-untyped]
-    get_schema_impl,
-    validate_and_execute_impl,
-    _schema_cache,
-)
+# Load the server module with a unique name to avoid collisions with other test files
+_server_path = os.path.join(_project_root, "mcp-servers", "honeybadge-nebula-mcp", "server.py")
+_spec = importlib.util.spec_from_file_location("nebula_mcp_server", _server_path)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+
+get_schema_impl = _mod.get_schema_impl
+validate_and_execute_impl = _mod.validate_and_execute_impl
+_schema_cache = _mod._schema_cache
 
 
 # ---------------------------------------------------------------------------

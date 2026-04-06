@@ -1,16 +1,13 @@
 """Tests for honeybadge-cache-mcp server."""
 
+import importlib.util
 import os
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
 
-# Add MCP server and src to path for imports
-sys.path.insert(
-    0,
-    os.path.join(os.path.dirname(__file__), "..", "mcp-servers", "honeybadge-cache-mcp"),
-)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(_project_root, "src"))
 
 # Mock redis if not available (e.g. Python 3.14 where redis may not be installed)
 if "redis" not in sys.modules:
@@ -23,7 +20,14 @@ if "redis" not in sys.modules:
 
 import pytest
 
-from server import check_cache_impl, cache_result_impl
+# Load server module with unique name to avoid collisions
+_server_path = os.path.join(_project_root, "mcp-servers", "honeybadge-cache-mcp", "server.py")
+_spec = importlib.util.spec_from_file_location("cache_mcp_server", _server_path)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+
+check_cache_impl = _mod.check_cache_impl
+cache_result_impl = _mod.cache_result_impl
 
 
 @pytest.fixture

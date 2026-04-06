@@ -1,16 +1,13 @@
 """Tests for honeybadge-audit-mcp server."""
 
+import importlib.util
 import os
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
 
-# Add MCP server and src to path for imports
-sys.path.insert(
-    0,
-    os.path.join(os.path.dirname(__file__), "..", "mcp-servers", "honeybadge-audit-mcp"),
-)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(_project_root, "src"))
 
 # Mock asyncpg if not available (e.g. Python 3.14 where asyncpg has no wheel)
 if "asyncpg" not in sys.modules:
@@ -21,7 +18,14 @@ if "asyncpg" not in sys.modules:
 
 import pytest
 
-from server import write_audit_log_impl, get_audit_trail_impl
+# Load server module with unique name to avoid collisions
+_server_path = os.path.join(_project_root, "mcp-servers", "honeybadge-audit-mcp", "server.py")
+_spec = importlib.util.spec_from_file_location("audit_mcp_server", _server_path)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+
+write_audit_log_impl = _mod.write_audit_log_impl
+get_audit_trail_impl = _mod.get_audit_trail_impl
 
 
 @pytest.fixture
