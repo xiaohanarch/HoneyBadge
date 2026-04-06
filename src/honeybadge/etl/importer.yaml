@@ -1,0 +1,293 @@
+# ============================================================================
+# HoneyBadge NebulaGraph Import Configuration (nebula-importer)
+# Version: v3
+# Description: Template for T+1 daily data import into NebulaGraph
+# Usage: nebula-importer --config importer.yaml
+# Environment Variables:
+#   NEBULA_GRAPHD_HOST: NebulaGraph GraphD host (default: localhost)
+#   NEBULA_GRAPHD_PORT: NebulaGraph GraphD port (default: 9669)
+#   NEBULA_USER: NebulaGraph username (default: root)
+#   NEBULA_PASSWORD: NebulaGraph password (default: nebula)
+#   NEBULA_SPACE: Target space name (default: honeybadge)
+#   BATCH_ID: ETL batch identifier (e.g., ETL-20260404-001)
+# ============================================================================
+
+version: v3
+description: HoneyBadge T+1 Daily Import - Batch ${BATCH_ID}
+
+clientSettings:
+  retry: 3
+  concurrency: 10
+  channelBufferSize: 128
+  space: ${NEBULA_SPACE:-honeybadge}
+  connection:
+    address: "${NEBULA_GRAPHD_HOST:-localhost}:${NEBULA_GRAPHD_PORT:-9669}"
+    user: ${NEBULA_USER:-root}
+    password: ${NEBULA_PASSWORD:-nebula}
+
+logPath: ./logs/import-${BATCH_ID:-batch}.log
+statsPath: ./stats/import-${BATCH_ID:-batch}.json
+
+#files:
+#  - path: import/${BATCH_ID}/vertex_Supplier.csv
+#    csv:
+#      withHeader: true
+#      delimiter: ","
+#      withEnvelope: false
+#    tags:
+#      - name: Supplier
+#        id:
+#          type: STRING
+#        props:
+#          - name: supplier_number
+#            type: STRING
+#          - name: supplier_name
+#            type: STRING
+#          - name: supplier_type
+#            type: STRING
+#          - name: status
+#            type: STRING
+#          - name: country
+#            type: STRING
+#          - name: city
+#            type: STRING
+#          - name: address
+#            type: STRING
+#          - name: contact_person
+#            type: STRING
+#          - name: contact_phone
+#            type: STRING
+#          - name: contact_email
+#            type: STRING
+#          - name: bank_account
+#            type: STRING
+#          - name: bank_name
+#            type: STRING
+#          - name: tax_id
+#            type: STRING
+#          - name: currency
+#            type: STRING
+#          - name: payment_terms
+#            type: STRING
+#          - name: credit_rating
+#            type: STRING
+#          - name: registration_date
+#            type: TIMESTAMP
+#          - name: qualification_expiry
+#            type: TIMESTAMP
+#          - name: org_id
+#            type: INT64
+#          - name: dept_id
+#            type: INT64
+#          - name: data_scope
+#            type: STRING
+#          - name: source_system
+#            type: STRING
+#          - name: is_active
+#            type: BOOL
+#
+#  - path: import/${BATCH_ID}/vertex_Customer.csv
+#    csv:
+#      withHeader: true
+#      delimiter: ","
+#    tags:
+#      - name: Customer
+#        id:
+#          type: STRING
+#        props:
+#          - name: customer_number
+#            type: STRING
+#          - name: customer_name
+#            type: STRING
+#          - name: customer_type
+#            type: STRING
+#          - name: status
+#            type: STRING
+#          - name: country
+#            type: STRING
+#          - name: city
+#            type: STRING
+#          - name: address
+#            type: STRING
+#          - name: contact_person
+#            type: STRING
+#          - name: contact_phone
+#            type: STRING
+#          - name: contact_email
+#            type: STRING
+#          - name: credit_limit
+#            type: DOUBLE
+#          - name: payment_terms
+#            type: STRING
+#          - name: tax_id
+#            type: STRING
+#          - name: currency
+#            type: STRING
+#          - name: sales_region
+#            type: STRING
+#          - name: org_id
+#            type: INT64
+#          - name: dept_id
+#            type: INT64
+#          - name: data_scope
+#            type: STRING
+#          - name: source_system
+#            type: STRING
+#          - name: is_active
+#            type: BOOL
+#
+#  - path: import/${BATCH_ID}/vertex_Item.csv
+#    csv:
+#      withHeader: true
+#      delimiter: ","
+#    tags:
+#      - name: Item
+#        id:
+#          type: STRING
+#        props:
+#          - name: item_number
+#            type: STRING
+#          - name: item_name
+#            type: STRING
+#          - name: item_description
+#            type: STRING
+#          - name: item_type
+#            type: STRING
+#          - name: category
+#            type: STRING
+#          - name: uom
+#            type: STRING
+#          - name: standard_cost
+#            type: DOUBLE
+#          - name: list_price
+#            type: DOUBLE
+#          - name: weight
+#            type: DOUBLE
+#          - name: weight_uom
+#            type: STRING
+#          - name: lead_time_days
+#            type: INT64
+#          - name: safety_stock
+#            type: DOUBLE
+#          - name: min_order_qty
+#            type: DOUBLE
+#          - name: status
+#            type: STRING
+#          - name: abc_class
+#            type: STRING
+#          - name: org_id
+#            type: INT64
+#          - name: dept_id
+#            type: INT64
+#          - name: data_scope
+#            type: STRING
+#          - name: source_system
+#            type: STRING
+#          - name: is_active
+#            type: BOOL
+#
+#  - path: import/${BATCH_ID}/vertex_PurchaseOrder.csv
+#    csv:
+#      withHeader: true
+#      delimiter: ","
+#    tags:
+#      - name: PurchaseOrder
+#        id:
+#          type: STRING
+#        props:
+#          - name: po_number
+#            type: STRING
+#          - name: po_type
+#            type: STRING
+#          - name: description
+#            type: STRING
+#          - name: status
+#            type: STRING
+#          - name: buyer
+#            type: STRING
+#          - name: order_date
+#            type: TIMESTAMP
+#          - name: approved_date
+#            type: TIMESTAMP
+#          - name: total_amount
+#            type: DOUBLE
+#          - name: currency
+#            type: STRING
+#          - name: exchange_rate
+#            type: DOUBLE
+#          - name: payment_terms
+#            type: STRING
+#          - name: freight_terms
+#            type: STRING
+#          - name: ship_to_location
+#            type: STRING
+#          - name: bill_to_location
+#            type: STRING
+#          - name: close_date
+#            type: TIMESTAMP
+#          - name: cancel_reason
+#            type: STRING
+#          - name: org_id
+#            type: INT64
+#          - name: dept_id
+#            type: INT64
+#          - name: data_scope
+#            type: STRING
+#          - name: source_system
+#            type: STRING
+#          - name: is_active
+#            type: BOOL
+#
+#  - path: import/${BATCH_ID}/edge_PLACED_WITH.csv
+#    csv:
+#      withHeader: true
+#      delimiter: ","
+#    edges:
+#      - name: PLACED_WITH
+#        src:
+#          type: STRING
+#        dst:
+#          type: STRING
+#        props:
+#          - name: order_date
+#            type: TIMESTAMP
+#          - name: org_id
+#            type: INT64
+#          - name: dept_id
+#            type: INT64
+#
+#  - path: import/${BATCH_ID}/edge_HAS_PO_LINE.csv
+#    csv:
+#      withHeader: true
+#      delimiter: ","
+#    edges:
+#      - name: HAS_PO_LINE
+#        src:
+#          type: STRING
+#        dst:
+#          type: STRING
+#        props:
+#          - name: org_id
+#            type: INT64
+#          - name: dept_id
+#            type: INT64
+#
+#  - path: import/${BATCH_ID}/edge_ORDERS_ITEM.csv
+#    csv:
+#      withHeader: true
+#      delimiter: ","
+#    edges:
+#      - name: ORDERS_ITEM
+#        src:
+#          type: STRING
+#        dst:
+#          type: STRING
+#        props:
+#          - name: quantity
+#            type: DOUBLE
+#          - name: unit_price
+#            type: DOUBLE
+#          - name: org_id
+#            type: INT64
+#          - name: dept_id
+#            type: INT64

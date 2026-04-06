@@ -1,0 +1,9 @@
+name: honeybadge-audit
+protocol: http
+endpoint: http://honeybadge-audit-mcp:8000
+description: "HoneyBadge Audit MCP Server - L5 full-chain audit logging"
+tools:
+  - write_audit_log
+  - get_audit_trail
+credentials:
+  accessToken: ""

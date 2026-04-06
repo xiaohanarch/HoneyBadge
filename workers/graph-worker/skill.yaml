@@ -1,0 +1,72 @@
+# Graph Worker Skill Definition
+# Version: v1.0
+# Date: 2026-04-04
+
+worker:
+  name: graph-worker
+  group: graph
+  runtime: openclaw
+  replicas: 2
+
+  skills:
+    - name: cypher_query
+      description: "将自然语言转换为 nGQL 查询并执行"
+      input:
+        - name: user_question
+          type: string
+          required: true
+          description: "用户的自然语言问题"
+        - name: session_context
+          type: object
+          required: false
+          description: "会话上下文信息"
+      output:
+        - name: summary
+          type: string
+          description: "AI 生成的摘要"
+        - name: raw_data
+          type: object
+          description: "原始查询结果"
+        - name: cypher
+          type: string
+          description: "生成的 nGQL"
+        - name: trace_id
+          type: string
+          description: "追踪 ID"
+        - name: execution_time_ms
+          type: integer
+          description: "执行时间（毫秒）"
+        - name: row_count
+          type: integer
+          description: "结果行数"
+
+  mcp_tools:
+    - name: nebula-query
+      description: "Execute nGQL queries against NebulaGraph"
+      server: nebula-mcp-server
+      tools:
+        - execute_ngql
+        - get_schema
+        - validate_ngql
+
+    - name: llm-generate
+      description: "LLM for nGQL generation and summarization"
+      server: llm-mcp-server
+      tools:
+        - generate_cypher
+        - summarize_result
+
+    - name: redis-cache
+      description: "Cache query results"
+      server: redis-mcp-server
+      tools:
+        - cache_result
+
+  resources:
+    cpu: "2"
+    memory: "4Gi"
+
+  execution:
+    timeout: 120s
+    retries: 3
+    retry_delay: 1s

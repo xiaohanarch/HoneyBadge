@@ -1,0 +1,47 @@
+# HoneyBadge HiClaw Manager Configuration
+# Version: v1.0
+# Date: 2026-04-04
+
+manager:
+  name: honeybadge-manager
+  runtime: openclaw
+  model:
+    provider: openai_compatible
+    endpoint: ${LLM_ENDPOINT}
+    api_key: ${LLM_API_KEY}
+    model: ${LLM_MODEL_NAME}
+
+  # Worker routing rules based on query patterns
+  routing:
+    rules:
+      - pattern: "查询|查找|搜索|有哪些|列出"
+        worker_group: graph-worker
+      - pattern: "分析|趋势|对比|统计|异常|检测"
+        worker_group: analytics-worker
+      - pattern: "外部数据|EBS|Oracle|其他系统"
+        worker_group: mcp-worker
+      - default: graph-worker
+
+  # Resource limits
+  worker_pool:
+    max_workers: 8
+    idle_timeout: 300s    # 5 minutes idle before stopping worker
+    task_timeout: 120s    # 2 minutes per task
+
+  # Matrix configuration for HiClaw Manager-Worker communication
+  matrix:
+    homeserver: ${MATRIX_HOMESERVER_URL}
+    bot_user: "@honeybadge-manager:matrix.local"
+    bot_token: ${MATRIX_BOT_TOKEN}
+
+  # Deployment settings
+  deployment:
+    replicas: 1  # Dev: 1, Prod: 2-3
+    resources:
+      cpu: "2"
+      memory: "4Gi"
+    health:
+      liveness_probe: /health
+      readiness_probe: /ready
+      liveness_interval: 30s
+      readiness_interval: 10s

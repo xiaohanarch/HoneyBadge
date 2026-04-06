@@ -1,0 +1,18 @@
+# gateway/config/header-transform.yaml
+apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: header-transform
+spec:
+  url: oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/transformer:latest
+  phase: UNSPECIFIED
+  config:
+    reqAdd:
+      - "X-Request-Id: ${request_id}"
+    reqSet:
+      # 从 JWT claims 提取并设置
+      - "X-User-Id: ${jwt.sub}"
+      - "X-User-Name: ${jwt.name}"
+      - "X-User-Roles: ${jwt.roles}"
+      - "X-User-Org: ${jwt.org_id}"
+      - "X-User-Dept: ${jwt.dept_id}"

@@ -1,0 +1,67 @@
+# Analytics Worker Skill Definition
+# Version: v1.0
+# Date: 2026-04-04
+
+worker:
+  name: analytics-worker
+  group: analytics
+  runtime: openclaw
+  replicas: 1
+
+  skills:
+    - name: multi_step_analysis
+      description: "多步推理分析，支持问题分解和中间结果整合"
+      input:
+        - name: user_question
+          type: string
+          required: true
+          description: "用户的复杂分析问题"
+        - name: analysis_type
+          type: string
+          required: false
+          description: "分析类型：anomaly_detection / trend / comparison"
+        - name: session_context
+          type: object
+          required: false
+          description: "会话上下文"
+      output:
+        - name: report
+          type: string
+          description: "分析报告"
+        - name: steps
+          type: list[object]
+          description: "每步的查询和结果"
+        - name: trace_id
+          type: string
+          description: "追踪 ID"
+
+  mcp_tools:
+    - name: nebula-query
+      description: "Execute nGQL queries"
+      server: nebula-mcp-server
+      tools:
+        - execute_ngql
+        - get_schema
+
+    - name: llm-generate
+      description: "LLM for multi-step reasoning"
+      server: llm-mcp-server
+      tools:
+        - generate_cypher
+        - summarize_result
+
+    - name: redis-cache
+      description: "Cache intermediate results"
+      server: redis-mcp-server
+      tools:
+        - cache_result
+        - get_cached_result
+
+  resources:
+    cpu: "4"
+    memory: "8Gi"
+
+  execution:
+    timeout: 300s  # Longer timeout for complex analysis
+    retries: 2
+    retry_delay: 2s

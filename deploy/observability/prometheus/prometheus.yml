@@ -1,0 +1,79 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  retention_days: 30
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # HiClaw Manager
+  - job_name: 'hiclaw-manager'
+    static_configs:
+      - targets: ['hiclaw-manager:8080']
+    metrics_path: /metrics
+
+  # HiClaw Workers (graph group)
+  - job_name: 'hiclaw-workers-graph'
+    static_configs:
+      - targets: ['hiclaw-worker-graph-1:8080', 'hiclaw-worker-graph-2:8080', 'hiclaw-worker-graph-3:8080']
+    metrics_path: /metrics
+
+  # HiClaw Workers (analytics group)
+  - job_name: 'hiclaw-workers-analytics'
+    static_configs:
+      - targets: ['hiclaw-worker-analytics-1:8080', 'hiclaw-worker-analytics-2:8080']
+    metrics_path: /metrics
+
+  # HiClaw Workers (MCP group)
+  - job_name: 'hiclaw-workers-mcp'
+    static_configs:
+      - targets: ['hiclaw-worker-mcp:8080']
+    metrics_path: /metrics
+
+  # Higress Gateway (Envoy)
+  - job_name: 'higress'
+    static_configs:
+      - targets: ['higress:15090']
+    metrics_path: /stats/prometheus
+
+  # NebulaGraph
+  - job_name: 'nebula'
+    static_configs:
+      - targets: ['nebula-graphd:13000', 'nebula-storaged:13001']
+    metrics_path: /metrics
+
+  # NebulaGraph Exporter
+  - job_name: 'nebula-exporter'
+    static_configs:
+      - targets: ['nebula-exporter:9220']
+    metrics_path: /metrics
+
+  # Loki
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+    metrics_path: /metrics
+
+  # Grafana
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    metrics_path: /metrics
+
+  # Alertmanager
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+    metrics_path: /metrics

@@ -1,0 +1,71 @@
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'smtp.example.com:587'
+  smtp_from: 'alertmanager@honeybadge.example.com'
+  smtp_auth_username: 'alertmanager'
+  smtp_auth_password: '${SMTP_AUTH_PASSWORD}'
+
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+route:
+  receiver: default
+  group_by: ['alertname', 'severity', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - match:
+        severity: critical
+      receiver: critical-alerts
+      continue: true
+    - match:
+        severity: warning
+      receiver: warning-alerts
+      continue: true
+    - match:
+        alertname: 'NoActiveWorkers|ETLStale|LLMHighErrorRate'
+      receiver: critical-alerts
+      repeat_interval: 1h
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: 'http://alert-webhook:9095/webhook'
+        send_resolved: true
+        http_config:
+          bearer_token: '${ALERT_WEBHOOK_TOKEN}'
+
+  - name: critical-alerts
+    webhook_configs:
+      - url: 'http://alert-webhook:9095/webhook'
+        send_resolved: true
+        http_config:
+          bearer_token: '${ALERT_WEBHOOK_TOKEN}'
+    pagerduty_configs:
+      - service_key: '${PAGERDUTY_SERVICE_KEY}'
+        severity_mapping:
+          critical: critical
+          warning: warning
+        description: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ .Annotations.description }}\n{{ end }}'
+        details:
+          service: HoneyBadge
+          environment: production
+
+  - name: warning-alerts
+    webhook_configs:
+      - url: 'http://alert-webhook:9095/webhook'
+        send_resolved: true
+        http_config:
+          bearer_token: '${ALERT_WEBHOOK_TOKEN}'
+    email_configs:
+      - to: 'honeybadge-ops@example.com'
+        headers:
+          subject: '[WARNING] HoneyBadge Alert - {{ .GroupLabels.alertname }}'
+
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: ['alertname', 'service']

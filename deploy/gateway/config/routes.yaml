@@ -1,0 +1,53 @@
+# gateway/config/routes.yaml
+apiVersion: networking.higress.io/v1
+kind: HTTPRoute
+metadata:
+  name: websocket-route
+spec:
+  hostnames:
+    - "honeybadge.local"
+  rules:
+    # WebSocket 路由
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /ws
+      backendRefs:
+        - name: hiclaw-manager
+          port: 8090
+
+    # 认证 API（Manager 内置处理）
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/auth
+      backendRefs:
+        - name: hiclaw-manager
+          port: 8090
+
+    # 会话 API（Manager 内置处理）
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/sessions
+      backendRefs:
+        - name: hiclaw-manager
+          port: 8090
+
+    # 健康检查
+    - matches:
+        - path:
+            type: Exact
+            value: /api/health
+      backendRefs:
+        - name: hiclaw-manager
+          port: 8090
+
+    # 前端
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: frontend
+          port: 5173

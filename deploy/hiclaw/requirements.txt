@@ -1,0 +1,47 @@
+# deploy/hiclaw/requirements.txt
+# Python dependencies for HiClaw Worker
+
+# NebulaGraph client
+nebula3-python>=3.4.0
+
+# Redis client
+redis>=5.0.0
+
+# PostgreSQL client
+asyncpg>=0.29.0
+
+# WebSocket
+websockets>=12.0
+
+# HTTP client
+httpx>=0.27.0
+
+# Configuration
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+pyyaml>=6.0.0
+
+# Template engine (for Jinja2 prompts)
+jinja2>=3.1.0
+
+# Logging and tracing
+structlog>=24.0.0
+
+# UUID generation
+uuid6>=2024.1.12
+
+# LLM support
+# GLM-5 / GLM-4.7-Flash on Huawei Ascend 910B
+openai>=1.12.0
+anthropic>=0.18.0
+
+# Vector DB (semantic cache, ontology retrieval)
+pymilvus>=2.4.0
+
+# Data quality (Great Expectations)
+great-expectations>=0.18.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0

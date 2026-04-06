@@ -1,0 +1,9 @@
+name: honeybadge-cache
+protocol: http
+endpoint: http://honeybadge-cache-mcp:8000
+description: "HoneyBadge Cache MCP Server - Redis query result caching"
+tools:
+  - check_cache
+  - cache_result
+credentials:
+  accessToken: ""

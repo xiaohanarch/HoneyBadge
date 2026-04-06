@@ -1,0 +1,26 @@
+# gateway/config/auth.yaml
+apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: jwt-auth
+spec:
+  url: oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/jwt-auth:latest
+  phase: AUTHN
+  matchRules:
+    # 排除不需要认证的路径
+    - exclude:
+        - /api/auth/login
+        - /api/health
+        - /api/version
+      config:
+        consumers:
+          - name: honeybadge-user
+            issuer: honeybadge
+            jwks: |
+              {
+                "keys": [{
+                  "kty": "oct",
+                  "kid": "honeybadge-key",
+                  "k": "${JWT_SECRET_BASE64}"
+                }]
+              }

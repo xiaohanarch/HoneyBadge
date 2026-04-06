@@ -1,0 +1,70 @@
+-- =============================================================================
+-- HoneyBadge NebulaGraph Index Rebuild Script
+-- Version: v1.0
+-- Date: 2026-04-04
+-- Description: Rebuilds all indexes after data load
+--              Indexes only take effect for data written AFTER index creation
+--              This script rebuilds indexes to include existing data
+-- =============================================================================
+
+USE honeybadge;
+
+-- =============================================================================
+-- Rebuild Tag Indexes
+-- =============================================================================
+
+-- Primary Key Indexes
+REBUILD TAG INDEX idx_supplier_number;
+REBUILD TAG INDEX idx_customer_number;
+REBUILD TAG INDEX idx_item_number;
+REBUILD TAG INDEX idx_org_code;
+REBUILD TAG INDEX idx_employee_number;
+REBUILD TAG INDEX idx_po_number;
+REBUILD TAG INDEX idx_pr_number;
+REBUILD TAG INDEX idx_receipt_number;
+REBUILD TAG INDEX idx_invoice_number;
+REBUILD TAG INDEX idx_payment_number;
+REBUILD TAG INDEX idx_so_number;
+REBUILD TAG INDEX idx_shipment_number;
+REBUILD TAG INDEX idx_ar_invoice_number;
+REBUILD TAG INDEX idx_ar_receipt_number;
+REBUILD TAG INDEX idx_journal_number;
+REBUILD TAG INDEX idx_contract_number;
+REBUILD TAG INDEX idx_bom_number;
+
+-- Status Indexes
+REBUILD TAG INDEX idx_po_status;
+REBUILD TAG INDEX idx_invoice_status;
+REBUILD TAG INDEX idx_so_status;
+REBUILD TAG INDEX idx_supplier_status;
+REBUILD TAG INDEX idx_item_status;
+
+-- Permission Field Indexes
+REBUILD TAG INDEX idx_po_org;
+REBUILD TAG INDEX idx_invoice_org;
+REBUILD TAG INDEX idx_so_org;
+REBUILD TAG INDEX idx_supplier_org;
+
+-- Composite Indexes
+REBUILD TAG INDEX idx_po_date_status;
+REBUILD TAG INDEX idx_invoice_date_status;
+REBUILD TAG INDEX idx_so_date_status;
+REBUILD TAG INDEX idx_po_org_status;
+REBUILD TAG INDEX idx_invoice_org_status;
+
+-- =============================================================================
+-- Rebuild Edge Indexes
+-- =============================================================================
+
+REBUILD EDGE INDEX idx_has_invoice_status;
+REBUILD EDGE INDEX idx_supplies_item_status;
+REBUILD EDGE INDEX idx_placed_with_org;
+REBUILD EDGE INDEX idx_sold_to_org;
+
+-- =============================================================================
+-- Verify Index Status
+-- =============================================================================
+
+-- Show index status after rebuild
+-- SHOW TAG INDEX STATUS;
+-- SHOW EDGE INDEX STATUS;

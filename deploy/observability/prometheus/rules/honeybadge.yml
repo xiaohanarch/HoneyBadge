@@ -1,0 +1,84 @@
+groups:
+  - name: honeybadge
+    rules:
+      # Query error rate above 5%
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(honeybadge_query_total{status!="success"}[5m]))
+          / sum(rate(honeybadge_query_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Query error rate above 5%"
+          description: "The query error rate has exceeded 5% for the past 5 minutes."
+
+      # P95 query latency above 30s
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(honeybadge_query_e2e_duration_seconds_bucket[5m])
+          ) > 30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 query latency above 30s"
+          description: "The P95 end-to-end query latency has exceeded 30 seconds for the past 10 minutes."
+
+      # LLM error rate above 10%
+      - alert: LLMHighErrorRate
+        expr: |
+          sum(rate(honeybadge_llm_errors_total[5m]))
+          / sum(rate(honeybadge_llm_tokens_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM error rate above 10%"
+          description: "The LLM error rate has exceeded 10% for the past 5 minutes."
+
+      # No active HiClaw workers
+      - alert: NoActiveWorkers
+        expr: sum(honeybadge_hiclaw_workers{status="active"}) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No active HiClaw workers"
+          description: "There are no active HiClaw workers for the past 1 minute."
+
+      # NebulaGraph connection pool exhausted
+      - alert: NebulaPoolExhausted
+        expr: |
+          honeybadge_nebula_pool_size{status="idle"} == 0
+          AND honeybadge_nebula_pool_size{status="active"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "NebulaGraph connection pool exhausted"
+          description: "All NebulaGraph connections are in use and no idle connections available for 5 minutes."
+
+      # nGQL validation failure rate above 30%
+      - alert: HighValidationFailRate
+        expr: |
+          sum(rate(honeybadge_validation_total{result="fail"}[15m]))
+          / sum(rate(honeybadge_validation_total[15m])) > 0.3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "nGQL validation failure rate above 30%"
+          description: "The nGQL validation failure rate has exceeded 30% for the past 15 minutes."
+
+      # ETL pipeline has not run successfully in 26+ hours
+      - alert: ETLStale
+        expr: |
+          (time() - honeybadge_etl_last_success_timestamp) > 93600
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "ETL pipeline has not run successfully in 26+ hours"
+          description: "The ETL pipeline has not completed successfully for more than 26 hours."

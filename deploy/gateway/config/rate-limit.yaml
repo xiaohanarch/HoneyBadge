@@ -1,0 +1,14 @@
+# gateway/config/rate-limit.yaml
+apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: rate-limit
+spec:
+  url: oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/key-rate-limit:latest
+  config:
+    # 全局限流
+    limit_by_header: X-User-Id
+    limit_by_per_header:
+      qps: 10           # 每用户每秒 10 请求
+    limit_by_per_ip:
+      qps: 100          # 每 IP 每秒 100 请求（防刷）

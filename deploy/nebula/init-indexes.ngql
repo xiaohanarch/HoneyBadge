@@ -1,0 +1,76 @@
+-- =============================================================================
+-- HoneyBadge NebulaGraph Index Creation Script
+-- Version: v1.0
+-- Date: 2026-04-04
+-- Description: Creates all Tag and Edge indexes for the HoneyBadge Knowledge Graph
+-- =============================================================================
+
+USE honeybadge;
+
+-- =============================================================================
+-- Section 1: Tag Indexes - Primary Key Indexes (for exact lookups)
+-- =============================================================================
+
+CREATE TAG INDEX idx_supplier_number ON Supplier(supplier_number(64));
+CREATE TAG INDEX idx_customer_number ON Customer(customer_number(64));
+CREATE TAG INDEX idx_item_number ON Item(item_number(64));
+CREATE TAG INDEX idx_org_code ON Organization(org_code(64));
+CREATE TAG INDEX idx_employee_number ON Employee(employee_number(64));
+CREATE TAG INDEX idx_po_number ON PurchaseOrder(po_number(64));
+CREATE TAG INDEX idx_pr_number ON PurchaseRequisition(pr_number(64));
+CREATE TAG INDEX idx_receipt_number ON Receipt(receipt_number(64));
+CREATE TAG INDEX idx_invoice_number ON Invoice(invoice_number(64));
+CREATE TAG INDEX idx_payment_number ON Payment(payment_number(64));
+CREATE TAG INDEX idx_so_number ON SalesOrder(so_number(64));
+CREATE TAG INDEX idx_shipment_number ON Shipment(shipment_number(64));
+CREATE TAG INDEX idx_ar_invoice_number ON ARInvoice(invoice_number(64));
+CREATE TAG INDEX idx_ar_receipt_number ON ARReceipt(receipt_number(64));
+CREATE TAG INDEX idx_journal_number ON GLJournalEntry(journal_number(64));
+CREATE TAG INDEX idx_contract_number ON Contract(contract_number(64));
+CREATE TAG INDEX idx_bom_number ON BOM(bom_number(64));
+
+-- =============================================================================
+-- Section 2: Tag Indexes - Status Indexes (for filtered queries)
+-- =============================================================================
+
+CREATE TAG INDEX idx_po_status ON PurchaseOrder(status(20));
+CREATE TAG INDEX idx_invoice_status ON Invoice(status(20));
+CREATE TAG INDEX idx_so_status ON SalesOrder(status(20));
+CREATE TAG INDEX idx_supplier_status ON Supplier(status(20));
+CREATE TAG INDEX idx_item_status ON Item(status(20));
+
+-- =============================================================================
+-- Section 3: Tag Indexes - Permission Field Indexes (for permission filtering)
+-- =============================================================================
+
+CREATE TAG INDEX idx_po_org ON PurchaseOrder(org_id);
+CREATE TAG INDEX idx_invoice_org ON Invoice(org_id);
+CREATE TAG INDEX idx_so_org ON SalesOrder(org_id);
+CREATE TAG INDEX idx_supplier_org ON Supplier(org_id);
+
+-- =============================================================================
+-- Section 4: Composite Tag Indexes
+-- =============================================================================
+
+-- Date + Status composite queries
+CREATE TAG INDEX idx_po_date_status ON PurchaseOrder(order_date, status(20));
+CREATE TAG INDEX idx_invoice_date_status ON Invoice(invoice_date, status(20));
+CREATE TAG INDEX idx_so_date_status ON SalesOrder(order_date, status(20));
+
+-- Organization + Status (permission filter + status filter)
+CREATE TAG INDEX idx_po_org_status ON PurchaseOrder(org_id, status(20));
+CREATE TAG INDEX idx_invoice_org_status ON Invoice(org_id, status(20));
+
+-- =============================================================================
+-- Section 5: Edge Indexes
+-- =============================================================================
+
+-- Three-way matching query acceleration
+CREATE EDGE INDEX idx_has_invoice_status ON HAS_INVOICE(match_status(20));
+
+-- Supply relationship query
+CREATE EDGE INDEX idx_supplies_item_status ON SUPPLIES_ITEM(status(20));
+
+-- Organization filtering edges
+CREATE EDGE INDEX idx_placed_with_org ON PLACED_WITH(org_id);
+CREATE EDGE INDEX idx_sold_to_org ON SOLD_TO(org_id);
