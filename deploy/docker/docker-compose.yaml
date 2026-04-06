@@ -53,8 +53,8 @@ services:
     hostname: nebula-storaged
     restart: unless-stopped
     ports:
-      - "9779:9779"  # Storage HTTP port
-      - "9780:9780"  # Storage port
+      - "9779:9779"    # Storage data port
+      - "19779:19779"  # Storage HTTP status port
     environment:
       - USER=root
       - TZ=Asia/Shanghai
@@ -70,11 +70,11 @@ services:
     networks:
       - honeybadge-net
     healthcheck:
-      test: ["CMD-SHELL", "echo > /dev/tcp/nebula-storaged/9779"]
+      test: ["CMD", "curl", "-sf", "http://nebula-storaged:19779/status"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 30s
 
   nebula-graphd:
     image: vesoft/nebula-graphd:nightly
@@ -264,6 +264,77 @@ services:
       retries: 3
     profiles:
       - vector  # Only runs with: docker-compose --profile vector up
+
+  # =============================================================================
+  # HoneyBadge MCP Servers
+  # =============================================================================
+
+  honeybadge-nebula-mcp:
+    build:
+      context: ../..
+      dockerfile: mcp-servers/honeybadge-nebula-mcp/Dockerfile
+    container_name: honeybadge-nebula-mcp
+    hostname: honeybadge-nebula-mcp
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      - NEBULA_HOST=nebula-graphd
+      - NEBULA_PORT=9669
+      - NEBULA_USER=root
+      - NEBULA_PASSWORD=nebula
+      - NEBULA_SPACE=honeybadge
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      - TZ=Asia/Shanghai
+    depends_on:
+      nebula-graphd:
+        condition: service_healthy
+    networks:
+      - honeybadge-net
+
+  honeybadge-audit-mcp:
+    build:
+      context: ../..
+      dockerfile: mcp-servers/honeybadge-audit-mcp/Dockerfile
+    container_name: honeybadge-audit-mcp
+    hostname: honeybadge-audit-mcp
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=honeybadge
+      - POSTGRES_PASSWORD=honeybadge123
+      - POSTGRES_DB=honeybadge_audit
+      - TZ=Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - honeybadge-net
+
+  honeybadge-cache-mcp:
+    build:
+      context: ../..
+      dockerfile: mcp-servers/honeybadge-cache-mcp/Dockerfile
+    container_name: honeybadge-cache-mcp
+    hostname: honeybadge-cache-mcp
+    restart: unless-stopped
+    ports:
+      - "8003:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis123
+      - TZ=Asia/Shanghai
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - honeybadge-net
 
 # =============================================================================
 # Networks & Volumes

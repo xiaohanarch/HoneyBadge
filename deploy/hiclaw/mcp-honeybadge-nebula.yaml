@@ -1,0 +1,12 @@
+name: honeybadge-nebula
+protocol: http
+endpoint: http://honeybadge-nebula-mcp:8000
+description: "HoneyBadge NebulaGraph MCP Server - nGQL generation, validation, execution"
+tools:
+  - get_schema
+  - generate_ngql
+  - validate_and_execute
+  - explain_ngql
+  - summarize_query_results
+credentials:
+  accessToken: ""
