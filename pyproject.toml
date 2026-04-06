@@ -44,6 +44,12 @@ dependencies = [
     "uuid6>=2024.1.12",
     # Prometheus metrics
     "prometheus-client>=0.19.0",
+    # FastAPI server
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    # JWT auth
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
 ]
 
 [project.optional-dependencies]
@@ -57,6 +63,7 @@ dev = [
 
 [project.scripts]
 honeybadge = "honeybadge.__main__:main"
+honeybadge-server = "honeybadge.server.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
