@@ -309,7 +309,7 @@ class DirectPipelineOrchestrator(QueryOrchestrator):
                 user_id=user_id,
             )
 
-            await callbacks.on_stream(summary, "summary", True)
+            await callbacks.on_stream(summary, "summarizing", True)
 
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
@@ -484,6 +484,10 @@ class DirectPipelineOrchestrator(QueryOrchestrator):
 
         ngql = response.content.strip()
 
+        # Strip chain-of-thought <think>...</think> tags (e.g. MiniMax, DeepSeek)
+        ngql = re.sub(r"<think>.*?</think>", "", ngql, flags=re.DOTALL)
+        ngql = ngql.strip()
+
         # Strip markdown code fences: ```ngql ... ``` or ``` ... ```
         ngql = re.sub(r"^```(?:ngql|cypher|nGQL)?\s*\n?", "", ngql, flags=re.IGNORECASE)
         ngql = re.sub(r"\n?```\s*$", "", ngql, flags=re.IGNORECASE)
@@ -634,7 +638,10 @@ class DirectPipelineOrchestrator(QueryOrchestrator):
             trace_id=trace_id,
             user_id=user_id,
         )
-        return response.content
+        summary = response.content
+        # Strip chain-of-thought <think>...</think> tags
+        summary = re.sub(r"<think>.*?</think>", "", summary, flags=re.DOTALL).strip()
+        return summary
 
     async def _write_audit_log_bg(
         self,
