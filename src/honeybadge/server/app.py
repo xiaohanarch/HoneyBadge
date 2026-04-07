@@ -26,7 +26,7 @@ logger = structlog.get_logger()
 
 def create_app(config: ServerConfig | None = None) -> FastAPI:
     if config is None:
-        config = ServerConfig()
+        config = ServerConfig.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
