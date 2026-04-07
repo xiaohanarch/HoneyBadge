@@ -32,6 +32,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DEMO_USERS: dict[str, dict[str, Any]] = {
     "admin": {
+        "id": "admin",
         "username": "admin",
         "password_hash": pwd_context.hash("admin123"),
         "display_name": "系统管理员",
@@ -39,6 +40,7 @@ DEMO_USERS: dict[str, dict[str, Any]] = {
         "org_id": 1,
     },
     "analyst": {
+        "id": "analyst",
         "username": "analyst",
         "password_hash": pwd_context.hash("analyst123"),
         "display_name": "数据分析师",
@@ -46,6 +48,7 @@ DEMO_USERS: dict[str, dict[str, Any]] = {
         "org_id": 1,
     },
     "auditor": {
+        "id": "auditor",
         "username": "auditor",
         "password_hash": pwd_context.hash("auditor123"),
         "display_name": "审计员",
