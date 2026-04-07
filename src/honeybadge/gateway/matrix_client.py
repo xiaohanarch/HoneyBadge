@@ -129,10 +129,12 @@ class MatrixClient:
         """Start the Matrix event listener loop."""
         if self._client is None:
             return
+        from nio import RoomMessage
+        self._client.add_event_callback(self._on_matrix_event, RoomMessage)
         self._running = True
         while self._running:
             try:
-                await self._client.sync()
+                await self._client.sync_forever(timeout=30000)
             except Exception as exc:
                 logger.error("matrix_sync_error", error=str(exc))
                 await asyncio.sleep(5)
