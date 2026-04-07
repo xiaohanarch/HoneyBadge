@@ -178,8 +178,8 @@ services:
   # Matrix Homeserver (for HiClaw Manager-Worker Communication)
   # =============================================================================
 
-  matrix-synapse:
-    image: matrixdotorg/synapse:v1.99.0
+  matrix-conduit:
+    image: matrixconduit/matrix-conduit:latest
     container_name: honeybadge-matrix
     hostname: matrix
     restart: unless-stopped
@@ -187,10 +187,12 @@ services:
       - "8008:8008"  # Client API
       - "8448:8448"  # Federation
     environment:
+      - RUST_LOG=info
+      - CONDUIT_CONFIG=/data/conduit.toml
       - TZ=Asia/Shanghai
     volumes:
-      - matrix_data:/data
-      - ./homeserver.yaml:/data/homeserver.yaml:ro
+      - ./matrix-data:/data
+      - ./conduit.toml:/data/conduit.toml:ro
     networks:
       - honeybadge-net
     healthcheck:
@@ -245,7 +247,8 @@ services:
     hostname: milvus
     restart: unless-stopped
     ports:
-      - "9091:9091"  # Milvus HTTP port
+      - "19530:19530"  # Milvus gRPC port
+      - "9091:9091"    # Milvus HTTP port
     environment:
       - ETCD_ENDPOINTS=milvus-etcd:2379
       - MINIO_ADDRESS=milvus-minio:9000
@@ -262,8 +265,6 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-    profiles:
-      - vector  # Only runs with: docker-compose --profile vector up
 
   # =============================================================================
   # HoneyBadge MCP Servers
@@ -335,6 +336,56 @@ services:
         condition: service_healthy
     networks:
       - honeybadge-net
+
+  # =============================================================================
+  # HoneyBadge Backend Server
+  # =============================================================================
+
+  honeybadge-server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.server
+    container_name: honeybadge-server
+    hostname: honeybadge-server
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - NEBULA_HOST=nebula-graphd
+      - NEBULA_PORT=9669
+      - NEBULA_USER=root
+      - NEBULA_PASSWORD=nebula
+      - NEBULA_SPACE=honeybadge
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis123
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=honeybadge
+      - PG_PASSWORD=honeybadge123
+      - PG_DATABASE=honeybadge_audit
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
+      - ORCHESTRATOR_TYPE=direct
+      - SERVER_PORT=8090
+      - TZ=Asia/Shanghai
+    depends_on:
+      nebula-graphd:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8090/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 # =============================================================================
 # Networks & Volumes
