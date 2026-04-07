@@ -122,7 +122,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                 await matrix_client.connect()
                 await matrix_client.bootstrap_schema(schema_cache)
             except Exception as exc:
-                logger.warning("matrix_bootstrap_failed", error=str(exc))
+                logger.error("matrix_bootstrap_failed", error=str(exc))
 
             logger.info("gateway_ready", schema_tags=len(schema_cache.get_tags()), schema_edges=len(schema_cache.get_edges()))
             logger.info("server_ready", services="nebula,pg,redis,llm")
@@ -135,6 +135,13 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         yield
 
         logger.info("server_shutting_down")
+        # Gracefully close active WebSocket sessions
+        if hasattr(app.state, "active_ws_sessions") and app.state.active_ws_sessions:
+            for ws in app.state.active_ws_sessions.values():
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
         if hasattr(app.state, "nebula") and app.state.nebula:
             await app.state.nebula.disconnect()
         if hasattr(app.state, "pg") and app.state.pg:
