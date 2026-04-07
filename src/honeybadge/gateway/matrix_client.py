@@ -122,6 +122,48 @@ class MatrixClient:
             raise RuntimeError(f"Matrix login failed: {resp}")
         logger.info("matrix_connected", user=self.user_id)
 
+        # Start event listener
+        self._listening_task = asyncio.create_task(self._start_listening())
+
+    async def _start_listening(self) -> None:
+        """Start the Matrix event listener loop."""
+        if self._client is None:
+            return
+        self._running = True
+        while self._running:
+            try:
+                await self._client.sync()
+            except Exception as exc:
+                logger.error("matrix_sync_error", error=str(exc))
+                await asyncio.sleep(5)
+
+    async def _on_matrix_event(self, room_id: str, event: Any) -> None:
+        """Handle incoming Matrix events."""
+        if self._client is None:
+            return
+
+        from nio import RoomMessage
+
+        if isinstance(event, RoomMessage):
+            content = event.source.get("content", {})
+            msg = MatrixMessage.from_dict(content)
+
+            # Route response by trace_id
+            if msg.trace_id and msg.trace_id in self._pending_responses:
+                future = self._pending_responses.pop(msg.trace_id)
+                if not future.done():
+                    future.set_result(msg)
+                return
+
+            # Dispatch to callbacks
+            if msg.msgtype == "result" and self.on_result:
+                session_id = self.room_manager.get_session_id(room_id) or self.room_manager.get_session_id_by_trace(msg.trace_id)
+                if session_id:
+                    self.room_manager.register_trace(msg.trace_id, session_id)
+                await self.on_result(msg)
+            elif msg.msgtype == "error" and self.on_error:
+                await self.on_error(msg)
+
     async def disconnect(self) -> None:
         """Disconnect from Matrix."""
         self._running = False
@@ -171,14 +213,14 @@ class MatrixClient:
         logger.info("matrix_query_sent", trace_id=trace_id, room_id=room_id)
 
     async def _send_and_wait_for_response(self, trace_id: str, timeout: float = 30.0) -> MatrixMessage:
-        """
-        Wait for a response with the given trace_id.
-        Internal helper used by bootstrap_schema.
-        """
-        future: asyncio.Future[MatrixMessage] = self._pending_responses.get(trace_id)
-        if not future:
-            raise RuntimeError(f"No pending future for trace_id: {trace_id}")
-        return await asyncio.wait_for(future, timeout=timeout)
+        """Send a message and wait for a response with the given trace_id."""
+        future: asyncio.Future[MatrixMessage] = asyncio.Future()
+        self._pending_responses[trace_id] = future
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._pending_responses.pop(trace_id, None)
+            raise
 
     async def bootstrap_schema(self, schema_cache: SchemaCache) -> None:
         """
@@ -188,9 +230,6 @@ class MatrixClient:
             logger.warning("matrix_bootstrap_mock_mode")
             schema_cache.load_schema([], [])
             return
-
-        future: asyncio.Future[MatrixMessage] = asyncio.Future()
-        self._pending_responses["__bootstrap__"] = future
 
         try:
             manager_user = "@hiclaw-manager:" + self.homeserver_url.split("//")[1]
@@ -211,5 +250,3 @@ class MatrixClient:
         except asyncio.TimeoutError:
             logger.error("matrix_schema_bootstrap_timeout")
             schema_cache.load_schema([], [])
-        finally:
-            self._pending_responses.pop("__bootstrap__", None)
