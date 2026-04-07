@@ -89,7 +89,7 @@ async def _handle_query(websocket: WebSocket, data: dict, user_payload: dict) ->
     question_upper = question.upper()
     for kw in write_keywords:
         if kw in question_upper:
-            await _send_error(websocket, ErrorCode.PERMISSION_DENIED, f"Write operations not allowed: {kw}", "")
+            await _send_error(websocket, ErrorCode.VALIDATION_FAILED, f"Write operations not allowed: {kw}", "")
             return
 
     matrix_client = websocket.app.state.matrix_client
