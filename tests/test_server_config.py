@@ -76,6 +76,13 @@ class TestDefaultConfig:
         assert config.matrix_url == ""
         assert config.hiclaw_manager_url == ""
 
+    def test_default_matrix_fields(self):
+        """Should have Matrix client defaults."""
+        config = ServerConfig()
+        assert config.matrix_homeserver_url == "http://localhost:8008"
+        assert config.matrix_user_id == "@honeybadge-gateway:matrix.local"
+        assert config.matrix_user_password == ""
+
     def test_default_config(self):
         """test_default_config: verify all defaults are correct types."""
         config = ServerConfig()
