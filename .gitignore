@@ -2,6 +2,9 @@
 .worktrees/
 worktrees/
 
+# Docker data volumes
+deploy/docker/data/
+
 # Python
 __pycache__/
 *.py[cod]
