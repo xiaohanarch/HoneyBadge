@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Enterprise Knowledge Graph Intelligent Assistant for ERP systems"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Proprietary"}
+license = {text = "Apache-2.0"}
 authors = [
     {name = "HoneyBadge Team"}
 ]
@@ -51,6 +51,12 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "bcrypt>=4.0.0,<5.0.0",
+    # Matrix client (HiClaw Manager-Worker communication)
+    "matrix-nio>=0.21.0",
+    # MCP SDK (Worker uses this to call MCP tools over SSE)
+    "mcp>=1.0.0",
+    # FastMCP framework (MCP servers use this)
+    "fastmcp>=2.0.0",
 ]
 
 [project.optional-dependencies]

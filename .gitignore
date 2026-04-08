@@ -4,6 +4,8 @@ worktrees/
 
 # Docker data volumes
 deploy/docker/data/
+deploy/docker/logs/
+deploy/docker/matrix-data/
 
 # Python
 __pycache__/
@@ -33,6 +35,24 @@ ENV/
 env/
 .venv/
 
+# Node.js
+node_modules/
+frontend/node_modules/
+
+# Scripts (Python compiled executables)
+scripts/*.exe
+scripts/coverage*.exe
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+
+# Pytest
+.pytest_cache/
+.nox/
+
 # IDE
 .idea/
 .vscode/
@@ -46,3 +66,23 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
+
+# Environment (contains secrets)
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+=*
+*.tmp
+*.temp
+
+# TypeScript
+frontend/src/auto-imports.d.ts
+frontend/src/components.d.ts
+
+# Package locks (we use uv)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

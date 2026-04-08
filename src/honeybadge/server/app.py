@@ -71,25 +71,28 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
 
             # Create Matrix client with callbacks
             async def on_matrix_result(msg):
+                app.state.pending_traces.discard(msg.trace_id)
                 # Route result to the appropriate WebSocket via session_id
                 session_id = room_manager.get_session_id_by_trace(msg.trace_id)
                 if session_id:
                     ws = app.state.active_ws_sessions.get(session_id)
                     if ws:
+                        raw_data = msg.data.get("rows", []) if msg.data else []
                         response = ResponseMessage(
                             payload=ResponsePayload(
                                 summary=msg.summary,
-                                raw_data=msg.data.get("rows", []) if msg.data else [],
+                                raw_data=raw_data,
                                 columns=msg.data.get("columns", []) if msg.data else [],
-                                cypher="",
+                                cypher=msg.data.get("cypher", "") if msg.data else "",
                                 trace_id=msg.trace_id,
-                                execution_time_ms=0,
-                                row_count=0,
+                                execution_time_ms=msg.data.get("execution_time_ms", 0) if msg.data else 0,
+                                row_count=len(raw_data),
                             ),
                         )
                         await ws.send_json(serialize_message(response))
 
             async def on_matrix_error(msg):
+                app.state.pending_traces.discard(msg.trace_id)
                 session_id = room_manager.get_session_id_by_trace(msg.trace_id)
                 if session_id:
                     ws = app.state.active_ws_sessions.get(session_id)
@@ -116,6 +119,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             app.state.schema_cache = schema_cache
             app.state.room_manager = room_manager
             app.state.active_ws_sessions = {}  # session_id -> WebSocket
+            app.state.pending_traces: set[str] = set()  # trace_ids awaiting Worker response
 
             # Bootstrap schema from Worker via Matrix
             try:

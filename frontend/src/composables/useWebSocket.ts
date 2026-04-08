@@ -29,14 +29,16 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
-  const { url, token, onMessage, onConnect, onDisconnect, onError } = options;
+  const { url, onMessage, onConnect, onDisconnect, onError } = options;
 
   function connect() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       return;
     }
 
-    ws = new WebSocket(`${url}?token=${token}`);
+    // Always read the latest token from localStorage at connect time
+    const currentToken = localStorage.getItem('token') || options.token;
+    ws = new WebSocket(`${url}?token=${currentToken}`);
 
     ws.onopen = () => {
       connected.value = true;

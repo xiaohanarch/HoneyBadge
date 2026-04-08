@@ -1,5 +1,6 @@
 """WebSocket handler for HoneyBadge query pipeline."""
 
+import asyncio
 import json
 
 import structlog
@@ -20,6 +21,8 @@ from honeybadge.server.auth import decode_token
 logger = structlog.get_logger()
 
 router = APIRouter()
+
+_QUERY_TIMEOUT_SECS = 60.0
 
 
 @router.websocket("/ws")
@@ -101,10 +104,15 @@ async def _handle_query(websocket: WebSocket, data: dict, user_payload: dict) ->
 
     # Register WebSocket session for response routing
     websocket.app.state.active_ws_sessions[session_id] = websocket
-    room_manager.register_trace("", session_id)  # temporary mapping until trace_id assigned
 
     trace_id = generate_trace_id()
     room_manager.register_trace(trace_id, session_id)
+
+    # Track pending trace for timeout; resolved by on_matrix_result / on_matrix_error
+    pending_traces = getattr(websocket.app.state, "pending_traces", None)
+    if pending_traces is not None:
+        pending_traces.add(trace_id)
+    asyncio.create_task(_query_timeout(websocket, trace_id, _QUERY_TIMEOUT_SECS))
 
     # Forward to Matrix → Manager → Worker (L1-L3 validation happens in Worker)
     await matrix_client.send_query(
@@ -143,6 +151,18 @@ async def _handle_query(websocket: WebSocket, data: dict, user_payload: dict) ->
                 )
         except Exception as e:
             logger.error("save_user_message_failed", error=str(e))
+
+
+async def _query_timeout(websocket: WebSocket, trace_id: str, timeout_secs: float) -> None:
+    """Send a timeout error if the Worker hasn't responded within *timeout_secs*."""
+    await asyncio.sleep(timeout_secs)
+    pending_traces = getattr(websocket.app.state, "pending_traces", None)
+    if pending_traces is not None and trace_id in pending_traces:
+        pending_traces.discard(trace_id)
+        try:
+            await _send_error(websocket, ErrorCode.SERVICE_UNAVAILABLE, "Query timed out — Worker did not respond in time", trace_id)
+        except Exception:
+            pass  # WebSocket may have already closed
 
 
 async def _send_error(websocket: WebSocket, code: ErrorCode, message: str, trace_id: str = "") -> None:

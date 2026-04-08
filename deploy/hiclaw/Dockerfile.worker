@@ -10,16 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements.txt and install dependencies
+# Install Python dependencies first (cached layer)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy pyproject.toml and install project in editable mode
+# Copy source before install so pip install -e . can find the package
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e .
-
-# Copy application code
 COPY src/ ./src/
+RUN pip install --no-cache-dir --no-deps -e .
 
 # Environment variables
 ENV PYTHONPATH=/app

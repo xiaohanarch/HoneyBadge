@@ -1,0 +1,21 @@
+# gateway/config/ingress-class.yaml
+# Higress IngressClass for HoneyBadge
+#
+# This defines Higress as the default ingress controller.
+
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: higress
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: higress.io/higress
+---
+# IngressClass for nginx (fallback)
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: nginx
+spec:
+  controller: nginx.org/ingress-controller

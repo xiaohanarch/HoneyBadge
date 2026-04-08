@@ -1,0 +1,30 @@
+# gateway/config/auth.yaml
+# Authentication Configuration for Higress Gateway
+#
+# For Phase 1, authentication is handled by honeybadge-server directly.
+# Higress provides:
+#   - CORS handling
+#   - Rate limiting
+#   - Request/response transformation
+#
+# Phase 2 SSO integration will replace this with:
+#   - OIDC plugin for enterprise SSO
+#   - JWT validation at gateway level
+#   - OAuth2 token introspection
+
+apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: honeybadge-auth
+spec:
+  url: oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/jwt-auth:latest
+  phase: AUTHN
+  config: |
+    {
+      "consumers": [],
+      "global": {
+        "issuer": "honeybadge",
+        "challengeOnFailure": false
+      },
+      "rules": []
+    }

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { authApi } from '@/api/http';
 
 const routes: RouteRecordRaw[] = [
   {
@@ -30,17 +31,32 @@ const router = createRouter({
 });
 
 // 路由守卫
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore();
   const requiresAuth = to.meta.requiresAuth !== false;
 
   if (requiresAuth && !authStore.isAuthenticated) {
     // 检查 localStorage 中是否有 token
     const token = localStorage.getItem('token');
+    const refreshToken = localStorage.getItem('refresh_token');
+
     if (token) {
-      // token 存在，尝试恢复会话
+      // token 存在，恢复 auth state
       authStore.setToken(token);
-      next();
+
+      // 获取用户信息来完成 auth 恢复
+      try {
+        const response = await authApi.getCurrentUser();
+        const user = response.data as any;
+        authStore.setAuth(token, refreshToken || '', user);
+        next();
+      } catch {
+        // token 无效，清除并跳转登录
+        localStorage.removeItem('token');
+        localStorage.removeItem('refresh_token');
+        authStore.clearAuth();
+        next('/login');
+      }
     } else {
       next('/login');
     }
