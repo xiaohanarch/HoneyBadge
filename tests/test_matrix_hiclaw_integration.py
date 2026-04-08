@@ -16,87 +16,113 @@ from honeybadge.gateway.schema_cache import SchemaCache
 @pytest.mark.asyncio
 async def test_matrix_client_creates_dm_with_hiclaw_manager():
     """When send_query is called without an existing room, MatrixClient creates a DM with Manager."""
-    room_manager = RoomManager()
-    client = MatrixClient(
-        homeserver_url="http://matrix-local.hiclaw.io",
-        user_id="@honeybadge-gateway:matrix-local.hiclaw.io",
-        password="",
-        room_manager=room_manager,
-    )
+    import sys
 
-    mock_client = MagicMock()
-    client._client = mock_client
+    class MockRoomCreateResponse:
+        def __init__(self, room_id: str):
+            self.room_id = room_id
 
-    # Track the invite argument passed to room_create
-    created_room_ids = []
-    async def capture_room_create(invite, **kwargs):
-        created_room_ids.append(invite)
-        return "!manager-dm:matrix-local.hiclaw.io"
-    mock_client.room_create = AsyncMock(side_effect=capture_room_create)
-    mock_client.room_send = AsyncMock(return_value=None)
+    mock_nio = MagicMock()
+    mock_nio.RoomCreateResponse = MockRoomCreateResponse
+    sys.modules["nio"] = mock_nio
 
-    await client.send_query(
-        question="供应商V001的订单有哪些？",
-        trace_id="HB-20260408-001",
-        user_id="admin",
-        org_id="org001",
-        roles=["admin"],
-        session_id="session-abc",
-    )
+    try:
+        room_manager = RoomManager()
+        client = MatrixClient(
+            homeserver_url="http://matrix-local.hiclaw.io",
+            user_id="@honeybadge-gateway:matrix-local.hiclaw.io",
+            password="",
+            room_manager=room_manager,
+        )
 
-    # Verify room was created inviting the Manager
-    assert len(created_room_ids) == 1
-    manager_id = created_room_ids[0]
-    assert "@hiclaw-manager:" in manager_id
-    # The domain should match the homeserver URL split
-    assert manager_id.startswith("@hiclaw-manager:matrix-local.hiclaw.io")
+        mock_client = MagicMock()
+        client._client = mock_client
 
-    # Verify room was registered
-    assert room_manager.get_room_id("session-abc") == "!manager-dm:matrix-local.hiclaw.io"
+        # Track the invite argument passed to room_create
+        invited_users = []
+        async def capture_room_create(invite, **kwargs):
+            # invite is a list of user IDs
+            invited_users.extend(invite)
+            return MockRoomCreateResponse("!manager-dm:matrix-local.hiclaw.io")
+        mock_client.room_create = AsyncMock(side_effect=capture_room_create)
+        mock_client.room_send = AsyncMock(return_value=None)
+
+        await client.send_query(
+            question="供应商V001的订单有哪些？",
+            trace_id="HB-20260408-001",
+            user_id="admin",
+            org_id="org001",
+            roles=["admin"],
+            session_id="session-abc",
+        )
+
+        # Verify room was created inviting the Manager
+        assert len(invited_users) == 1
+        assert "@honeybadge-manager:" in invited_users[0]
+        # The domain should match the homeserver URL
+        assert invited_users[0].startswith("@honeybadge-manager:matrix-local.hiclaw.io")
+
+        # Verify room was registered
+        assert room_manager.get_room_id("session-abc") == "!manager-dm:matrix-local.hiclaw.io"
+    finally:
+        sys.modules.pop("nio", None)
 
 
 @pytest.mark.asyncio
 async def test_gateway_query_message_format():
     """gateway_query message should include all required fields from the spec."""
-    room_manager = RoomManager()
-    client = MatrixClient(
-        homeserver_url="http://matrix-local.hiclaw.io",
-        user_id="@honeybadge-gateway:matrix-local.hiclaw.io",
-        password="",
-        room_manager=room_manager,
-    )
+    import sys
 
-    mock_client = MagicMock()
-    client._client = mock_client
+    class MockRoomCreateResponse:
+        def __init__(self, room_id: str):
+            self.room_id = room_id
 
-    async def mock_room_create(invite, **kwargs):
-        return "!dm-room:matrix-local.hiclaw.io"
-    mock_client.room_create = AsyncMock(side_effect=mock_room_create)
+    mock_nio = MagicMock()
+    mock_nio.RoomCreateResponse = MockRoomCreateResponse
+    sys.modules["nio"] = mock_nio
 
-    sent_messages = []
-    async def capture_room_send(room_id, event_type, content):
-        sent_messages.append(content)
-    mock_client.room_send = AsyncMock(side_effect=capture_room_send)
+    try:
+        room_manager = RoomManager()
+        client = MatrixClient(
+            homeserver_url="http://matrix-local.hiclaw.io",
+            user_id="@honeybadge-gateway:matrix-local.hiclaw.io",
+            password="",
+            room_manager=room_manager,
+        )
 
-    await client.send_query(
-        question="查询供应商列表",
-        trace_id="HB-20260408-002",
-        user_id="admin",
-        org_id="org001",
-        roles=["admin", "analyst"],
-        session_id="session-xyz",
-    )
+        mock_client = MagicMock()
+        client._client = mock_client
 
-    assert len(sent_messages) == 1
-    msg = sent_messages[0]
+        async def mock_room_create(invite, **kwargs):
+            return MockRoomCreateResponse("!dm-room:matrix-local.hiclaw.io")
+        mock_client.room_create = AsyncMock(side_effect=mock_room_create)
 
-    assert msg["type"] == "gateway_query"
-    assert msg["trace_id"] == "HB-20260408-002"
-    assert msg["question"] == "查询供应商列表"
-    assert msg["user_id"] == "admin"
-    assert msg["org_id"] == "org001"
-    assert msg["roles"] == ["admin", "analyst"]
-    assert "data" not in msg  # gateway_query does not include data field
+        sent_messages = []
+        async def capture_room_send(room_id, event_type, content):
+            sent_messages.append(content)
+        mock_client.room_send = AsyncMock(side_effect=capture_room_send)
+
+        await client.send_query(
+            question="查询供应商列表",
+            trace_id="HB-20260408-002",
+            user_id="admin",
+            org_id="org001",
+            roles=["admin", "analyst"],
+            session_id="session-xyz",
+        )
+
+        assert len(sent_messages) == 1
+        msg = sent_messages[0]
+
+        assert msg["type"] == "gateway_query"
+        assert msg["trace_id"] == "HB-20260408-002"
+        assert msg["question"] == "查询供应商列表"
+        assert msg["user_id"] == "admin"
+        assert msg["org_id"] == "org001"
+        assert msg["roles"] == ["admin", "analyst"]
+        assert "data" not in msg  # gateway_query does not include data field
+    finally:
+        sys.modules.pop("nio", None)
 
 
 @pytest.mark.asyncio
