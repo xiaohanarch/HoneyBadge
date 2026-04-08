@@ -172,3 +172,15 @@ class TestConfigFromEnv:
         # Other fields remain at defaults
         assert config.host == "0.0.0.0"
         assert config.nebula_host == "localhost"
+
+    def test_from_env_matrix_defaults_to_hiclaw_tuwunel(self, monkeypatch):
+        """When no Matrix env vars are set, from_env() should default to HiClaw Tuwunel."""
+        # Ensure no Matrix env vars are set
+        monkeypatch.delenv("MATRIX_HOMESERVER_URL", raising=False)
+        monkeypatch.delenv("MATRIX_USER_ID", raising=False)
+        monkeypatch.delenv("MATRIX_USER_PASSWORD", raising=False)
+
+        config = ServerConfig.from_env()
+        assert config.matrix_homeserver_url == "http://localhost:6167"
+        assert config.matrix_user_id == "@honeybadge-gateway:matrix-local.hiclaw.io"
+        assert config.matrix_user_password == ""
