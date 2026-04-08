@@ -79,10 +79,10 @@ class ServerConfig:
     hiclaw_manager_url: str = field(default="")
 
     # -------------------------------------------------------------------------
-    # Matrix client (honeybadge-gateway bot user)
+    # Matrix client (honeybadge-gateway bot user, connects to HiClaw Tuwunel :6167)
     # -------------------------------------------------------------------------
-    matrix_homeserver_url: str = field(default="http://localhost:8008")
-    matrix_user_id: str = field(default="@honeybadge-gateway:matrix.local")
+    matrix_homeserver_url: str = field(default="http://localhost:6167")
+    matrix_user_id: str = field(default="@honeybadge-gateway:matrix-local.hiclaw.io")
     matrix_user_password: str = field(default="")
 
     @classmethod
