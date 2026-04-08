@@ -78,6 +78,13 @@ class ServerConfig:
     matrix_url: str = field(default="")
     hiclaw_manager_url: str = field(default="")
 
+    # -------------------------------------------------------------------------
+    # Matrix client (honeybadge-gateway bot user, connects to HiClaw Tuwunel :6167)
+    # -------------------------------------------------------------------------
+    matrix_homeserver_url: str = field(default="http://localhost:6167")
+    matrix_user_id: str = field(default="@honeybadge-gateway:matrix-local.hiclaw.io")
+    matrix_user_password: str = field(default="")
+
     @classmethod
     def from_env(cls) -> "ServerConfig":
         """Create a ServerConfig by reading environment variables.
@@ -124,4 +131,8 @@ class ServerConfig:
             # Reserved URLs
             matrix_url=os.environ.get("MATRIX_URL", ""),
             hiclaw_manager_url=os.environ.get("HICLAW_MANAGER_URL", ""),
+            # Matrix client
+            matrix_homeserver_url=os.environ.get("MATRIX_HOMESERVER_URL", "http://localhost:6167"),
+            matrix_user_id=os.environ.get("MATRIX_USER_ID", "@honeybadge-gateway:matrix-local.hiclaw.io"),
+            matrix_user_password=os.environ.get("MATRIX_USER_PASSWORD", ""),
         )

@@ -61,16 +61,87 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             orchestrator = create_orchestrator(config, nebula, llm, pg, redis, validator)
             app.state.orchestrator = orchestrator
 
+            # Import gateway modules
+            from honeybadge.gateway import MatrixClient, SchemaCache, RoomManager
+            from honeybadge.protocols.messages import ErrorCode, ErrorMessage, ErrorPayload, ResponseMessage, ResponsePayload, serialize_message
+
+            # Create gateway components
+            schema_cache = SchemaCache()
+            room_manager = RoomManager()
+
+            # Create Matrix client with callbacks
+            async def on_matrix_result(msg):
+                # Route result to the appropriate WebSocket via session_id
+                session_id = room_manager.get_session_id_by_trace(msg.trace_id)
+                if session_id:
+                    ws = app.state.active_ws_sessions.get(session_id)
+                    if ws:
+                        response = ResponseMessage(
+                            payload=ResponsePayload(
+                                summary=msg.summary,
+                                raw_data=msg.data.get("rows", []) if msg.data else [],
+                                columns=msg.data.get("columns", []) if msg.data else [],
+                                cypher="",
+                                trace_id=msg.trace_id,
+                                execution_time_ms=0,
+                                row_count=0,
+                            ),
+                        )
+                        await ws.send_json(serialize_message(response))
+
+            async def on_matrix_error(msg):
+                session_id = room_manager.get_session_id_by_trace(msg.trace_id)
+                if session_id:
+                    ws = app.state.active_ws_sessions.get(session_id)
+                    if ws:
+                        error = ErrorMessage(
+                            payload=ErrorPayload(
+                                code=ErrorCode.EXECUTION_ERROR,
+                                message=msg.error_message,
+                                trace_id=msg.trace_id,
+                            ),
+                        )
+                        await ws.send_json(serialize_message(error))
+
+            matrix_client = MatrixClient(
+                homeserver_url=config.matrix_homeserver_url,
+                user_id=config.matrix_user_id,
+                password=config.matrix_user_password,
+                room_manager=room_manager,
+                on_result=on_matrix_result,
+                on_error=on_matrix_error,
+            )
+
+            app.state.matrix_client = matrix_client
+            app.state.schema_cache = schema_cache
+            app.state.room_manager = room_manager
+            app.state.active_ws_sessions = {}  # session_id -> WebSocket
+
+            # Bootstrap schema from Worker via Matrix
+            try:
+                await matrix_client.connect()
+                await matrix_client.bootstrap_schema(schema_cache)
+            except Exception as exc:
+                logger.error("matrix_bootstrap_failed", error=str(exc))
+
+            logger.info("gateway_ready", schema_tags=len(schema_cache.get_tags()), schema_edges=len(schema_cache.get_edges()))
             logger.info("server_ready", services="nebula,pg,redis,llm")
         except Exception as e:
             logger.error("startup_failed", error=str(e))
-            for attr in ("nebula", "pg", "redis", "llm", "orchestrator", "validator"):
+            for attr in ("nebula", "pg", "redis", "llm", "orchestrator", "validator", "matrix_client", "schema_cache", "room_manager"):
                 if not hasattr(app.state, attr):
                     setattr(app.state, attr, None)
 
         yield
 
         logger.info("server_shutting_down")
+        # Gracefully close active WebSocket sessions
+        if hasattr(app.state, "active_ws_sessions") and app.state.active_ws_sessions:
+            for ws in app.state.active_ws_sessions.values():
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
         if hasattr(app.state, "nebula") and app.state.nebula:
             await app.state.nebula.disconnect()
         if hasattr(app.state, "pg") and app.state.pg:
@@ -79,6 +150,8 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             await app.state.redis.disconnect()
         if hasattr(app.state, "llm") and app.state.llm:
             await app.state.llm.close()
+        if hasattr(app.state, "matrix_client") and app.state.matrix_client:
+            await app.state.matrix_client.disconnect()
 
     app = FastAPI(title="HoneyBadge", version=VERSION, lifespan=lifespan)
     app.state.config = config

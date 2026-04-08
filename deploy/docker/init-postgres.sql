@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     archived_at     TIMESTAMPTZ,
     message_count   INT DEFAULT 0,
+    last_trace_id   VARCHAR(64),                           -- Last trace_id used in this session
     status          VARCHAR(20) DEFAULT 'active'           -- active / archived / deleted
 );
 

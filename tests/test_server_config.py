@@ -76,6 +76,13 @@ class TestDefaultConfig:
         assert config.matrix_url == ""
         assert config.hiclaw_manager_url == ""
 
+    def test_default_matrix_fields(self):
+        """Should have Matrix client defaults pointing to HiClaw Tuwunel."""
+        config = ServerConfig()
+        assert config.matrix_homeserver_url == "http://localhost:6167"
+        assert config.matrix_user_id == "@honeybadge-gateway:matrix-local.hiclaw.io"
+        assert config.matrix_user_password == ""
+
     def test_default_config(self):
         """test_default_config: verify all defaults are correct types."""
         config = ServerConfig()
@@ -117,6 +124,9 @@ class TestConfigFromEnv:
         monkeypatch.setenv("MILVUS_PORT", "19531")
         monkeypatch.setenv("MATRIX_URL", "http://matrix.example.com")
         monkeypatch.setenv("HICLAW_MANAGER_URL", "http://hiclaw.example.com")
+        monkeypatch.setenv("MATRIX_HOMESERVER_URL", "http://hiclaw.example.com:6167")
+        monkeypatch.setenv("MATRIX_USER_ID", "@honeybadge-gateway:hiclaw.example.com")
+        monkeypatch.setenv("MATRIX_USER_PASSWORD", "secret")
 
         config = ServerConfig.from_env()
 
@@ -146,6 +156,9 @@ class TestConfigFromEnv:
         assert config.milvus_port == 19531
         assert config.matrix_url == "http://matrix.example.com"
         assert config.hiclaw_manager_url == "http://hiclaw.example.com"
+        assert config.matrix_homeserver_url == "http://hiclaw.example.com:6167"
+        assert config.matrix_user_id == "@honeybadge-gateway:hiclaw.example.com"
+        assert config.matrix_user_password == "secret"
 
     def test_partial_env_override(self, monkeypatch):
         """Partial env vars should override only those fields."""
@@ -159,3 +172,15 @@ class TestConfigFromEnv:
         # Other fields remain at defaults
         assert config.host == "0.0.0.0"
         assert config.nebula_host == "localhost"
+
+    def test_from_env_matrix_defaults_to_hiclaw_tuwunel(self, monkeypatch):
+        """When no Matrix env vars are set, from_env() should default to HiClaw Tuwunel."""
+        # Ensure no Matrix env vars are set
+        monkeypatch.delenv("MATRIX_HOMESERVER_URL", raising=False)
+        monkeypatch.delenv("MATRIX_USER_ID", raising=False)
+        monkeypatch.delenv("MATRIX_USER_PASSWORD", raising=False)
+
+        config = ServerConfig.from_env()
+        assert config.matrix_homeserver_url == "http://localhost:6167"
+        assert config.matrix_user_id == "@honeybadge-gateway:matrix-local.hiclaw.io"
+        assert config.matrix_user_password == ""

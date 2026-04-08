@@ -1,13 +1,11 @@
 """WebSocket handler for HoneyBadge query pipeline."""
 
 import json
-from typing import Any
 
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from honeybadge.server.auth import decode_token
-from honeybadge.server.orchestrator import PipelineCallbacks, QueryResult
+from honeybadge.core.trace import generate_trace_id
 from honeybadge.protocols.messages import (
     ErrorCode,
     ErrorMessage,
@@ -15,13 +13,9 @@ from honeybadge.protocols.messages import (
     HeartbeatAckMessage,
     ProgressMessage,
     ProgressPayload,
-    ResponseMessage,
-    ResponsePayload,
-    StreamMessage,
-    StreamPayload,
-    StreamPhase,
     serialize_message,
 )
+from honeybadge.server.auth import decode_token
 
 logger = structlog.get_logger()
 
@@ -81,66 +75,74 @@ async def _handle_query(websocket: WebSocket, data: dict, user_payload: dict) ->
     question = data.get("payload", {}).get("question", "")
     session_id = data.get("payload", {}).get("session_id", "")
 
-    if not question:
-        await _send_error(websocket, ErrorCode.VALIDATION_FAILED, "Empty question")
+    # ---- Lightweight Input Filtering ----
+    # Full L1-L3 validation happens in Worker after nGQL generation.
+    # Gateway only does basic safety checks on the raw question.
+
+    # Check: empty question
+    if not question.strip():
+        await _send_error(websocket, ErrorCode.VALIDATION_FAILED, "Empty question", "")
         return
 
-    orchestrator = websocket.app.state.orchestrator
-    if orchestrator is None:
-        await _send_error(websocket, ErrorCode.SERVICE_UNAVAILABLE, "Orchestrator not available")
+    # Check: write operations attempted at gateway level
+    write_keywords = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE"]
+    question_upper = question.upper()
+    for kw in write_keywords:
+        if kw in question_upper:
+            await _send_error(websocket, ErrorCode.VALIDATION_FAILED, f"Write operations not allowed: {kw}", "")
+            return
+
+    matrix_client = websocket.app.state.matrix_client
+    room_manager = websocket.app.state.room_manager
+
+    if matrix_client is None:
+        await _send_error(websocket, ErrorCode.SERVICE_UNAVAILABLE, "Matrix client not initialized", "")
         return
 
-    user_context = {
-        "user_id": user_payload["sub"],
-        "username": user_payload.get("username"),
-        "org_ids": [user_payload.get("org_id")] if user_payload.get("org_id") else [],
-        "data_scope": "ALL",
-    }
+    # Register WebSocket session for response routing
+    websocket.app.state.active_ws_sessions[session_id] = websocket
+    room_manager.register_trace("", session_id)  # temporary mapping until trace_id assigned
 
-    async def on_progress(step_number: int, total_steps: int, step: str, detail=None) -> None:
-        msg = ProgressMessage(payload=ProgressPayload(step=step, step_number=step_number, total_steps=total_steps, detail=detail), trace_id="")
-        await websocket.send_json(serialize_message(msg))
+    trace_id = generate_trace_id()
+    room_manager.register_trace(trace_id, session_id)
 
-    async def on_stream(content: str, phase: str, done: bool) -> None:
-        msg = StreamMessage(payload=StreamPayload(content=content, phase=StreamPhase(phase), done=done), trace_id="")
-        await websocket.send_json(serialize_message(msg))
+    # Forward to Matrix → Manager → Worker (L1-L3 validation happens in Worker)
+    await matrix_client.send_query(
+        question=question,
+        trace_id=trace_id,
+        user_id=user_payload["sub"],
+        org_id=user_payload.get("org_id", ""),
+        roles=user_payload.get("roles", []),
+        session_id=session_id,
+    )
 
-    callbacks = PipelineCallbacks(on_progress=on_progress, on_stream=on_stream)
+    # Send progress: query forwarded to Manager
+    progress_msg = ProgressMessage(
+        payload=ProgressPayload(
+            step="Query forwarded to Manager",
+            step_number=1,
+            total_steps=3,
+            detail=f"trace_id={trace_id}",
+        ),
+        trace_id=trace_id,
+    )
+    await websocket.send_json(serialize_message(progress_msg))
 
-    result = await orchestrator.execute_query(question=question, session_id=session_id, user_context=user_context, callbacks=callbacks)
-
-    if result.error:
-        await _send_error(websocket, ErrorCode.EXECUTION_ERROR, result.error, result.trace_id)
-    else:
-        response = ResponseMessage(
-            payload=ResponsePayload(
-                summary=result.summary, raw_data=result.raw_data, columns=result.columns,
-                cypher=result.cypher, trace_id=result.trace_id,
-                execution_time_ms=result.execution_time_ms, row_count=result.row_count,
-            ),
-        )
-        await websocket.send_json(serialize_message(response))
-
-    # Save messages to PostgreSQL
+    # Save user message to PostgreSQL (optimistic)
     pg = websocket.app.state.pg
     if pg and hasattr(pg, '_pool') and pg._pool:
         try:
             async with pg._pool.acquire() as conn:
                 await conn.execute(
-                    """INSERT INTO honeybadge_audit.chat_messages (session_id, role, content, message_type, metadata) VALUES ($1, 'user', $2, 'text', NULL)""",
+                    """INSERT INTO chat_sessions (session_id, user_id, message_count, last_trace_id) VALUES ($1, $2, 1, $3) ON CONFLICT (session_id) DO UPDATE SET message_count = chat_sessions.message_count + 1, updated_at = NOW(), last_trace_id = $3""",
+                    session_id, user_payload["sub"], trace_id,
+                )
+                await conn.execute(
+                    """INSERT INTO chat_messages (session_id, role, content, message_type, metadata) VALUES ($1, 'user', $2, 'text', NULL)""",
                     session_id, question,
                 )
-                metadata = json.dumps({"trace_id": result.trace_id, "cypher": result.cypher, "raw_data": result.raw_data, "columns": result.columns, "execution_time_ms": result.execution_time_ms}, ensure_ascii=False, default=str)
-                await conn.execute(
-                    """INSERT INTO honeybadge_audit.chat_messages (session_id, role, content, message_type, metadata) VALUES ($1, 'assistant', $2, $3, $4::jsonb)""",
-                    session_id, result.summary, "query_result" if not result.error else "error", metadata,
-                )
-                await conn.execute(
-                    """UPDATE honeybadge_audit.chat_sessions SET message_count = message_count + 2 WHERE session_id = $1""",
-                    session_id,
-                )
         except Exception as e:
-            logger.error("save_messages_failed", error=str(e))
+            logger.error("save_user_message_failed", error=str(e))
 
 
 async def _send_error(websocket: WebSocket, code: ErrorCode, message: str, trace_id: str = "") -> None:

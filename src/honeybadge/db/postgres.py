@@ -83,11 +83,12 @@ class PostgreSQLClient:
             logger.info("postgres_disconnected")
 
     async def init_schema(self) -> None:
-        """Initialize audit log schema. Creates tables if they don't exist."""
+        """Initialize audit log and chat session schema."""
         if not self._pool:
             raise PostgreSQLError("Not connected to PostgreSQL")
 
         async with self._pool.acquire() as conn:
+            # audit_logs table (existing)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS audit_logs (
                     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -105,18 +106,41 @@ class PostgreSQLClient:
                 )
             """)
 
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_audit_trace_id ON audit_logs(trace_id)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs(user_id)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_audit_session_id ON audit_logs(session_id)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at DESC)"
-            )
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_trace_id ON audit_logs(trace_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs(user_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_session_id ON audit_logs(session_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at DESC)")
+
+            # chat_sessions table (new)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    session_id      VARCHAR(64) PRIMARY KEY,
+                    user_id         VARCHAR(64) NOT NULL,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    message_count   INT NOT NULL DEFAULT 0,
+                    last_trace_id   VARCHAR(64)
+                )
+            """)
+
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_session_user_id ON chat_sessions(user_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_session_created_at ON chat_sessions(created_at DESC)")
+
+            # chat_messages table (new)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    session_id      VARCHAR(64) NOT NULL REFERENCES chat_sessions(session_id),
+                    role            VARCHAR(16) NOT NULL,  -- 'user' or 'assistant'
+                    content         TEXT NOT NULL,
+                    message_type    VARCHAR(32) NOT NULL,  -- 'text', 'query_result', 'error'
+                    metadata        JSONB,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON chat_messages(session_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON chat_messages(created_at)")
 
         logger.info("postgres_schema_initialized")
 

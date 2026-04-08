@@ -77,6 +77,51 @@ def app(config):
     ))
     application.state.orchestrator = mock_orchestrator
 
+    # Mock gateway components (normally set in lifespan, but TestClient skips it)
+    # The on_result/on_error callbacks live on application.state so the mock can call them
+    from honeybadge.gateway.matrix_client import MatrixMessage
+    from honeybadge.protocols.messages import ResponseMessage, ResponsePayload, serialize_message
+
+    async def mock_on_result(msg: MatrixMessage):
+        session_id = application.state.room_manager.get_session_id_by_trace(msg.trace_id)
+        if session_id:
+            ws = application.state.active_ws_sessions.get(session_id)
+            if ws:
+                response = ResponseMessage(
+                    payload=ResponsePayload(
+                        summary=msg.summary or "找到5个活跃供应商",
+                        raw_data=msg.data.get("rows", []) if msg.data else [],
+                        columns=msg.data.get("columns", []) if msg.data else [],
+                        cypher="",
+                        trace_id=msg.trace_id or "TRC-20260407-120000-abcd1234",
+                        execution_time_ms=0,
+                        row_count=2,
+                    ),
+                )
+                await ws.send_json(serialize_message(response))
+
+    async def mock_send_query(question, trace_id, user_id, org_id, roles, session_id):
+        # Simulate Matrix client sending query and immediately triggering the result callback
+        import asyncio
+        asyncio.get_event_loop().create_task(mock_on_result(MatrixMessage(
+            msgtype="result",
+            trace_id=trace_id,
+            summary="找到5个活跃供应商",
+            data={"rows": [
+                {"supplier_name": "大连黄海贸易有限公司", "status": "ACTIVE"},
+                {"supplier_name": "成都孙超贸易有限公司", "status": "ACTIVE"},
+            ], "columns": ["supplier_name", "status"]},
+        )))
+
+    application.state.matrix_client = AsyncMock()
+    application.state.matrix_client.send_query = mock_send_query
+    application.state.matrix_client.on_result = mock_on_result
+    application.state.room_manager = MagicMock()
+    application.state.room_manager.register_trace = MagicMock()
+    application.state.room_manager.get_session_id_by_trace = MagicMock(return_value="test-session")
+    application.state.schema_cache = AsyncMock()
+    application.state.active_ws_sessions = {}
+
     return application
 
 
