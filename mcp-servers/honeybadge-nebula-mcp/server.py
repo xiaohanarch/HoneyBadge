@@ -40,10 +40,31 @@ mcp = FastMCP(
 )
 
 # ---------------------------------------------------------------------------
-# Global schema cache
+# Schema cache — L1 in-process dict, L2 Redis (shared across replicas)
 # ---------------------------------------------------------------------------
 
 _schema_cache: dict[str, str] = {}
+_SCHEMA_REDIS_PREFIX = "honeybadge:schema:"
+_SCHEMA_TTL = int(os.environ.get("SCHEMA_CACHE_TTL", "3600"))  # seconds
+
+_redis_client = None  # redis.asyncio.Redis, lazily initialized
+
+
+def _get_redis():
+    """Return a shared redis.asyncio.Redis client, or None if Redis is unavailable."""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            import redis.asyncio as aioredis
+            _redis_client = aioredis.Redis(
+                host=os.environ.get("REDIS_HOST", "localhost"),
+                port=int(os.environ.get("REDIS_PORT", "6379")),
+                password=os.environ.get("REDIS_PASSWORD") or None,
+                decode_responses=True,
+            )
+        except Exception:
+            pass
+    return _redis_client
 
 # ---------------------------------------------------------------------------
 # Write-operation keywords (must be rejected before execution)
@@ -110,12 +131,24 @@ async def get_schema_impl(
 ) -> str:
     """Load NebulaGraph schema (SHOW TAGS / DESCRIBE TAG / SHOW EDGES / DESCRIBE EDGE).
 
-    Results are cached in the global ``_schema_cache`` keyed by space name.
+    Two-level cache: L1 in-process dict, L2 Redis (shared across replicas).
     """
     target_space = space or _default_space()
 
+    # L1: in-process memory
     if target_space in _schema_cache:
         return _schema_cache[target_space]
+
+    # L2: Redis
+    redis = _get_redis()
+    if redis is not None:
+        try:
+            cached = await redis.get(f"{_SCHEMA_REDIS_PREFIX}{target_space}")
+            if cached:
+                _schema_cache[target_space] = cached
+                return cached
+        except Exception as exc:
+            logger.warning("schema_redis_read_failed", error=str(exc))
 
     lines: list[str] = []
     lines.append(f"# Schema for space: {target_space}\n")
@@ -160,7 +193,17 @@ async def get_schema_impl(
                 lines.append(f"  - {prop_name}: {prop_type}")
 
     schema_text = "\n".join(lines)
+
+    # Store in L1
     _schema_cache[target_space] = schema_text
+
+    # Store in L2 (Redis), best-effort
+    if redis is not None:
+        try:
+            await redis.setex(f"{_SCHEMA_REDIS_PREFIX}{target_space}", _SCHEMA_TTL, schema_text)
+        except Exception as exc:
+            logger.warning("schema_redis_write_failed", error=str(exc))
+
     return schema_text
 
 
@@ -367,7 +410,7 @@ async def generate_query(question: str, schema_info: str = "") -> dict:
 
 
 @mcp.tool()
-async def validate_and_execute(ngql: str, space: str = "") -> dict:
+async def validate_and_execute(ngql: str, space: str = "", user_context: dict | None = None) -> dict:
     """Validate (L1-L3) and execute an nGQL query.
 
     Runs the Anti-Hallucination Framework gates:
@@ -381,9 +424,10 @@ async def validate_and_execute(ngql: str, space: str = "") -> dict:
     Args:
         ngql: nGQL statement to validate and execute.
         space: NebulaGraph space name. Uses NEBULA_SPACE env var if empty.
+        user_context: Optional dict with user_id, org_id, roles for L3 permission check.
     """
     return await validate_and_execute_impl(
-        _get_nebula(), _get_validator(), ngql, space=space
+        _get_nebula(), _get_validator(), ngql, space=space, user_context=user_context
     )
 
 

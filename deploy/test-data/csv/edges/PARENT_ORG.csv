@@ -1,0 +1,10 @@
+src_vid,dst_vid,rank,properties
+ORG:ORG00002,ORG:ORG00001,0,"{""org_id"": ""1001"", ""dept_id"": ""1001""}"
+ORG:ORG00003,ORG:ORG00001,0,"{""org_id"": ""1002"", ""dept_id"": ""1002""}"
+ORG:ORG00004,ORG:ORG00001,0,"{""org_id"": ""1003"", ""dept_id"": ""1003""}"
+ORG:ORG00005,ORG:ORG00001,0,"{""org_id"": ""1004"", ""dept_id"": ""1004""}"
+ORG:ORG00006,ORG:ORG00001,0,"{""org_id"": ""1005"", ""dept_id"": ""1005""}"
+ORG:ORG00007,ORG:ORG00001,0,"{""org_id"": ""1006"", ""dept_id"": ""1006""}"
+ORG:ORG00008,ORG:ORG00001,0,"{""org_id"": ""1007"", ""dept_id"": ""1007""}"
+ORG:ORG00009,ORG:ORG00001,0,"{""org_id"": ""1008"", ""dept_id"": ""1008""}"
+ORG:ORG00010,ORG:ORG00001,0,"{""org_id"": ""1009"", ""dept_id"": ""1009""}"

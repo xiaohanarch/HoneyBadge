@@ -50,37 +50,53 @@ def test_matrix_message_parse_error():
 
 @pytest.mark.asyncio
 async def test_matrix_client_bootstrap_fetches_schema():
+    import sys
     from honeybadge.gateway.schema_cache import SchemaCache
     from honeybadge.protocols.validator import SchemaTag, SchemaEdge
 
-    client = MatrixClient(
-        homeserver_url="http://localhost:8008",
-        user_id="@honeybadge-gateway:matrix.local",
-        password="secret",
-        room_manager=MagicMock(),
-    )
+    # bootstrap_schema does `from nio import RoomCreateResponse` at runtime,
+    # so we inject a minimal mock for nio that includes RoomCreateResponse.
+    class MockRoomCreateResponse:
+        def __init__(self, room_id: str):
+            self.room_id = room_id
 
-    # Directly set _client to a mock to bypass the nio import
-    mock_client = MagicMock()
-    client._client = mock_client
-    mock_client.room_create = AsyncMock(return_value="!test-room:matrix.local")
-    mock_client.room_send = AsyncMock(return_value=None)
+    mock_nio = MagicMock()
+    mock_nio.RoomCreateResponse = MockRoomCreateResponse
+    sys.modules["nio"] = mock_nio
 
-    # Mock the schema response from Worker
-    async def mock_send_and_wait_for_response(trace_id: str, timeout: float = 30.0):
-        return MatrixMessage(
-            msgtype="schema_response",
-            trace_id="__bootstrap__",
-            tags=[SchemaTag(name="Supplier", properties=[])],
-            edges=[SchemaEdge(name="PLACED_WITH", properties=[])],
+    try:
+        client = MatrixClient(
+            homeserver_url="http://localhost:8008",
+            user_id="@honeybadge-gateway:matrix.local",
+            password="secret",
+            room_manager=MagicMock(),
         )
 
-    client._send_and_wait_for_response = mock_send_and_wait_for_response
-    schema_cache = SchemaCache()
-    await client.bootstrap_schema(schema_cache)
+        # Directly set _client to a mock to bypass actual connection
+        mock_client = MagicMock()
+        client._client = mock_client
+        mock_client.room_create = AsyncMock(
+            return_value=MockRoomCreateResponse("!test-room:matrix.local")
+        )
+        mock_client.room_send = AsyncMock(return_value=None)
 
-    assert schema_cache.is_ready()
-    assert "SUPPLIER" in schema_cache.get_tags()
+        # Mock the schema response from Worker
+        async def mock_send_and_wait_for_response(trace_id: str, timeout: float = 30.0):
+            return MatrixMessage(
+                msgtype="schema_response",
+                trace_id="__bootstrap__",
+                tags=[SchemaTag(name="Supplier", properties=[])],
+                edges=[SchemaEdge(name="PLACED_WITH", properties=[])],
+            )
+
+        client._send_and_wait_for_response = mock_send_and_wait_for_response
+        schema_cache = SchemaCache()
+        await client.bootstrap_schema(schema_cache)
+
+        assert schema_cache.is_ready()
+        assert "SUPPLIER" in schema_cache.get_tags()
+    finally:
+        sys.modules.pop("nio", None)
 
 
 @pytest.mark.asyncio
@@ -106,15 +122,16 @@ async def test_matrix_client_auto_registers_when_user_not_exists():
             self.access_token = "auto-registered-token"
             self.device_id = "auto-device"
 
-    # Create a mock Client class that returns a mock instance with login configured
-    class MockClient:
-        def __init__(self, homeserver_url):
+    # Create a mock AsyncClient class that returns a mock instance with login configured
+    class MockAsyncClient:
+        def __init__(self, homeserver_url, user_id=None):
             self.homeserver_url = homeserver_url
+            self.user_id = user_id
             self.login = AsyncMock(return_value=MockRegisterResponse())
 
     mock_nio.RegisterResponse = MockRegisterResponse
     mock_nio.LoginResponse = MockLoginResponse
-    mock_nio.Client = MockClient
+    mock_nio.AsyncClient = MockAsyncClient
     mock_nio.RoomMessage = MagicMock
 
     # Install mock nio module

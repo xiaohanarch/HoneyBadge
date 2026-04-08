@@ -27,44 +27,44 @@ import sys
 # =============================================================================
 
 # Entity counts for data generation
-NUM_SUPPLIERS = 550
-NUM_CUSTOMERS = 480
-NUM_ITEMS = 5200
-NUM_ORGANIZATIONS = 120
-NUM_EMPLOYEES = 220
-NUM_WAREHOUSES = 12
-NUM_GL_ACCOUNTS = 200
-NUM_CURRENCIES = 15
-NUM_UOMS = 30
+NUM_SUPPLIERS = 100
+NUM_CUSTOMERS = 80
+NUM_ITEMS = 500
+NUM_ORGANIZATIONS = 10
+NUM_EMPLOYEES = 50
+NUM_WAREHOUSES = 5
+NUM_GL_ACCOUNTS = 30
+NUM_CURRENCIES = 8
+NUM_UOMS = 15
 
-# Transaction counts
-NUM_PURCHASE_REQUISITIONS = 15000
-NUM_PURCHASE_ORDERS = 52000
-NUM_RECEIPTS = 46000
-NUM_INVOICES = 49000
-NUM_PAYMENTS = 42000
-NUM_SALES_ORDERS = 31000
-NUM_SHIPMENTS = 29000
-NUM_AR_INVOICES = 26000
-NUM_AR_RECEIPTS = 21000
-NUM_GL_JOURNAL_ENTRIES = 80000
-NUM_XLA_EVENTS = 100000
-NUM_APPROVAL_RECORDS = 90000
-NUM_CONTRACTS = 3000
-NUM_BOMS = 800
+# Transaction counts (reduced for testing - full ~500K)
+NUM_PURCHASE_REQUISITIONS = 1000
+NUM_PURCHASE_ORDERS = 3000
+NUM_RECEIPTS = 2500
+NUM_INVOICES = 3000
+NUM_PAYMENTS = 2000
+NUM_SALES_ORDERS = 2000
+NUM_SHIPMENTS = 1800
+NUM_AR_INVOICES = 1500
+NUM_AR_RECEIPTS = 1000
+NUM_GL_JOURNAL_ENTRIES = 5000
+NUM_XLA_EVENTS = 6000
+NUM_APPROVAL_RECORDS = 5000
+NUM_CONTRACTS = 200
+NUM_BOMS = 50
 
-# Anomaly rates
+# Anomaly rates (realistic noisy data)
 THREE_WAY_MATCH_FAILURE_RATE = 0.05  # 5%
-TEMPORAL_VIOLATION_RATE = 0.02  # 2%
-DUPLICATE_INVOICE_RATE = 0.01  # 1%
-EXPIRED_QUALIFICATION_RATE = 0.08  # 8% of suppliers
+TEMPORAL_VIOLATION_RATE = 0.03  # 3%
+DUPLICATE_INVOICE_RATE = 0.015  # 1.5%
+EXPIRED_QUALIFICATION_RATE = 0.10  # 10% of suppliers
 
 # Time range for data (24 months)
 DATA_START_DATE = datetime(2024, 4, 1)
 DATA_END_DATE = datetime(2026, 4, 1)
 
 # Output configuration
-BATCH_SIZE = 10000  # Records per CSV file
+BATCH_SIZE = 50  # Records per CSV file
 
 # =============================================================================
 # VID Prefix Constants (aligned with constants.py)
@@ -297,7 +297,7 @@ class CSVWriter:
         self.batch_size = batch_size
         self.writers: dict[str, csv.writer] = {}
         self.files: dict[str, Path] = {}
-        self buffers: dict[str, list[list]] = {}
+        self.buffers: dict[str, list] = {}
 
     def _ensure_dir(self, subdir: str):
         """Ensure output subdirectory exists."""
@@ -317,7 +317,7 @@ class CSVWriter:
     def _write_record(self, category: str, name: str, record: list):
         """Write a record to the appropriate CSV file."""
         key = f"{category}/{name}"
-        if key not in self.writers:
+        if key not in self.buffers:
             dir_path = self._ensure_dir(category)
             file_path = dir_path / f"{name}.csv"
             self.files[key] = file_path
@@ -401,6 +401,10 @@ class TestDataGenerator:
         self._pr_line_counter = 0
         self._journal_line_counter = 0
 
+    def close(self):
+        """Close the writer and flush all buffers."""
+        self.writer.close()
+
     def generate_all(self):
         """Generate all test data."""
         print("=" * 60)
@@ -418,17 +422,17 @@ class TestDataGenerator:
         self._generate_currencies()
         self._generate_uoms()
 
-        print("[2/15] Generating Suppliers...")
-        self._generate_suppliers()
-
-        print("[3/15] Generating Customers...")
-        self._generate_customers()
-
-        print("[4/15] Generating Items and BOMs...")
+        print("[2/15] Generating Items and BOMs...")
         self._generate_items()
         self._generate_boms()
 
-        print("[4/15] Generating Contracts...")
+        print("[3/15] Generating Suppliers...")
+        self._generate_suppliers()
+
+        print("[4/15] Generating Customers...")
+        self._generate_customers()
+
+        print("[5/15] Generating Contracts...")
         self._generate_contracts()
 
         print("[5/15] Generating Purchase Requisitions...")
@@ -1973,19 +1977,19 @@ class TestDataGenerator:
 
                 line_vid = vid(VID_PREFIX_JOURNAL_LINE, f"{journal_number}-{line_number}")
                 self.writer.write_vertex("GLJournalLine", line_vid, line_props)
-                journal_lines.append((line_vid, gl_account))
+                journal_lines.append((line_vid, gl_account, credit))
 
             # Ensure debits == credits for journal entry
             imbalance = total_debit - total_credit
             if imbalance != 0 and journal_lines:
                 # Adjust the last line to balance
-                last_line_vid, last_gl_account = journal_lines[-1]
+                last_line_vid, last_gl_account, last_credit = journal_lines[-1]
                 if imbalance > 0:
-                    # Reduce debit or increase credit
-                    self.writer.write_vertex(
-                        "GLJournalLine", last_line_vid,
-                        {"credit_amount": round(journal_lines[-1][1], 2) + imbalance}  # Simplified
-                    )
+                    # Increase credit to balance
+                    new_credit = round(last_credit + imbalance, 2)
+                    line_props["credit_amount"] = new_credit
+                    line_props["debit_amount"] = 0
+                    self.writer.write_vertex("GLJournalLine", last_line_vid, line_props)
 
             props = {
                 "journal_number": journal_number,
@@ -2013,7 +2017,7 @@ class TestDataGenerator:
             self.registry.gl_journal_entries.append(jle_vid)
 
             # Write edges
-            for line_vid, gl_account in journal_lines:
+            for line_vid, gl_account, _credit in journal_lines:
                 self.writer.write_edge(
                     "HAS_JOURNAL_LINE",
                     jle_vid,
@@ -2279,6 +2283,7 @@ Examples:
     # Generate data
     generator = TestDataGenerator(args.output_dir, seed=args.seed)
     generator.generate_all()
+    generator.close()  # Flush remaining buffered records
 
     print(f"\nGeneration complete. Files written to: {args.output_dir}")
     return 0

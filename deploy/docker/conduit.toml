@@ -1,0 +1,10 @@
+[global]
+server_name = "matrix.local"
+allow_registration = true
+
+[database]
+backend = "rocksdb"
+path = "/data/conduit.db"
+
+[address]
+port = 8008

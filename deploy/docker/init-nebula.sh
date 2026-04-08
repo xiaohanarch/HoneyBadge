@@ -185,7 +185,7 @@ CREATE EDGE TYPE IF NOT EXISTS UNDER_CONTRACT(org_id INT64, dept_id INT64);
 EOF
 
 echo "Creating Indexes..."
-docker exec honeybadge-nebula-graphd nebula-console -addr localhost -port 9669 -u root -p nebura << 'EOF'
+docker exec honeybadge-nebula-graphd nebula-console -addr localhost -port 9669 -u root -p nebula << 'EOF'
 USE honeybadge;
 
 CREATE TAG INDEX idx_supplier_number ON Supplier(supplier_number(64));

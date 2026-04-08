@@ -10,6 +10,9 @@ from honeybadge.gateway.schema_cache import SchemaCache
 
 logger = structlog.get_logger()
 
+_BACKOFF_BASE = 5.0    # seconds before first retry
+_BACKOFF_MAX = 300.0   # cap at 5 minutes
+
 
 # Matrix event callback type
 MatrixEventCallback = Callable[["MatrixMessage"], Awaitable[None]]
@@ -110,13 +113,13 @@ class MatrixClient:
     async def connect(self) -> None:
         """Connect to Matrix homeserver and log in."""
         try:
-            from nio import Client, LoginResponse
+            from nio import AsyncClient, LoginResponse
         except ImportError:
             logger.warning("matrix_nio_not_installed", note="Using mock client for development")
             self._client = None
             return
 
-        self._client = Client(self.homeserver_url)
+        self._client = AsyncClient(self.homeserver_url, self.user_id)
         resp = await self._client.login(self.password)
         if not isinstance(resp, LoginResponse):
             raise RuntimeError(f"Matrix login failed: {resp}")
@@ -126,21 +129,26 @@ class MatrixClient:
         self._listening_task = asyncio.create_task(self._start_listening())
 
     async def _start_listening(self) -> None:
-        """Start the Matrix event listener loop."""
+        """Start the Matrix event listener loop with exponential backoff on errors."""
         if self._client is None:
             return
         from nio import RoomMessage
         self._client.add_event_callback(self._on_matrix_event, RoomMessage)
         self._running = True
+        backoff = _BACKOFF_BASE
         while self._running:
             try:
                 await self._client.sync_forever(timeout=30000)
+                backoff = _BACKOFF_BASE  # clean exit — reset backoff
             except Exception as exc:
-                logger.error("matrix_sync_error", error=str(exc))
-                await asyncio.sleep(5)
+                if not self._running:
+                    break
+                logger.error("matrix_sync_error", error=str(exc), retry_in_secs=backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, _BACKOFF_MAX)
 
-    async def _on_matrix_event(self, room_id: str, event: Any) -> None:
-        """Handle incoming Matrix events."""
+    async def _on_matrix_event(self, room: Any, event: Any) -> None:
+        """Handle incoming Matrix events. room is a nio MatrixRoom object."""
         if self._client is None:
             return
 
@@ -159,6 +167,7 @@ class MatrixClient:
 
             # Dispatch to callbacks
             if msg.msgtype == "result" and self.on_result:
+                room_id = room.room_id
                 session_id = self.room_manager.get_session_id(room_id) or self.room_manager.get_session_id_by_trace(msg.trace_id)
                 if session_id:
                     self.room_manager.register_trace(msg.trace_id, session_id)
@@ -193,13 +202,21 @@ class MatrixClient:
             logger.warning("matrix_client_mock_mode", note="Cannot send real Matrix message")
             return
 
+        from nio import RoomCreateResponse
+
         room_id = self.room_manager.get_room_id(session_id)
         if not room_id:
-            manager_user = "@hiclaw-manager:" + self.homeserver_url.split("//")[1]
-            room_id = await self._client.room_create(
-                invite=manager_user,
+            # manager user is on the same homeserver as us
+            server_name = self.homeserver_url.split("//")[-1].split(":")[0]
+            manager_user = f"@honeybadge-manager:{server_name}"
+            resp = await self._client.room_create(
+                invite=[manager_user],
                 is_direct=True,
             )
+            if not isinstance(resp, RoomCreateResponse):
+                logger.error("matrix_room_create_failed", error=str(resp))
+                return
+            room_id = resp.room_id
             self.room_manager.register(session_id, room_id, trace_id)
             logger.info("matrix_room_created", session_id=session_id, room_id=room_id)
 
@@ -211,7 +228,13 @@ class MatrixClient:
             org_id=org_id,
             roles=roles,
         )
-        await self._client.room_send(room_id, "m.room.message", msg.to_dict())
+        # m.room.message requires a msgtype field; embed our structured payload
+        # alongside it so both Matrix-standard and HoneyBadge parsers can read it.
+        content = msg.to_dict()
+        content["session_id"] = session_id
+        content["msgtype"] = "m.text"
+        content["body"] = f"[HoneyBadge] {msg.msgtype} trace={trace_id}"
+        await self._client.room_send(room_id, "m.room.message", content)
         logger.info("matrix_query_sent", trace_id=trace_id, room_id=room_id)
 
     async def _send_and_wait_for_response(self, trace_id: str, timeout: float = 30.0) -> MatrixMessage:
@@ -234,11 +257,21 @@ class MatrixClient:
             return
 
         try:
-            manager_user = "@hiclaw-manager:" + self.homeserver_url.split("//")[1]
-            room_id = await self._client.room_create(invite=manager_user, is_direct=True)
+            from nio import RoomCreateResponse
+            server_name = self.homeserver_url.split("//")[-1].split(":")[0]
+            manager_user = f"@honeybadge-manager:{server_name}"
+            resp = await self._client.room_create(invite=[manager_user], is_direct=True)
+            if not isinstance(resp, RoomCreateResponse):
+                logger.error("matrix_schema_room_create_failed", error=str(resp))
+                schema_cache.load_schema([], [])
+                return
+            room_id = resp.room_id
 
             bootstrap_msg = MatrixMessage(msgtype="get_schema", trace_id="__bootstrap__")
-            await self._client.room_send(room_id, "m.room.message", bootstrap_msg.to_dict())
+            content = bootstrap_msg.to_dict()
+            content["msgtype"] = "m.text"
+            content["body"] = "[HoneyBadge] get_schema bootstrap"
+            await self._client.room_send(room_id, "m.room.message", content)
 
             logger.info("matrix_schema_request_sent", room_id=room_id)
             response = await self._send_and_wait_for_response("__bootstrap__", timeout=30.0)
