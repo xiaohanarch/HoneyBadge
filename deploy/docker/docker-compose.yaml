@@ -8,6 +8,12 @@
 #   - redis: Redis for session/cache (port 6379)
 #   - postgres: PostgreSQL for audit log (port 5432)
 #   - matrix: Matrix homeserver for HiClaw (port 8008)
+#   - higress: AI Gateway with SSO/rate-limiting (port 80/443) [NEW]
+#
+# Architecture:
+#   Frontend → Higress (port 80) → HoneyBadge Server (port 8090)
+#                                    ↓
+#                              HiClaw Manager ← Matrix ← Workers
 #
 # Usage:
 #   docker-compose up -d
@@ -338,6 +344,38 @@ services:
       - honeybadge-net
 
   # =============================================================================
+  # Higress Gateway (AI Gateway - SSO/OAuth2, rate limiting, auth)
+  # =============================================================================
+
+  higress:
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/server:latest
+    container_name: honeybadge-higress
+    hostname: higress
+    restart: unless-stopped
+    ports:
+      - "80:80"      # HTTP (for WebSocket upgrade)
+      - "443:443"    # HTTPS (future)
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./higress.conf:/etc/higress/higress.conf:ro
+      - ./gateway/config/routes.yaml:/etc/higress/routes/routes.yaml:ro
+      - ./gateway/config/auth.yaml:/etc/higress/plugins/auth.yaml:ro
+      - ./gateway/config/cors.yaml:/etc/higress/plugins/cors.yaml:ro
+      - ./gateway/config/rate-limit.yaml:/etc/higress/plugins/rate-limit.yaml:ro
+      - ./gateway/config/header-transform.yaml:/etc/higress/plugins/header-transform.yaml:ro
+      - higress_data:/etc/higress/data
+    networks:
+      honeybadge-net:
+        aliases:
+          - higress
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # =============================================================================
   # HoneyBadge Backend Server
   # =============================================================================
 
@@ -370,6 +408,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
       - ORCHESTRATOR_TYPE=direct
       - SERVER_PORT=8090
+      # Matrix gateway bot credentials (connects to HiClaw Manager)
+      - MATRIX_HOMESERVER_URL=http://matrix:8008
+      - MATRIX_USER_ID=@honeybadge-gateway:matrix.local
+      - MATRIX_USER_PASSWORD=${MATRIX_GATEWAY_PASSWORD:-gateway-dev-pass}
       - TZ=Asia/Shanghai
     depends_on:
       nebula-graphd:
@@ -377,6 +419,8 @@ services:
       redis:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      matrix-conduit:
         condition: service_healthy
     networks:
       - honeybadge-net
@@ -386,6 +430,94 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # =============================================================================
+  # HiClaw Manager — routes queries from gateway to workers
+  # =============================================================================
+
+  hiclaw-manager:
+    build:
+      context: ../..
+      dockerfile: deploy/hiclaw/Dockerfile.manager
+    container_name: honeybadge-hiclaw-manager
+    hostname: hiclaw-manager
+    restart: unless-stopped
+    environment:
+      - MATRIX_HOMESERVER_URL=http://matrix:8008
+      - MATRIX_USER_ID=@honeybadge-manager:matrix.local
+      - MATRIX_USER_PASSWORD=${MATRIX_MANAGER_PASSWORD:-manager-dev-pass}
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      - NEBULA_MCP_URL=http://honeybadge-nebula-mcp:8000
+      - AUDIT_MCP_URL=http://honeybadge-audit-mcp:8000
+      - CACHE_MCP_URL=http://honeybadge-cache-mcp:8000
+      - TZ=Asia/Shanghai
+    depends_on:
+      matrix-conduit:
+        condition: service_healthy
+      honeybadge-nebula-mcp:
+        condition: service_started
+      honeybadge-audit-mcp:
+        condition: service_started
+      honeybadge-cache-mcp:
+        condition: service_started
+    networks:
+      - honeybadge-net
+
+  # =============================================================================
+  # HiClaw Workers — execute queries via MCP tools
+  # =============================================================================
+
+  hiclaw-graph-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/hiclaw/Dockerfile.worker
+    container_name: honeybadge-graph-worker
+    hostname: hiclaw-graph-worker
+    restart: unless-stopped
+    environment:
+      - WORKER_TYPE=graph-worker
+      - MATRIX_HOMESERVER_URL=http://matrix:8008
+      - MATRIX_USER_ID=@graph-worker:matrix.local
+      - MATRIX_USER_PASSWORD=${MATRIX_GRAPH_WORKER_PASSWORD:-graph-worker-dev-pass}
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      - NEBULA_MCP_URL=http://honeybadge-nebula-mcp:8000
+      - AUDIT_MCP_URL=http://honeybadge-audit-mcp:8000
+      - CACHE_MCP_URL=http://honeybadge-cache-mcp:8000
+      - TZ=Asia/Shanghai
+    depends_on:
+      hiclaw-manager:
+        condition: service_started
+    networks:
+      - honeybadge-net
+
+  hiclaw-analytics-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/hiclaw/Dockerfile.worker
+    container_name: honeybadge-analytics-worker
+    hostname: hiclaw-analytics-worker
+    restart: unless-stopped
+    environment:
+      - WORKER_TYPE=analytics-worker
+      - MATRIX_HOMESERVER_URL=http://matrix:8008
+      - MATRIX_USER_ID=@analytics-worker:matrix.local
+      - MATRIX_USER_PASSWORD=${MATRIX_ANALYTICS_WORKER_PASSWORD:-analytics-worker-dev-pass}
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      - NEBULA_MCP_URL=http://honeybadge-nebula-mcp:8000
+      - AUDIT_MCP_URL=http://honeybadge-audit-mcp:8000
+      - CACHE_MCP_URL=http://honeybadge-cache-mcp:8000
+      - TZ=Asia/Shanghai
+    depends_on:
+      hiclaw-manager:
+        condition: service_started
+    networks:
+      - honeybadge-net
 
 # =============================================================================
 # Networks & Volumes
@@ -430,3 +562,7 @@ volumes:
     driver: local
   milvus_data:
     name: honeybadge-milvus-data
+
+  # Higress
+  higress_data:
+    name: honeybadge-higress-data

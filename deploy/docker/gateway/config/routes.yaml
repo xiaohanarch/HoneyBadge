@@ -1,0 +1,104 @@
+# gateway/config/routes.yaml
+# Higress Route Configuration for HoneyBadge (Docker Compose)
+#
+# Traffic flow: Frontend → Higress → HoneyBadge Server
+#
+# Usage: Place in higress ingress.config.global working directory
+# For standalone mode, use native Kubernetes Ingress format
+
+# =============================================================================
+# Ingress: WebSocket + REST API Routes
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: honeybadge-ingress
+  annotations:
+    # Higress-specific annotations for standalone mode
+    higress.io/destination: honeybadge-server:8090
+    # CORS configuration
+    nginx.ingress.kubernetes.io/cors-allow-origin: "http://localhost:3000,http://localhost:5173"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type, X-Request-Id"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    # WebSocket support
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-write-timeout: "3600"
+    # Rate limiting (basic)
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: honeybadge.local
+      http:
+        paths:
+          # WebSocket endpoint
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: honeybadge-server
+                port:
+                  number: 8090
+          # Auth endpoints (no auth required)
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: honeybadge-server
+                port:
+                  number: 8090
+          # Health check (no auth required)
+          - path: /api/health
+            pathType: Exact
+            backend:
+              service:
+                name: honeybadge-server
+                port:
+                  number: 8090
+          # Version endpoint (no auth required)
+          - path: /api/version
+            pathType: Exact
+            backend:
+              service:
+                name: honeybadge-server
+                port:
+                  number: 8090
+          # Sessions API
+          - path: /api/sessions
+            pathType: Prefix
+            backend:
+              service:
+                name: honeybadge-server
+                port:
+                  number: 8090
+          # Query API (admin only in production)
+          - path: /api/query
+            pathType: Prefix
+            backend:
+              service:
+                name: honeybadge-server
+                port:
+                  number: 8090
+          # Matrix client API
+          - path: /matrix
+            pathType: Prefix
+            backend:
+              service:
+                name: honeybadge-server
+                port:
+                  number: 8090
+          # Default: serve frontend or API
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: honeybadge-server
+                port:
+                  number: 8090
+
+---
+# Additional ingress rules can be added here for different hosts/paths
+# Each ingress resource should have unique name
