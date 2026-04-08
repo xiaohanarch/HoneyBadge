@@ -81,3 +81,58 @@ async def test_matrix_client_bootstrap_fetches_schema():
 
     assert schema_cache.is_ready()
     assert "SUPPLIER" in schema_cache.get_tags()
+
+
+@pytest.mark.asyncio
+async def test_matrix_client_auto_registers_when_user_not_exists():
+    """When login returns RegisterResponse (not LoginResponse), matrix-nio auto-registers the user.
+
+    Tuwunel (HiClaw Matrix) has allow_registration=true by default.
+    """
+    import sys
+    from unittest.mock import MagicMock, AsyncMock
+
+    # Create mock nio module
+    mock_nio = MagicMock()
+
+    # MockLoginResponse is the base class; MockRegisterResponse is a subclass
+    # so isinstance check for LoginResponse returns False for RegisterResponse
+    class MockLoginResponse:
+        pass
+
+    class MockRegisterResponse(MockLoginResponse):
+        def __init__(self):
+            self.user_id = "@honeybadge-gateway:matrix-local.hiclaw.io"
+            self.access_token = "auto-registered-token"
+            self.device_id = "auto-device"
+
+    # Create a mock Client class that returns a mock instance with login configured
+    class MockClient:
+        def __init__(self, homeserver_url):
+            self.homeserver_url = homeserver_url
+            self.login = AsyncMock(return_value=MockRegisterResponse())
+
+    mock_nio.RegisterResponse = MockRegisterResponse
+    mock_nio.LoginResponse = MockLoginResponse
+    mock_nio.Client = MockClient
+    mock_nio.RoomMessage = MagicMock
+
+    # Install mock nio module
+    sys.modules['nio'] = mock_nio
+
+    try:
+        client = MatrixClient(
+            homeserver_url="http://localhost:6167",
+            user_id="@honeybadge-gateway:matrix-local.hiclaw.io",
+            password="",
+            room_manager=MagicMock(),
+        )
+
+        await client.connect()
+
+        # Should have called login (and nio auto-registers with empty password)
+        client._client.login.assert_called_once_with("")
+    finally:
+        # Clean up - remove mock nio module
+        if 'nio' in sys.modules:
+            del sys.modules['nio']
