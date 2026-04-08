@@ -36,6 +36,12 @@ class MatrixMessage:
     # Schema response fields
     tags: list[Any] = field(default_factory=list)
     edges: list[Any] = field(default_factory=list)
+    # x-honeybadge result fields (CONTRACT-002)
+    ngql: str = ""
+    rows: list[dict[str, Any]] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+    row_count: int = 0
+    execution_time_ms: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for Matrix event content."""
@@ -80,6 +86,28 @@ class MatrixMessage:
             recoverable=data.get("recoverable", True),
             tags=data.get("tags", []),
             edges=data.get("edges", []),
+        )
+
+    @classmethod
+    def from_hiclaw_dict(cls, content: dict[str, Any]) -> "MatrixMessage":
+        """Parse from x-honeybadge Matrix event content (CONTRACT-001/002/003)."""
+        hb = content.get("x-honeybadge", {})
+        return cls(
+            msgtype=hb.get("type", "unknown"),
+            trace_id=hb.get("trace_id", ""),
+            question=hb.get("question", ""),
+            user_id=hb.get("user_id", ""),
+            org_id=hb.get("org_id", ""),
+            roles=hb.get("roles", []),
+            summary=hb.get("summary", ""),
+            ngql=hb.get("ngql", ""),
+            rows=hb.get("rows", []),
+            columns=hb.get("columns", []),
+            row_count=hb.get("row_count", 0),
+            execution_time_ms=hb.get("execution_time_ms", 0),
+            error_code=hb.get("error_code", ""),
+            error_message=hb.get("error_message", ""),
+            recoverable=hb.get("recoverable", True),
         )
 
 
