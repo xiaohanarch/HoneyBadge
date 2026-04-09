@@ -6,12 +6,16 @@
 #   2. Verify mcporter MCP tool call conventions (tool names, transport)
 #   3. Verify Worker sends x-honeybadge fields in result/error messages
 #
-# TODO: Replace image name with actual registry path once confirmed.
-#       Expected format: registry.cn-hangzhou.aliyuncs.com/hiclaw/worker-openclaw:v1.0.6
+# NOTE: In docker-compose (local dev), Workers pull ALL config (SOUL.md,
+# AGENTS.md, openclaw.json) from MinIO at startup — no custom build needed.
+# Worker registration is handled by deploy/hiclaw/init-workers.sh.
+#
+# This Dockerfile is kept as a reference for custom Worker image builds only
+# (e.g. baking in skills for production deployments without MinIO dependency).
 
-FROM hiclaw/worker-openclaw:v1.0.6
+FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.6
 
-# Copy skill definitions: SKILL.md + mcporter MCP configs
-COPY skill/ /app/agent/skills/
+# Workers get their config from MinIO at runtime.
+# Nothing to COPY here for standard deployments.
 
 EXPOSE 8080

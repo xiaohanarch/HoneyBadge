@@ -64,11 +64,13 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8090',
+        // In Docker Compose: set VITE_API_TARGET=http://honeybadge-server:8090
+        // For local dev (npm run dev on host): falls back to localhost:8090
+        target: process.env.VITE_API_TARGET || 'http://localhost:8090',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8090',
+        target: process.env.VITE_WS_TARGET || 'ws://localhost:8090',
         ws: true,
       },
     },

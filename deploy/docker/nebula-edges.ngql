@@ -1,0 +1,82 @@
+# ============================================================
+# HoneyBadge NebulaGraph Schema — Edges & Edge Indexes
+#
+# Run by init-nebula.sh after nebula-schema.ngql.
+# Can also be run manually:
+#   docker run --rm --network honeybadge-network --entrypoint="" \
+#     vesoft/nebula-console:v3.8.0 \
+#     nebula-console -addr nebula-graphd -P 9669 -u root -password nebula \
+#     < nebula-edges.ngql
+# ============================================================
+USE honeybadge;
+
+# ============================================================
+# Procurement Edges
+# ============================================================
+CREATE EDGE IF NOT EXISTS PLACED_WITH(order_date TIMESTAMP, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_PO_LINE(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS ORDERS_ITEM(quantity DOUBLE, unit_price DOUBLE, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS CONVERTS_TO_PO(conversion_date TIMESTAMP, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_PR_LINE(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_RECEIPT(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_RECEIPT_LINE(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_INVOICE(match_status STRING, match_date TIMESTAMP, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS ORDERED_BY(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_QUALIFICATION(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS SUPPLIES_ITEM(priority INT64, unit_price DOUBLE, lead_time_days INT64, status STRING, effective_from TIMESTAMP, effective_to TIMESTAMP, org_id INT64, dept_id INT64);
+
+# ============================================================
+# Payable Edges
+# ============================================================
+CREATE EDGE IF NOT EXISTS HAS_INVOICE_LINE(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS INVOICED_BY(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS PAYS_INVOICE(paid_amount DOUBLE, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS PAID_TO(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS CONTAINS_PAYMENT(org_id INT64, dept_id INT64);
+
+# ============================================================
+# Order-to-Cash Edges
+# ============================================================
+CREATE EDGE IF NOT EXISTS SOLD_TO(order_date TIMESTAMP, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_SO_LINE(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS SELLS_ITEM(quantity DOUBLE, unit_price DOUBLE, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_SHIPMENT(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_SHIPMENT_LINE(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_AR_INVOICE(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS RECEIVED_FROM(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS APPLIES_TO(applied_amount DOUBLE, org_id INT64, dept_id INT64);
+
+# ============================================================
+# Master Data Edges
+# ============================================================
+CREATE EDGE IF NOT EXISTS BOM_FOR(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS USES_COMPONENT(quantity_per DOUBLE, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS PARENT_ORG(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS BELONGS_TO_ORG(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS RECEIVED_AT(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS SHIPPED_FROM(org_id INT64, dept_id INT64);
+
+# ============================================================
+# Accounting Edges
+# ============================================================
+CREATE EDGE IF NOT EXISTS ACCOUNTING_FOR(event_class STRING, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS POSTED_TO(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS HAS_JOURNAL_LINE(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS DISTRIBUTED_TO(org_id INT64, dept_id INT64);
+
+# ============================================================
+# Approval & Contract Edges
+# ============================================================
+CREATE EDGE IF NOT EXISTS APPROVED_BY(org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS APPROVAL_FOR(doc_type STRING, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS CONTRACT_WITH(party_type STRING, org_id INT64, dept_id INT64);
+CREATE EDGE IF NOT EXISTS UNDER_CONTRACT(org_id INT64, dept_id INT64);
+
+# ============================================================
+# Edge Indexes
+# (REBUILD EDGE INDEX is run by init-nebula.sh after this file)
+# ============================================================
+CREATE EDGE INDEX IF NOT EXISTS idx_has_invoice_status ON HAS_INVOICE(match_status(20));
+CREATE EDGE INDEX IF NOT EXISTS idx_supplies_item_status ON SUPPLIES_ITEM(status(20));
+CREATE EDGE INDEX IF NOT EXISTS idx_placed_with_org ON PLACED_WITH(org_id);
+CREATE EDGE INDEX IF NOT EXISTS idx_sold_to_org ON SOLD_TO(org_id);

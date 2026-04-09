@@ -7,12 +7,16 @@
 #   3. Verify mcporter MCP call conventions unchanged
 #   4. Verify Matrix DM room auto-accept behavior unchanged
 #
-# TODO: Replace image name with actual registry path once confirmed.
-#       Expected format: registry.cn-hangzhou.aliyuncs.com/hiclaw/manager:v1.0.6
+# NOTE: In docker-compose (local dev), the Manager image is used directly
+# without a custom build — worker configs are volume-mounted and registered
+# via deploy/hiclaw/init-workers.sh.
+#
+# This Dockerfile is kept as a reference for custom Manager builds only.
 
-FROM hiclaw/manager:v1.0.6
+FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.6
 
-# Copy agent configuration (LLM routing rules, system prompts for Manager)
-COPY agent/ /app/agent/
+# Copy custom Manager agent configuration (SOUL.md, AGENTS.md)
+# Mount path inside the Manager for agent identity files
+COPY hiclaw/manager/agent/ /opt/hiclaw/agent/manager/
 
-EXPOSE 8080
+EXPOSE 8080 8001 18888 9001

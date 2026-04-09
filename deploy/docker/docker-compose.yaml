@@ -1,40 +1,57 @@
 # HoneyBadge Local Development Infrastructure
-# Docker Compose for Docker Desktop + WSL
-#
-# Services:
-#   - nebula-graphd: NebulaGraph Graph Service (port 9669)
-#   - nebula-storaged: NebulaGraph Storage Service
-#   - nebula-metad: NebulaGraph Metadata Service
-#   - redis: Redis for session/cache (port 6379)
-#   - postgres: PostgreSQL for audit log (port 5432)
-#   - matrix: Matrix homeserver for HiClaw (port 8008)
-#   - higress: AI Gateway with SSO/rate-limiting (port 80/443) [NEW]
+# Docker Compose — Phase 1 (HiClaw Mode)
 #
 # Architecture:
-#   Frontend → Higress (port 80) → HoneyBadge Server (port 8090)
-#                                    ↓
-#                              HiClaw Manager ← Matrix ← Workers
+#   Browser → Frontend (3000) → proxy → HoneyBadge Server (8090)
+#                                          ↓ Matrix DM (:6167 internal)
+#                                   HiClaw Manager (all-in-one)
+#                                     ├─ Tuwunel Matrix server
+#                                     ├─ MinIO (worker config storage)
+#                                     ├─ Higress AI Gateway (:8080)
+#                                     └─ Element Web chat UI (:18888)
+#                                          ↓ Worker dispatch via Matrix
+#                                   HiClaw Workers → MCP Servers → NebulaGraph/Redis/PostgreSQL
 #
-# Usage:
-#   docker-compose up -d
-#   docker-compose ps
-#   docker-compose logs -f [service]
-#   docker-compose down (stop)
-#   docker-compose down -v (stop + remove volumes)
+# Quick start:
+#   1. cd deploy/docker
+#   2. docker compose up -d
+#   3. Wait ~60s for HiClaw Manager to start all internal services
+#   4. ONE-TIME worker registration (first startup only):
+#        bash ../../deploy/hiclaw/init-workers.sh
+#      (places worker configs in MinIO so workers can start)
+#   5. Workers auto-start once their MinIO config exists (restart: unless-stopped)
+#   6. Access: http://localhost:3000  |  Login: admin/admin123
+#
+# HiClaw UIs (after startup):
+#   Element Web (Matrix agent chat): http://localhost:18888
+#   MinIO Console (worker config):   http://localhost:19001  (admin/admin)
+#   Higress Console (MCP tools):     http://localhost:18001
+#
+# Profiles:
+#   --profile tools    nebula-console (interactive nGQL shell)
+#   --profile vector   Milvus stack (Phase 2 semantic cache)
+#
+# Commands:
+#   docker compose up -d
+#   docker compose ps
+#   docker compose logs -f hiclaw-manager
+#   docker compose logs -f hiclaw-graph-worker
+#   docker compose down          # stop, keep volumes
+#   docker compose down -v       # stop + wipe all data (re-run init-workers.sh after)
 
 services:
   # =============================================================================
-  # NebulaGraph Cluster (1 metad + 1 storaged + 1 graphd)
+  # NebulaGraph Cluster (1 metad + 1 storaged + 1 graphd) — pinned to v3.8.0
   # =============================================================================
 
   nebula-metad:
-    image: vesoft/nebula-metad:nightly
+    image: vesoft/nebula-metad:v3.8.0
     container_name: honeybadge-nebula-metad
     hostname: nebula-metad
     restart: unless-stopped
     ports:
-      - "9559:9559"  # Meta service port
-      - "9619:9619"  # Meta HTTP port
+      - "9559:9559"    # Meta RPC port
+      - "9619:9619"    # Meta HTTP status port
     environment:
       - USER=root
       - TZ=Asia/Shanghai
@@ -50,17 +67,17 @@ services:
       test: ["CMD", "curl", "-sf", "http://nebula-metad:9619/status"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 20s
+      retries: 5
+      start_period: 30s
 
   nebula-storaged:
-    image: vesoft/nebula-storaged:nightly
+    image: vesoft/nebula-storaged:v3.8.0
     container_name: honeybadge-nebula-storaged
     hostname: nebula-storaged
     restart: unless-stopped
     ports:
-      - "9779:9779"    # Storage data port
-      - "19779:19779"  # Storage HTTP status port
+      - "9779:9779"      # Storage data port
+      - "19779:19779"    # Storage HTTP status port
     environment:
       - USER=root
       - TZ=Asia/Shanghai
@@ -70,26 +87,26 @@ services:
       - ./nebula-storaged.conf:/usr/local/nebula/etc/nebula-storaged.conf:ro
     command:
       - --flagfile=/usr/local/nebula/etc/nebula-storaged.conf
-    depends_on:
-      nebula-metad:
-        condition: service_started
     networks:
       - honeybadge-net
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://nebula-storaged:19779/status"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
       start_period: 30s
 
   nebula-graphd:
-    image: vesoft/nebula-graphd:nightly
+    image: vesoft/nebula-graphd:v3.8.0
     container_name: honeybadge-nebula-graphd
     hostname: nebula-graphd
     restart: unless-stopped
     ports:
-      - "9669:9669"  # Graph service port (main)
-      - "19669:19669"  # Graph HTTP port
+      - "9669:9669"      # Graph service port (main client connection)
+      - "19669:19669"    # Graph HTTP status port
     environment:
       - USER=root
       - TZ=Asia/Shanghai
@@ -98,30 +115,27 @@ services:
       - ./nebula-graphd.conf:/usr/local/nebula/etc/nebula-graphd.conf:ro
     command:
       - --flagfile=/usr/local/nebula/etc/nebula-graphd.conf
-    depends_on:
-      nebula-metad:
-        condition: service_started
-      nebula-storaged:
-        condition: service_started
     networks:
       - honeybadge-net
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+      nebula-storaged:
+        condition: service_started    # storaged needs ADD HOSTS before it becomes healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://nebula-graphd:19669/status"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 20s
+      retries: 5
+      start_period: 30s
 
-  # =============================================================================
-  # NebulaGraph Console (for running .ngql scripts)
-  # =============================================================================
-
+  # Interactive nGQL console — only with: docker compose --profile tools up -d
   nebula-console:
-    image: vesoft/nebula-console:nightly
+    image: vesoft/nebula-console:v3.8.0
     container_name: honeybadge-nebula-console
     hostname: nebula-console
     profiles:
-      - tools  # Only runs with: docker-compose --profile tools up
+      - tools
     networks:
       - honeybadge-net
     depends_on:
@@ -139,7 +153,7 @@ services:
     hostname: redis
     restart: unless-stopped
     ports:
-      - "6379:6379"  # Redis port
+      - "6379:6379"
     environment:
       - TZ=Asia/Shanghai
     volumes:
@@ -151,10 +165,10 @@ services:
       test: ["CMD", "redis-cli", "-a", "redis123", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
 
   # =============================================================================
-  # PostgreSQL (Audit Log)
+  # PostgreSQL (Audit Log + Sessions)
   # =============================================================================
 
   postgres:
@@ -163,7 +177,7 @@ services:
     hostname: postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"  # PostgreSQL port
+      - "5432:5432"
     environment:
       - POSTGRES_USER=honeybadge
       - POSTGRES_PASSWORD=honeybadge123
@@ -178,43 +192,277 @@ services:
       test: ["CMD-SHELL", "pg_isready -U honeybadge -d honeybadge_audit"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
 
   # =============================================================================
-  # Matrix Homeserver (for HiClaw Manager-Worker Communication)
+  # HiClaw Manager — all-in-one supervisord container
+  #
+  # Bundles: Tuwunel Matrix server (:6167), MinIO (:9000/:9001),
+  #          Higress AI Gateway (:8080), Higress Console (:8001),
+  #          Element Web (:18888), Manager Agent (OpenClaw)
+  #
+  # MATRIX_DOMAIN: sets Tuwunel server name → determines Matrix user ID format.
+  #   User IDs: @username:matrix-local.hiclaw.io
+  #   This must match MATRIX_USER_ID configured in honeybadge-server.
+  #
+  # INITIAL SETUP (run once, see deploy/hiclaw/init-workers.sh):
+  #   bash deploy/hiclaw/init-workers.sh
   # =============================================================================
 
-  matrix-conduit:
-    image: matrixconduit/matrix-conduit:latest
-    container_name: honeybadge-matrix
-    hostname: matrix
+  hiclaw-manager:
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.6
+    container_name: honeybadge-hiclaw-manager
+    hostname: hiclaw-manager
     restart: unless-stopped
     ports:
-      - "8008:8008"  # Client API
-      - "8448:8448"  # Federation
+      - "18888:18888"    # Element Web — Matrix chat UI for agent monitoring
+      - "19001:9001"     # MinIO Console — inspect/manage worker config files
+      - "18001:8001"     # Higress Admin Console — register/manage MCP tools
+      - "18080:8080"     # Higress AI Gateway — external gateway access
+      # Note: Tuwunel (:6167) and MinIO API (:9000) are internal only
     environment:
-      - RUST_LOG=info
-      - CONDUIT_CONFIG=/data/conduit.toml
+      # Admin credentials — used for MinIO root user and Higress console login
+      # MinIO requires password >= 8 chars; use .env to override
+      - HICLAW_ADMIN_USER=${HICLAW_ADMIN_USER:-admin}
+      - HICLAW_ADMIN_PASSWORD=${HICLAW_ADMIN_PASSWORD:-admin1234}
+      # Tuwunel Matrix server name — must match domain in MATRIX_USER_ID below
+      - HICLAW_MATRIX_DOMAIN=matrix-local.hiclaw.io
+      # Registration token — used by create-worker.sh to create Matrix accounts
+      - HICLAW_REGISTRATION_TOKEN=${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}
       - TZ=Asia/Shanghai
     volumes:
-      - ./matrix-data:/data
-      - ./conduit.toml:/data/conduit.toml:ro
+      - hiclaw_manager_data:/data    # Persists MinIO data + Tuwunel DB
     networks:
       - honeybadge-net
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8008/health"]
+      # MinIO health endpoint — confirms internal MinIO is ready for Workers
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s    # Multiple services start via supervisord; allow time
+
+  # =============================================================================
+  # HiClaw Workers — lightweight stateless agent containers
+  #
+  # Each Worker pulls its config from MinIO at startup:
+  #   hiclaw-storage/agents/{WORKER_NAME}/SOUL.md
+  #   hiclaw-storage/agents/{WORKER_NAME}/AGENTS.md
+  #   hiclaw-storage/agents/{WORKER_NAME}/openclaw.json
+  #
+  # Workers will restart until init-workers.sh has populated MinIO.
+  # After init, they start automatically on next restart.
+  # =============================================================================
+
+  hiclaw-graph-worker:
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.6
+    container_name: honeybadge-graph-worker
+    hostname: hiclaw-graph-worker
+    restart: unless-stopped
+    environment:
+      - HICLAW_WORKER_NAME=graph-worker
+      - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
+      - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
+      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin}
+      - TZ=Asia/Shanghai
+    networks:
+      - honeybadge-net
+    depends_on:
+      hiclaw-manager:
+        condition: service_healthy
+
+  hiclaw-analytics-worker:
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.6
+    container_name: honeybadge-analytics-worker
+    hostname: hiclaw-analytics-worker
+    restart: unless-stopped
+    environment:
+      - HICLAW_WORKER_NAME=analytics-worker
+      - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
+      - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
+      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin}
+      - TZ=Asia/Shanghai
+    networks:
+      - honeybadge-net
+    depends_on:
+      hiclaw-manager:
+        condition: service_healthy
+
+  # =============================================================================
+  # MCP Servers — tools exposed to HiClaw Workers via Higress AI Gateway
+  #
+  # Build context: project root (../../ from deploy/docker/)
+  # After init-workers.sh: run deploy/hiclaw/setup-honeybadge-mcps.sh
+  #   to register these servers in Higress so Workers can call them.
+  # =============================================================================
+
+  honeybadge-nebula-mcp:
+    build:
+      context: ../..
+      dockerfile: mcp-servers/honeybadge-nebula-mcp/Dockerfile
+    container_name: honeybadge-nebula-mcp
+    hostname: honeybadge-nebula-mcp
+    restart: unless-stopped
+    environment:
+      - NEBULA_HOST=nebula-graphd
+      - NEBULA_PORT=9669
+      - NEBULA_USER=${NEBULA_USER:-root}
+      - NEBULA_PASSWORD=${NEBULA_PASSWORD:-nebula}
+      - NEBULA_SPACE=${NEBULA_SPACE:-honeybadge}
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      - TZ=Asia/Shanghai
+    networks:
+      - honeybadge-net
+    depends_on:
+      nebula-graphd:
+        condition: service_healthy
+
+  honeybadge-audit-mcp:
+    build:
+      context: ../..
+      dockerfile: mcp-servers/honeybadge-audit-mcp/Dockerfile
+    container_name: honeybadge-audit-mcp
+    hostname: honeybadge-audit-mcp
+    restart: unless-stopped
+    environment:
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${PG_USER:-honeybadge}
+      - PG_PASSWORD=${PG_PASSWORD:-honeybadge123}
+      - PG_DATABASE=${PG_DB:-honeybadge_audit}
+      - TZ=Asia/Shanghai
+    networks:
+      - honeybadge-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  honeybadge-cache-mcp:
+    build:
+      context: ../..
+      dockerfile: mcp-servers/honeybadge-cache-mcp/Dockerfile
+    container_name: honeybadge-cache-mcp
+    hostname: honeybadge-cache-mcp
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis123}
+      - TZ=Asia/Shanghai
+    networks:
+      - honeybadge-net
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # =============================================================================
+  # HoneyBadge Backend Server
+  # ORCHESTRATOR_TYPE=hiclaw: delegates queries to HiClaw Manager via Matrix DM.
+  # honeybadge-gateway bot user sends DMs to the Manager; Manager routes to Workers.
+  # =============================================================================
+
+  honeybadge-server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.server
+    container_name: honeybadge-server
+    hostname: honeybadge-server
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      # NebulaGraph
+      - NEBULA_HOST=nebula-graphd
+      - NEBULA_PORT=9669
+      - NEBULA_USER=${NEBULA_USER:-root}
+      - NEBULA_PASSWORD=${NEBULA_PASSWORD:-nebula}
+      - NEBULA_SPACE=${NEBULA_SPACE:-honeybadge}
+      # Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis123}
+      # PostgreSQL
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${PG_USER:-honeybadge}
+      - PG_PASSWORD=${PG_PASSWORD:-honeybadge123}
+      - PG_DATABASE=${PG_DB:-honeybadge_audit}
+      # LLM
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      # Auth
+      - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
+      # Orchestration — HiClaw mode
+      - ORCHESTRATOR_TYPE=hiclaw
+      - SERVER_PORT=8090
+      # Matrix / HiClaw Manager connection
+      # Tuwunel listens on :6167 inside hiclaw-manager container
+      # User ID domain must match HICLAW_MATRIX_DOMAIN set on hiclaw-manager
+      - MATRIX_HOMESERVER_URL=http://hiclaw-manager:6167
+      - MATRIX_USER_ID=@honeybadge-gateway:matrix-local.hiclaw.io
+      - MATRIX_USER_PASSWORD=${MATRIX_GATEWAY_PASSWORD:-gateway-dev-pass}
+      - TZ=Asia/Shanghai
+    depends_on:
+      nebula-graphd:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      hiclaw-manager:
+        condition: service_healthy
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8090/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   # =============================================================================
-  # Milvus (Vector DB for Phase 2 - Semantic Cache & Ontology)
+  # Frontend — Vue 3 + Vite dev server
+  # Proxies /api → honeybadge-server:8090 and /ws → ws://honeybadge-server:8090
+  # Access: http://localhost:3000
+  # Login: admin/admin123, analyst/analyst123, auditor/auditor123
+  # =============================================================================
+
+  frontend:
+    image: node:20-alpine
+    container_name: honeybadge-frontend
+    hostname: frontend
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_TARGET=http://honeybadge-server:8090
+      - VITE_WS_TARGET=ws://honeybadge-server:8090
+      - TZ=Asia/Shanghai
+    volumes:
+      - ../../frontend:/app
+      - frontend_node_modules:/app/node_modules
+    networks:
+      - honeybadge-net
+    depends_on:
+      honeybadge-server:
+        condition: service_started
+
+  # =============================================================================
+  # Milvus Vector DB — Phase 2 semantic cache (optional)
+  # Start with: docker compose --profile vector up -d
   # =============================================================================
 
   milvus-etcd:
     image: quay.io/coreos/etcd:v3.5.5
     container_name: honeybadge-milvus-etcd
     hostname: milvus-etcd
+    profiles:
+      - vector
     restart: unless-stopped
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -231,6 +479,8 @@ services:
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
     container_name: honeybadge-milvus-minio
     hostname: milvus-minio
+    profiles:
+      - vector
     restart: unless-stopped
     environment:
       - MINIO_ACCESS_KEY=minioadmin
@@ -251,10 +501,12 @@ services:
     image: milvusdb/milvus:v2.3.3
     container_name: honeybadge-milvus
     hostname: milvus
+    profiles:
+      - vector
     restart: unless-stopped
     ports:
-      - "19530:19530"  # Milvus gRPC port
-      - "9091:9091"    # Milvus HTTP port
+      - "19530:19530"    # Milvus gRPC
+      - "9091:9091"      # Milvus HTTP
     environment:
       - ETCD_ENDPOINTS=milvus-etcd:2379
       - MINIO_ADDRESS=milvus-minio:9000
@@ -264,258 +516,6 @@ services:
     depends_on:
       - milvus-etcd
       - milvus-minio
-    networks:
-      - honeybadge-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  # =============================================================================
-  # HoneyBadge MCP Servers
-  # =============================================================================
-
-  honeybadge-nebula-mcp:
-    build:
-      context: ../..
-      dockerfile: mcp-servers/honeybadge-nebula-mcp/Dockerfile
-    container_name: honeybadge-nebula-mcp
-    hostname: honeybadge-nebula-mcp
-    restart: unless-stopped
-    ports:
-      - "8001:8000"
-    environment:
-      - NEBULA_HOST=nebula-graphd
-      - NEBULA_PORT=9669
-      - NEBULA_USER=root
-      - NEBULA_PASSWORD=nebula
-      - NEBULA_SPACE=honeybadge
-      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
-      - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
-      - TZ=Asia/Shanghai
-    depends_on:
-      nebula-graphd:
-        condition: service_healthy
-    networks:
-      - honeybadge-net
-
-  honeybadge-audit-mcp:
-    build:
-      context: ../..
-      dockerfile: mcp-servers/honeybadge-audit-mcp/Dockerfile
-    container_name: honeybadge-audit-mcp
-    hostname: honeybadge-audit-mcp
-    restart: unless-stopped
-    ports:
-      - "8002:8000"
-    environment:
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=honeybadge
-      - POSTGRES_PASSWORD=honeybadge123
-      - POSTGRES_DB=honeybadge_audit
-      - TZ=Asia/Shanghai
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - honeybadge-net
-
-  honeybadge-cache-mcp:
-    build:
-      context: ../..
-      dockerfile: mcp-servers/honeybadge-cache-mcp/Dockerfile
-    container_name: honeybadge-cache-mcp
-    hostname: honeybadge-cache-mcp
-    restart: unless-stopped
-    ports:
-      - "8003:8000"
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=redis123
-      - TZ=Asia/Shanghai
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - honeybadge-net
-
-  # =============================================================================
-  # Higress Gateway (AI Gateway - SSO/OAuth2, rate limiting, auth)
-  # =============================================================================
-
-  higress:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/server:latest
-    container_name: honeybadge-higress
-    hostname: higress
-    restart: unless-stopped
-    ports:
-      - "80:80"      # HTTP (for WebSocket upgrade)
-      - "443:443"    # HTTPS (future)
-    environment:
-      - TZ=Asia/Shanghai
-    volumes:
-      - ./higress.conf:/etc/higress/higress.conf:ro
-      - ./gateway/config/routes.yaml:/etc/higress/routes/routes.yaml:ro
-      - ./gateway/config/auth.yaml:/etc/higress/plugins/auth.yaml:ro
-      - ./gateway/config/cors.yaml:/etc/higress/plugins/cors.yaml:ro
-      - ./gateway/config/rate-limit.yaml:/etc/higress/plugins/rate-limit.yaml:ro
-      - ./gateway/config/header-transform.yaml:/etc/higress/plugins/header-transform.yaml:ro
-      - higress_data:/etc/higress/data
-    networks:
-      honeybadge-net:
-        aliases:
-          - higress
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # =============================================================================
-  # HoneyBadge Backend Server
-  # =============================================================================
-
-  honeybadge-server:
-    build:
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile.server
-    container_name: honeybadge-server
-    hostname: honeybadge-server
-    restart: unless-stopped
-    ports:
-      - "8090:8090"
-    environment:
-      - NEBULA_HOST=nebula-graphd
-      - NEBULA_PORT=9669
-      - NEBULA_USER=root
-      - NEBULA_PASSWORD=nebula
-      - NEBULA_SPACE=honeybadge
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=redis123
-      - PG_HOST=postgres
-      - PG_PORT=5432
-      - PG_USER=honeybadge
-      - PG_PASSWORD=honeybadge123
-      - PG_DATABASE=honeybadge_audit
-      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
-      - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
-      - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
-      - ORCHESTRATOR_TYPE=direct
-      - SERVER_PORT=8090
-      # Matrix gateway bot credentials (connects to HiClaw Manager)
-      - MATRIX_HOMESERVER_URL=http://matrix:8008
-      - MATRIX_USER_ID=@honeybadge-gateway:matrix.local
-      - MATRIX_USER_PASSWORD=${MATRIX_GATEWAY_PASSWORD:-gateway-dev-pass}
-      - TZ=Asia/Shanghai
-    depends_on:
-      nebula-graphd:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      matrix-conduit:
-        condition: service_healthy
-    networks:
-      - honeybadge-net
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8090/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  # =============================================================================
-  # HiClaw Manager — routes queries from gateway to workers
-  # =============================================================================
-
-  hiclaw-manager:
-    build:
-      context: ../..
-      dockerfile: deploy/hiclaw/Dockerfile.manager
-    container_name: honeybadge-hiclaw-manager
-    hostname: hiclaw-manager
-    restart: unless-stopped
-    environment:
-      - MATRIX_HOMESERVER_URL=http://matrix:8008
-      - MATRIX_USER_ID=@honeybadge-manager:matrix.local
-      - MATRIX_USER_PASSWORD=${MATRIX_MANAGER_PASSWORD:-manager-dev-pass}
-      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
-      - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
-      - NEBULA_MCP_URL=http://honeybadge-nebula-mcp:8000
-      - AUDIT_MCP_URL=http://honeybadge-audit-mcp:8000
-      - CACHE_MCP_URL=http://honeybadge-cache-mcp:8000
-      - TZ=Asia/Shanghai
-    depends_on:
-      matrix-conduit:
-        condition: service_healthy
-      honeybadge-nebula-mcp:
-        condition: service_started
-      honeybadge-audit-mcp:
-        condition: service_started
-      honeybadge-cache-mcp:
-        condition: service_started
-    networks:
-      - honeybadge-net
-
-  # =============================================================================
-  # HiClaw Workers — execute queries via MCP tools
-  # =============================================================================
-
-  hiclaw-graph-worker:
-    build:
-      context: ../..
-      dockerfile: deploy/hiclaw/Dockerfile.worker
-    container_name: honeybadge-graph-worker
-    hostname: hiclaw-graph-worker
-    restart: unless-stopped
-    environment:
-      - WORKER_TYPE=graph-worker
-      - MATRIX_HOMESERVER_URL=http://matrix:8008
-      - MATRIX_USER_ID=@graph-worker:matrix.local
-      - MATRIX_USER_PASSWORD=${MATRIX_GRAPH_WORKER_PASSWORD:-graph-worker-dev-pass}
-      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
-      - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
-      - NEBULA_MCP_URL=http://honeybadge-nebula-mcp:8000
-      - AUDIT_MCP_URL=http://honeybadge-audit-mcp:8000
-      - CACHE_MCP_URL=http://honeybadge-cache-mcp:8000
-      - TZ=Asia/Shanghai
-    depends_on:
-      hiclaw-manager:
-        condition: service_started
-    networks:
-      - honeybadge-net
-
-  hiclaw-analytics-worker:
-    build:
-      context: ../..
-      dockerfile: deploy/hiclaw/Dockerfile.worker
-    container_name: honeybadge-analytics-worker
-    hostname: hiclaw-analytics-worker
-    restart: unless-stopped
-    environment:
-      - WORKER_TYPE=analytics-worker
-      - MATRIX_HOMESERVER_URL=http://matrix:8008
-      - MATRIX_USER_ID=@analytics-worker:matrix.local
-      - MATRIX_USER_PASSWORD=${MATRIX_ANALYTICS_WORKER_PASSWORD:-analytics-worker-dev-pass}
-      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
-      - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
-      - NEBULA_MCP_URL=http://honeybadge-nebula-mcp:8000
-      - AUDIT_MCP_URL=http://honeybadge-audit-mcp:8000
-      - CACHE_MCP_URL=http://honeybadge-cache-mcp:8000
-      - TZ=Asia/Shanghai
-    depends_on:
-      hiclaw-manager:
-        condition: service_started
     networks:
       - honeybadge-net
 
@@ -529,40 +529,22 @@ networks:
     name: honeybadge-network
 
 volumes:
-  # NebulaGraph
-  nebula_metad_data:
-    name: honeybadge-nebula-metad-data
-  nebula_metad_logs:
-    name: honeybadge-nebula-metad-logs
-  nebula_storaged_data:
-    name: honeybadge-nebula-storaged-data
-  nebula_storaged_logs:
-    name: honeybadge-nebula-storaged-logs
-  nebula_graphd_logs:
-    name: honeybadge-nebula-graphd-logs
-
-  # Redis
   redis_data:
     name: honeybadge-redis-data
 
-  # PostgreSQL
   postgres_data:
     name: honeybadge-postgres-data
 
-  # Matrix
-  matrix_data:
-    name: honeybadge-matrix-data
+  hiclaw_manager_data:
+    name: honeybadge-hiclaw-manager-data    # Persists MinIO + Tuwunel state
 
-  # Milvus
+  frontend_node_modules:
+    name: honeybadge-frontend-node-modules
+
+  # Milvus (Phase 2 — --profile vector)
   milvus_etcd_data:
     name: honeybadge-milvus-etcd-data
-    driver: local
   milvus_minio_data:
     name: honeybadge-milvus-minio-data
-    driver: local
   milvus_data:
     name: honeybadge-milvus-data
-
-  # Higress
-  higress_data:
-    name: honeybadge-higress-data
