@@ -38,41 +38,52 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             from honeybadge.llm.adapter import OpenAICompatibleAdapter
             from honeybadge.protocols.validator import NgqlValidator
             from honeybadge.server.orchestrator import create_orchestrator
+            from honeybadge.gateway import MatrixClient, SchemaCache, RoomManager
+            from honeybadge.protocols.messages import (
+                ErrorCode, ErrorMessage, ErrorPayload,
+                ResponseMessage, ResponsePayload, serialize_message,
+            )
 
-            nebula = NebulaGraphClient(host=config.nebula_host, port=config.nebula_port, user=config.nebula_user, password=config.nebula_password)
+            nebula = NebulaGraphClient(
+                host=config.nebula_host, port=config.nebula_port,
+                user=config.nebula_user, password=config.nebula_password,
+            )
             await nebula.connect()
             app.state.nebula = nebula
 
-            pg = PostgreSQLClient(host=config.pg_host, port=config.pg_port, user=config.pg_user, password=config.pg_password, database=config.pg_database)
+            pg = PostgreSQLClient(
+                host=config.pg_host, port=config.pg_port,
+                user=config.pg_user, password=config.pg_password,
+                database=config.pg_database,
+            )
             await pg.connect()
             await pg.init_schema()
             app.state.pg = pg
 
-            redis = RedisClient(host=config.redis_host, port=config.redis_port, password=config.redis_password)
+            redis = RedisClient(
+                host=config.redis_host, port=config.redis_port,
+                password=config.redis_password,
+            )
             await redis.connect()
             app.state.redis = redis
 
-            llm = OpenAICompatibleAdapter(config={"endpoint": config.llm_endpoint, "api_key": config.llm_api_key, "model": config.llm_model})
+            llm = OpenAICompatibleAdapter(config={
+                "endpoint": config.llm_endpoint,
+                "api_key": config.llm_api_key,
+                "model": config.llm_model,
+            })
             app.state.llm = llm
 
             validator = NgqlValidator()
             app.state.validator = validator
 
-            orchestrator = create_orchestrator(config, nebula, llm, pg, redis, validator)
-            app.state.orchestrator = orchestrator
-
-            # Import gateway modules
-            from honeybadge.gateway import MatrixClient, SchemaCache, RoomManager
-            from honeybadge.protocols.messages import ErrorCode, ErrorMessage, ErrorPayload, ResponseMessage, ResponsePayload, serialize_message
-
-            # Create gateway components
+            # Gateway components — created before create_orchestrator so that
+            # matrix_client can be injected when ORCHESTRATOR_TYPE=hiclaw.
             schema_cache = SchemaCache()
             room_manager = RoomManager()
 
-            # Create Matrix client with callbacks
             async def on_matrix_result(msg):
                 app.state.pending_traces.discard(msg.trace_id)
-                # Route result to the appropriate WebSocket via session_id
                 session_id = room_manager.get_session_id_by_trace(msg.trace_id)
                 if session_id:
                     ws = app.state.active_ws_sessions.get(session_id)
@@ -118,28 +129,44 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             app.state.matrix_client = matrix_client
             app.state.schema_cache = schema_cache
             app.state.room_manager = room_manager
-            app.state.active_ws_sessions = {}  # session_id -> WebSocket
-            app.state.pending_traces: set[str] = set()  # trace_ids awaiting Worker response
+            app.state.active_ws_sessions = {}
+            app.state.pending_traces: set[str] = set()
 
-            # Bootstrap schema from Worker via Matrix
+            # Create orchestrator — passes matrix_client for hiclaw mode
+            orchestrator = create_orchestrator(
+                config, nebula, llm, pg, redis, validator,
+                matrix_client=matrix_client,
+            )
+            app.state.orchestrator = orchestrator
+
+            # Connect to Matrix homeserver.
+            # Skip bootstrap_schema in hiclaw mode — schema is fetched internally
+            # by the HiClaw Worker via the get_schema MCP tool.
             try:
                 await matrix_client.connect()
-                await matrix_client.bootstrap_schema(schema_cache)
+                if config.orchestrator_type != "hiclaw":
+                    await matrix_client.bootstrap_schema(schema_cache)
             except Exception as exc:
                 logger.error("matrix_bootstrap_failed", error=str(exc))
 
-            logger.info("gateway_ready", schema_tags=len(schema_cache.get_tags()), schema_edges=len(schema_cache.get_edges()))
+            logger.info(
+                "gateway_ready",
+                schema_tags=len(schema_cache.get_tags()),
+                schema_edges=len(schema_cache.get_edges()),
+            )
             logger.info("server_ready", services="nebula,pg,redis,llm")
         except Exception as e:
             logger.error("startup_failed", error=str(e))
-            for attr in ("nebula", "pg", "redis", "llm", "orchestrator", "validator", "matrix_client", "schema_cache", "room_manager"):
+            for attr in (
+                "nebula", "pg", "redis", "llm", "orchestrator", "validator",
+                "matrix_client", "schema_cache", "room_manager",
+            ):
                 if not hasattr(app.state, attr):
                     setattr(app.state, attr, None)
 
         yield
 
         logger.info("server_shutting_down")
-        # Gracefully close active WebSocket sessions
         if hasattr(app.state, "active_ws_sessions") and app.state.active_ws_sessions:
             for ws in app.state.active_ws_sessions.values():
                 try:

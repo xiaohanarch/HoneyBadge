@@ -17,6 +17,7 @@ from honeybadge.core.trace import generate_trace_id
 from honeybadge.db.nebula import NebulaGraphClient
 from honeybadge.db.postgres import AuditLogEntry, PostgreSQLClient
 from honeybadge.db.redis import RedisClient
+from honeybadge.gateway.matrix_client import MatrixClient, MatrixMessage
 from honeybadge.llm.adapter import LLMAdapter, generate_ngql, summarize_results
 from honeybadge.protocols.validator import NgqlValidator
 
@@ -698,6 +699,137 @@ class DirectPipelineOrchestrator(QueryOrchestrator):
 
 
 # =============================================================================
+# HiClaw Orchestrator
+# =============================================================================
+
+
+class HiClawOrchestrator(QueryOrchestrator):
+    """Thin adapter that delegates query execution to HiClaw Manager/Worker.
+
+    Submits queries using MatrixClient.submit_and_wait() with the x-honeybadge
+    interface contract. Holds no references to LLM, NebulaGraph, or Validator
+    — those are owned by the HiClaw Worker.
+
+    The sole coupling point to HiClaw is _to_query_result(), which maps
+    MatrixMessage fields to QueryResult. Update only this method when the
+    x-honeybadge contract version changes.
+    """
+
+    def __init__(
+        self,
+        matrix_client: MatrixClient,
+        pg: PostgreSQLClient,
+        query_timeout: float = 60.0,
+    ) -> None:
+        self._matrix = matrix_client
+        self._pg = pg
+        self._timeout = query_timeout
+        logger.info("hiclaw_orchestrator_initialized", query_timeout=query_timeout)
+
+    async def execute_query(
+        self,
+        question: str,
+        session_id: str,
+        user_context: dict[str, Any],
+        callbacks: PipelineCallbacks,
+    ) -> QueryResult:
+        """Submit query to HiClaw via Matrix DM and wait for result.
+
+        HiClaw native text (CONTRACT-004) is streamed to callbacks.on_stream
+        as "thinking" chunks while the Worker executes.
+        On timeout, writes one audit log entry and returns QueryResult(error=...).
+        """
+        trace_id = generate_trace_id()
+
+        async def on_room_text(text: str) -> None:
+            await callbacks.on_stream(text, "thinking", False)
+
+        try:
+            msg = await self._matrix.submit_and_wait(
+                question=question,
+                trace_id=trace_id,
+                user_context=user_context,
+                session_id=session_id,
+                on_room_text=on_room_text,
+                timeout=self._timeout,
+            )
+            return self._to_query_result(msg, trace_id)
+
+        except asyncio.TimeoutError:
+            logger.error(
+                "hiclaw_query_timeout",
+                trace_id=trace_id,
+                timeout=self._timeout,
+            )
+            await self._write_timeout_audit(trace_id, question, user_context, session_id)
+            return QueryResult(
+                summary="",
+                raw_data=[],
+                columns=[],
+                cypher="",
+                trace_id=trace_id,
+                execution_time_ms=int(self._timeout * 1000),
+                row_count=0,
+                error=f"Query timed out after {self._timeout}s",
+            )
+
+    def _to_query_result(self, msg: MatrixMessage, trace_id: str) -> QueryResult:
+        """Convert MatrixMessage to QueryResult (CONTRACT v1 mapping).
+
+        This is the single function to update when the x-honeybadge contract
+        version changes. See docs/patches/hiclaw-interface-contract-v1.md.
+        """
+        if msg.msgtype == "error":
+            return QueryResult(
+                summary="",
+                raw_data=[],
+                columns=[],
+                cypher="",
+                trace_id=trace_id,
+                execution_time_ms=0,
+                row_count=0,
+                error=f"[{msg.error_code}] {msg.error_message}",
+            )
+        return QueryResult(
+            summary=msg.summary,
+            raw_data=msg.rows,
+            columns=msg.columns,
+            cypher=msg.ngql,
+            trace_id=trace_id,
+            execution_time_ms=msg.execution_time_ms,
+            row_count=msg.row_count,
+            error=None,
+        )
+
+    async def _write_timeout_audit(
+        self,
+        trace_id: str,
+        question: str,
+        user_context: dict[str, Any],
+        session_id: str,
+    ) -> None:
+        """Write a gateway-side failure audit entry on query timeout."""
+        try:
+            entry = AuditLogEntry(
+                trace_id=trace_id,
+                question=question,
+                cypher="",
+                raw_result={},
+                summary="",
+                user_id=user_context.get("user_id", "unknown"),
+                session_id=session_id,
+                execution_time_ms=int(self._timeout * 1000),
+                row_count=0,
+                error_message=f"Query timed out after {self._timeout}s",
+            )
+            await self._pg.write_audit_log(entry)
+        except Exception as exc:
+            logger.error(
+                "hiclaw_timeout_audit_failed", trace_id=trace_id, error=str(exc)
+            )
+
+
+# =============================================================================
 # Factory Function
 # =============================================================================
 
@@ -709,6 +841,7 @@ def create_orchestrator(
     pg: PostgreSQLClient,
     redis: RedisClient,
     validator: NgqlValidator,
+    matrix_client: Optional[MatrixClient] = None,
 ) -> QueryOrchestrator:
     """Factory function to create the appropriate QueryOrchestrator.
 
@@ -719,19 +852,26 @@ def create_orchestrator(
         pg: PostgreSQL client.
         redis: Redis client.
         validator: nGQL validator.
+        matrix_client: MatrixClient instance. Required when orchestrator_type is "hiclaw".
 
     Returns:
         Configured QueryOrchestrator instance.
 
     Raises:
-        NotImplementedError: If orchestrator_type is "hiclaw" (Phase 2+).
-        ValueError: If orchestrator_type is unknown.
+        ValueError: If orchestrator_type is "hiclaw" and matrix_client is None,
+                    or if orchestrator_type is unknown.
     """
     orchestrator_type = config.orchestrator_type
 
     if orchestrator_type == "hiclaw":
-        raise NotImplementedError(
-            "HiClaw orchestrator not yet implemented. Use ORCHESTRATOR_TYPE=direct"
+        if matrix_client is None:
+            raise ValueError(
+                "ORCHESTRATOR_TYPE=hiclaw 需要传入 matrix_client"
+            )
+        return HiClawOrchestrator(
+            matrix_client=matrix_client,
+            pg=pg,
+            query_timeout=getattr(config, "hiclaw_query_timeout", 60.0),
         )
 
     if orchestrator_type == "direct":
@@ -745,5 +885,6 @@ def create_orchestrator(
         )
 
     raise ValueError(
-        f"Unknown orchestrator_type: '{orchestrator_type}'. Valid values: 'direct', 'hiclaw'"
+        f"Unknown orchestrator_type: '{orchestrator_type}'. "
+        "Valid values: 'direct', 'hiclaw'"
     )

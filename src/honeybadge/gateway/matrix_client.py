@@ -36,6 +36,12 @@ class MatrixMessage:
     # Schema response fields
     tags: list[Any] = field(default_factory=list)
     edges: list[Any] = field(default_factory=list)
+    # x-honeybadge result fields (CONTRACT-002)
+    ngql: str = ""
+    rows: list[dict[str, Any]] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+    row_count: int = 0
+    execution_time_ms: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for Matrix event content."""
@@ -82,6 +88,28 @@ class MatrixMessage:
             edges=data.get("edges", []),
         )
 
+    @classmethod
+    def from_hiclaw_dict(cls, content: dict[str, Any]) -> "MatrixMessage":
+        """Parse from x-honeybadge Matrix event content (CONTRACT-001/002/003)."""
+        hb = content.get("x-honeybadge", {})
+        return cls(
+            msgtype=hb.get("type", "unknown"),
+            trace_id=hb.get("trace_id", ""),
+            question=hb.get("question", ""),
+            user_id=hb.get("user_id", ""),
+            org_id=hb.get("org_id", ""),
+            roles=hb.get("roles", []),
+            summary=hb.get("summary", ""),
+            ngql=hb.get("ngql", ""),
+            rows=hb.get("rows", []),
+            columns=hb.get("columns", []),
+            row_count=hb.get("row_count", 0),
+            execution_time_ms=hb.get("execution_time_ms", 0),
+            error_code=hb.get("error_code", ""),
+            error_message=hb.get("error_message", ""),
+            recoverable=hb.get("recoverable", True),
+        )
+
 
 class MatrixClient:
     """
@@ -108,6 +136,8 @@ class MatrixClient:
         self._client = None  # matrix-nio Client instance
         self._running = False
         self._pending_responses: dict[str, asyncio.Future[MatrixMessage]] = {}
+        self._pending_queues: dict[str, asyncio.Queue[MatrixMessage]] = {}
+        self._room_text_callbacks: dict[str, Callable[[str], Awaitable[None]]] = {}
         self._listening_task: asyncio.Task | None = None
 
     async def connect(self) -> None:
@@ -148,32 +178,69 @@ class MatrixClient:
                 backoff = min(backoff * 2, _BACKOFF_MAX)
 
     async def _on_matrix_event(self, room: Any, event: Any) -> None:
-        """Handle incoming Matrix events. room is a nio MatrixRoom object."""
+        """Handle incoming Matrix events with x-honeybadge-aware routing."""
         if self._client is None:
             return
 
         from nio import RoomMessage
 
-        if isinstance(event, RoomMessage):
-            content = event.source.get("content", {})
+        if not isinstance(event, RoomMessage):
+            return
+
+        content = event.source.get("content", {})
+        room_id = room.room_id
+
+        if "x-honeybadge" in content:
+            # HiClaw contract path: CONTRACT-001 to CONTRACT-003
+            msg = MatrixMessage.from_hiclaw_dict(content)
+            trace_id = msg.trace_id
+
+            # Priority 1: pending queue (submit_and_wait path)
+            if trace_id in self._pending_queues:
+                await self._pending_queues[trace_id].put(msg)
+                return
+
+            # Priority 2: pending future (bootstrap / legacy direct path)
+            if trace_id in self._pending_responses:
+                future = self._pending_responses.pop(trace_id)
+                if not future.done():
+                    future.set_result(msg)
+                return
+
+            # Priority 3: global callbacks (direct-mode fallback)
+            if msg.msgtype == "result" and self.on_result:
+                await self.on_result(msg)
+            elif msg.msgtype == "error" and self.on_error:
+                await self.on_error(msg)
+        else:
+            # Legacy path (direct mode, bootstrap) or plain HiClaw text (CONTRACT-004)
             msg = MatrixMessage.from_dict(content)
 
-            # Route response by trace_id
+            # Route by trace_id to pending future (bootstrap schema path)
             if msg.trace_id and msg.trace_id in self._pending_responses:
                 future = self._pending_responses.pop(msg.trace_id)
                 if not future.done():
                     future.set_result(msg)
                 return
 
-            # Dispatch to callbacks
+            # Global callbacks for legacy direct-mode messages
             if msg.msgtype == "result" and self.on_result:
-                room_id = room.room_id
-                session_id = self.room_manager.get_session_id(room_id) or self.room_manager.get_session_id_by_trace(msg.trace_id)
+                session_id = (
+                    self.room_manager.get_session_id(room_id)
+                    or self.room_manager.get_session_id_by_trace(msg.trace_id)
+                )
                 if session_id:
                     self.room_manager.register_trace(msg.trace_id, session_id)
                 await self.on_result(msg)
             elif msg.msgtype == "error" and self.on_error:
                 await self.on_error(msg)
+            else:
+                # CONTRACT-004: plain text from HiClaw Manager/Worker
+                sender = getattr(event, "sender", "")
+                if sender != self.user_id and room_id in self._room_text_callbacks:
+                    body = content.get("body", "")
+                    if body:
+                        await self._room_text_callbacks[room_id](body)
 
     async def disconnect(self) -> None:
         """Disconnect from Matrix."""
@@ -246,6 +313,102 @@ class MatrixClient:
         except asyncio.TimeoutError:
             self._pending_responses.pop(trace_id, None)
             raise
+
+    async def submit_and_wait(
+        self,
+        question: str,
+        trace_id: str,
+        user_context: dict[str, Any],
+        session_id: str,
+        on_room_text: Callable[[str], Awaitable[None]],
+        timeout: float = 60.0,
+    ) -> MatrixMessage:
+        """Submit a query to HiClaw Manager and wait for result or error.
+
+        Implements CONTRACT-001 (send) and CONTRACT-002/003 (receive).
+        HiClaw native plain text (CONTRACT-004) is forwarded to on_room_text.
+
+        Args:
+            question: User's natural language question.
+            trace_id: Unique trace ID for this query.
+            user_context: Dict with user_id, org_id, roles.
+            session_id: Session identifier.
+            on_room_text: Callback for HiClaw native plain text (thinking stream).
+            timeout: Max seconds to wait. Raises asyncio.TimeoutError on expiry.
+
+        Returns:
+            MatrixMessage with msgtype "result" or "error".
+
+        Raises:
+            asyncio.TimeoutError: If no response arrives within timeout seconds.
+            RuntimeError: If not connected or DM room creation fails.
+        """
+        if self._client is None:
+            raise RuntimeError("MatrixClient not connected")
+
+        queue: asyncio.Queue[MatrixMessage] = asyncio.Queue()
+        self._pending_queues[trace_id] = queue
+        room_id: str | None = None
+
+        try:
+            from nio import RoomCreateResponse
+
+            room_id = self.room_manager.get_room_id(session_id)
+            if not room_id:
+                server_name = self.homeserver_url.split("//")[-1].split(":")[0]
+                manager_user = f"@honeybadge-manager:{server_name}"
+                resp = await self._client.room_create(
+                    invite=[manager_user], is_direct=True
+                )
+                if not isinstance(resp, RoomCreateResponse):
+                    raise RuntimeError(
+                        f"Failed to create DM room with HiClaw Manager: {resp}"
+                    )
+                room_id = resp.room_id
+                self.room_manager.register(session_id, room_id, trace_id)
+                logger.info(
+                    "hiclaw_dm_room_created", session_id=session_id, room_id=room_id
+                )
+
+            self._room_text_callbacks[room_id] = on_room_text
+
+            # CONTRACT-001: send query
+            content = {
+                "msgtype": "m.text",
+                "body": f"[HoneyBadge] query trace={trace_id}",
+                "x-honeybadge": {
+                    "version": "1",
+                    "type": "query",
+                    "trace_id": trace_id,
+                    "question": question,
+                    "user_id": user_context.get("user_id", ""),
+                    "org_id": user_context.get("org_id", ""),
+                    "roles": user_context.get("roles", []),
+                    "session_id": session_id,
+                },
+            }
+            await self._client.room_send(room_id, "m.room.message", content)
+            logger.info("hiclaw_query_sent", trace_id=trace_id, room_id=room_id)
+
+            # Wait for CONTRACT-002 or CONTRACT-003 response
+            start = asyncio.get_running_loop().time()
+            while True:
+                elapsed = asyncio.get_running_loop().time() - start
+                remaining = timeout - elapsed
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                msg = await asyncio.wait_for(queue.get(), timeout=remaining)
+                if msg.msgtype in ("result", "error"):
+                    return msg
+                logger.warning(
+                    "hiclaw_unexpected_msg_type",
+                    msgtype=msg.msgtype,
+                    trace_id=trace_id,
+                )
+        finally:
+            self._pending_queues.pop(trace_id, None)
+            if room_id:
+                self._room_text_callbacks.pop(room_id, None)
 
     async def bootstrap_schema(self, schema_cache: SchemaCache) -> None:
         """

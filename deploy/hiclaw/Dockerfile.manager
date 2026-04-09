@@ -1,30 +1,18 @@
 # deploy/hiclaw/Dockerfile.manager
-# Manager Docker image - Python base, installs from pyproject.toml
+# HiClaw Manager container — applies to HiClaw v1.0.6
+#
+# UPGRADE CHECKLIST (see docs/patches/hiclaw-interface-contract-v1.md):
+#   1. Verify x-honeybadge field passthrough (Manager must not strip x-honeybadge)
+#   2. Verify Worker SKILL.md syntax is compatible with new version
+#   3. Verify mcporter MCP call conventions unchanged
+#   4. Verify Matrix DM room auto-accept behavior unchanged
+#
+# TODO: Replace image name with actual registry path once confirmed.
+#       Expected format: registry.cn-hangzhou.aliyuncs.com/hiclaw/manager:v1.0.6
 
-FROM python:3.12-slim
+FROM hiclaw/manager:v1.0.6
 
-WORKDIR /app
+# Copy agent configuration (LLM routing rules, system prompts for Manager)
+COPY agent/ /app/agent/
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy source before install so pip install -e . can find the package
-COPY pyproject.toml .
-COPY src/ ./src/
-RUN pip install --no-cache-dir -e .
-
-# Environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
-
-# Expose manager port
-EXPOSE 8090
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8090/api/health || exit 1
-
-# Run manager
-CMD ["python", "-m", "honeybadge.__main__", "manager"]
+EXPOSE 8080

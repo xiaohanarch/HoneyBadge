@@ -153,3 +153,50 @@ async def test_matrix_client_auto_registers_when_user_not_exists():
         # Clean up - remove mock nio module
         if 'nio' in sys.modules:
             del sys.modules['nio']
+
+
+def test_matrix_message_from_hiclaw_dict_result():
+    content = {
+        "msgtype": "m.text",
+        "body": "[HoneyBadge] result trace=TRC-20260408-120000-abcd1234",
+        "x-honeybadge": {
+            "version": "1",
+            "type": "result",
+            "trace_id": "TRC-20260408-120000-abcd1234",
+            "summary": "发现3笔疑似异常交易",
+            "ngql": "MATCH (po:PurchaseOrder) RETURN po",
+            "rows": [{"po_number": "PO001", "amount": 100}],
+            "columns": ["po_number", "amount"],
+            "row_count": 1,
+            "execution_time_ms": 500,
+        },
+    }
+    msg = MatrixMessage.from_hiclaw_dict(content)
+    assert msg.msgtype == "result"
+    assert msg.trace_id == "TRC-20260408-120000-abcd1234"
+    assert msg.summary == "发现3笔疑似异常交易"
+    assert msg.ngql == "MATCH (po:PurchaseOrder) RETURN po"
+    assert msg.rows == [{"po_number": "PO001", "amount": 100}]
+    assert msg.columns == ["po_number", "amount"]
+    assert msg.row_count == 1
+    assert msg.execution_time_ms == 500
+
+
+def test_matrix_message_from_hiclaw_dict_error():
+    content = {
+        "msgtype": "m.text",
+        "body": "[HoneyBadge] error trace=TRC-20260408-120000-abcd1234",
+        "x-honeybadge": {
+            "version": "1",
+            "type": "error",
+            "trace_id": "TRC-20260408-120000-abcd1234",
+            "error_code": "VALIDATION_ERROR",
+            "error_message": "L1 语法校验失败",
+            "recoverable": False,
+        },
+    }
+    msg = MatrixMessage.from_hiclaw_dict(content)
+    assert msg.msgtype == "error"
+    assert msg.error_code == "VALIDATION_ERROR"
+    assert msg.error_message == "L1 语法校验失败"
+    assert msg.recoverable is False

@@ -184,3 +184,16 @@ class TestConfigFromEnv:
         assert config.matrix_homeserver_url == "http://localhost:6167"
         assert config.matrix_user_id == "@honeybadge-gateway:matrix-local.hiclaw.io"
         assert config.matrix_user_password == ""
+
+
+def test_hiclaw_query_timeout_default():
+    from honeybadge.server.config import ServerConfig
+    config = ServerConfig()
+    assert config.hiclaw_query_timeout == 60.0
+
+
+def test_hiclaw_query_timeout_from_env(monkeypatch):
+    monkeypatch.setenv("HICLAW_QUERY_TIMEOUT", "120")
+    from honeybadge.server.config import ServerConfig
+    config = ServerConfig.from_env()
+    assert config.hiclaw_query_timeout == 120.0
