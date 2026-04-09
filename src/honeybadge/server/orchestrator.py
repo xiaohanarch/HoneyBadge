@@ -841,6 +841,7 @@ def create_orchestrator(
     pg: PostgreSQLClient,
     redis: RedisClient,
     validator: NgqlValidator,
+    matrix_client: Optional[MatrixClient] = None,
 ) -> QueryOrchestrator:
     """Factory function to create the appropriate QueryOrchestrator.
 
@@ -851,19 +852,26 @@ def create_orchestrator(
         pg: PostgreSQL client.
         redis: Redis client.
         validator: nGQL validator.
+        matrix_client: MatrixClient instance. Required when orchestrator_type is "hiclaw".
 
     Returns:
         Configured QueryOrchestrator instance.
 
     Raises:
-        NotImplementedError: If orchestrator_type is "hiclaw" (Phase 2+).
-        ValueError: If orchestrator_type is unknown.
+        ValueError: If orchestrator_type is "hiclaw" and matrix_client is None,
+                    or if orchestrator_type is unknown.
     """
     orchestrator_type = config.orchestrator_type
 
     if orchestrator_type == "hiclaw":
-        raise NotImplementedError(
-            "HiClaw orchestrator not yet implemented. Use ORCHESTRATOR_TYPE=direct"
+        if matrix_client is None:
+            raise ValueError(
+                "ORCHESTRATOR_TYPE=hiclaw 需要传入 matrix_client"
+            )
+        return HiClawOrchestrator(
+            matrix_client=matrix_client,
+            pg=pg,
+            query_timeout=getattr(config, "hiclaw_query_timeout", 60.0),
         )
 
     if orchestrator_type == "direct":
@@ -877,5 +885,6 @@ def create_orchestrator(
         )
 
     raise ValueError(
-        f"Unknown orchestrator_type: '{orchestrator_type}'. Valid values: 'direct', 'hiclaw'"
+        f"Unknown orchestrator_type: '{orchestrator_type}'. "
+        "Valid values: 'direct', 'hiclaw'"
     )

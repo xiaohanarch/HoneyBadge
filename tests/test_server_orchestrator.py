@@ -159,12 +159,36 @@ def test_create_orchestrator_direct(
     assert isinstance(orch, DirectPipelineOrchestrator)
 
 
-# Test 6: create_orchestrator hiclaw raises NotImplementedError
-def test_create_orchestrator_hiclaw(
+# Test 6: create_orchestrator hiclaw raises ValueError when matrix_client not passed
+def test_create_orchestrator_hiclaw_no_matrix_client(
     mock_nebula, mock_llm, mock_pg, mock_redis, mock_validator
 ):
     from honeybadge.server.config import ServerConfig
 
     config = ServerConfig(orchestrator_type="hiclaw")
-    with pytest.raises(NotImplementedError):
-        create_orchestrator(config, mock_nebula, mock_llm, mock_pg, mock_redis, mock_validator)
+    with pytest.raises(ValueError, match="matrix_client"):
+        create_orchestrator(
+            config, mock_nebula, mock_llm, mock_pg, mock_redis, mock_validator
+        )
+
+
+# Test 7: create_orchestrator hiclaw succeeds when matrix_client is provided
+def test_create_orchestrator_hiclaw_with_matrix_client(
+    mock_nebula, mock_llm, mock_pg, mock_redis, mock_validator
+):
+    from honeybadge.server.config import ServerConfig
+    from honeybadge.server.orchestrator import HiClawOrchestrator
+    from unittest.mock import MagicMock
+
+    config = ServerConfig(orchestrator_type="hiclaw")
+    mock_matrix = MagicMock()
+    orch = create_orchestrator(
+        config,
+        mock_nebula,
+        mock_llm,
+        mock_pg,
+        mock_redis,
+        mock_validator,
+        matrix_client=mock_matrix,
+    )
+    assert isinstance(orch, HiClawOrchestrator)
