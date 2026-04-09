@@ -365,7 +365,7 @@ class MatrixClient:
                         f"Failed to create DM room with HiClaw Manager: {resp}"
                     )
                 room_id = resp.room_id
-                self.room_manager.register(session_id, room_id)
+                self.room_manager.register(session_id, room_id, trace_id)
                 logger.info(
                     "hiclaw_dm_room_created", session_id=session_id, room_id=room_id
                 )
