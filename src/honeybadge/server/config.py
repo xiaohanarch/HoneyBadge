@@ -85,6 +85,11 @@ class ServerConfig:
     matrix_user_id: str = field(default="@honeybadge-gateway:matrix-local.hiclaw.io")
     matrix_user_password: str = field(default="")
 
+    # -------------------------------------------------------------------------
+    # HiClaw orchestrator settings
+    # -------------------------------------------------------------------------
+    hiclaw_query_timeout: float = field(default=60.0)
+
     @classmethod
     def from_env(cls) -> "ServerConfig":
         """Create a ServerConfig by reading environment variables.
@@ -135,4 +140,6 @@ class ServerConfig:
             matrix_homeserver_url=os.environ.get("MATRIX_HOMESERVER_URL", "http://localhost:6167"),
             matrix_user_id=os.environ.get("MATRIX_USER_ID", "@honeybadge-gateway:matrix-local.hiclaw.io"),
             matrix_user_password=os.environ.get("MATRIX_USER_PASSWORD", ""),
+            # HiClaw
+            hiclaw_query_timeout=float(os.environ.get("HICLAW_QUERY_TIMEOUT", "60")),
         )
