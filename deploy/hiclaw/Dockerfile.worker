@@ -1,34 +1,17 @@
 # deploy/hiclaw/Dockerfile.worker
-# Worker Docker image - Python base with GPU support
+# HiClaw Worker (OpenClaw) container — applies to HiClaw v1.0.6
+#
+# UPGRADE CHECKLIST (see docs/patches/hiclaw-interface-contract-v1.md):
+#   1. Verify Worker SKILL.md directory structure and instruction syntax
+#   2. Verify mcporter MCP tool call conventions (tool names, transport)
+#   3. Verify Worker sends x-honeybadge fields in result/error messages
+#
+# TODO: Replace image name with actual registry path once confirmed.
+#       Expected format: registry.cn-hangzhou.aliyuncs.com/hiclaw/worker-openclaw:v1.0.6
 
-FROM python:3.12-slim
+FROM hiclaw/worker-openclaw:v1.0.6
 
-WORKDIR /app
+# Copy skill definitions: SKILL.md + mcporter MCP configs
+COPY skill/ /app/agent/skills/
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies first (cached layer)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy source before install so pip install -e . can find the package
-COPY pyproject.toml .
-COPY src/ ./src/
-RUN pip install --no-cache-dir --no-deps -e .
-
-# Environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
-
-# Expose worker port (for health check and metrics)
 EXPOSE 8080
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
-
-# Run worker
-CMD ["python", "-m", "honeybadge.__main__", "worker"]
