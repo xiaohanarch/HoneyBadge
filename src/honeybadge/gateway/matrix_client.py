@@ -391,9 +391,9 @@ class MatrixClient:
             logger.info("hiclaw_query_sent", trace_id=trace_id, room_id=room_id)
 
             # Wait for CONTRACT-002 or CONTRACT-003 response
-            start = asyncio.get_event_loop().time()
+            start = asyncio.get_running_loop().time()
             while True:
-                elapsed = asyncio.get_event_loop().time() - start
+                elapsed = asyncio.get_running_loop().time() - start
                 remaining = timeout - elapsed
                 if remaining <= 0:
                     raise asyncio.TimeoutError()
