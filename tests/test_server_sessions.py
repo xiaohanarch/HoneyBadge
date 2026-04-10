@@ -17,7 +17,6 @@ def app():
     application.state.redis = AsyncMock()
     application.state.nebula = AsyncMock()
     application.state.llm = AsyncMock()
-    application.state.orchestrator = AsyncMock()
     application.state.pg._pool = MagicMock()
 
     return application
