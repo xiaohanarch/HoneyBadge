@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
 # Install only what auth_service needs
-RUN pip install --no-cache-dir fastapi uvicorn "python-jose[cryptography]" httpx structlog passlib[bcrypt]
+RUN pip install --no-cache-dir fastapi uvicorn "python-jose[cryptography]" httpx structlog "passlib[bcrypt]" "bcrypt==4.0.1"
 # Copy source files needed
 COPY src/honeybadge/server/auth.py /app/honeybadge/server/auth.py
 COPY src/honeybadge/server/__init__.py /app/honeybadge/server/__init__.py

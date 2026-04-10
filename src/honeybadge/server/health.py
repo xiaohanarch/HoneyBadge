@@ -43,17 +43,6 @@ async def health_check(request: Request):
     except Exception as e:
         services["nebula"] = {"status": "down", "error": str(e)}
 
-    # Check LLM
-    try:
-        llm = request.app.state.llm
-        if llm:
-            healthy = await llm.health_check()
-            services["llm"] = {"status": "up" if healthy else "degraded"}
-        else:
-            services["llm"] = {"status": "down", "error": "not configured"}
-    except Exception as e:
-        services["llm"] = {"status": "down", "error": str(e)}
-
     all_up = all(s.get("status") == "up" for s in services.values())
     return {
         "status": "healthy" if all_up else "degraded",

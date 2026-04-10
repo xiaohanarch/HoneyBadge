@@ -10,5 +10,5 @@ COPY mcp-servers/honeybadge-cache-mcp/ ./mcp-servers/honeybadge-cache-mcp/
 ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD python -c "import socket; s=socket.create_connection(('localhost',8000),2); s.close()" || exit 1
 CMD ["python", "-m", "honeybadge.__main__", "cache-mcp"]

@@ -35,13 +35,13 @@ console_exec() {
 }
 
 # Run a .ngql file by piping it to nebula-console stdin
+# Uses cat | docker run -i to avoid Windows Git Bash path translation issues with < redirect
 console_file() {
     local file="$1"
-    docker run --rm --network "$NETWORK" --entrypoint="" \
+    cat "${SCRIPT_DIR}/${file}" | docker run --rm -i --network "$NETWORK" --entrypoint="" \
         "$CONSOLE_IMAGE" \
         nebula-console -addr "$NEBULA_ADDR" -P "$NEBULA_PORT" \
-        -u "$NEBULA_USER" -password "$NEBULA_PASSWORD" \
-        < "${SCRIPT_DIR}/${file}"
+        -u "$NEBULA_USER" -password "$NEBULA_PASSWORD"
 }
 
 echo "=========================================="
