@@ -31,15 +31,15 @@ def main() -> None:
     if args.command == "nebula-mcp":
         sys.path.insert(0, "mcp-servers/honeybadge-nebula-mcp")
         from server import mcp  # type: ignore[import]
-        mcp.run(transport="sse")
+        mcp.run(transport="sse", host="0.0.0.0", port=8000)
     elif args.command == "audit-mcp":
         sys.path.insert(0, "mcp-servers/honeybadge-audit-mcp")
         from server import mcp  # type: ignore[import]
-        mcp.run(transport="sse")
+        mcp.run(transport="sse", host="0.0.0.0", port=8000)
     elif args.command == "cache-mcp":
         sys.path.insert(0, "mcp-servers/honeybadge-cache-mcp")
         from server import mcp  # type: ignore[import]
-        mcp.run(transport="sse")
+        mcp.run(transport="sse", host="0.0.0.0", port=8000)
 
 
 # =============================================================================

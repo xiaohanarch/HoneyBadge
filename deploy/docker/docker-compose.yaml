@@ -236,7 +236,12 @@ services:
     volumes:
       - hiclaw_manager_data:/data    # Persists MinIO data + Tuwunel DB
     networks:
-      - honeybadge-net
+      honeybadge-net:
+        aliases:
+          # These hostnames are used by HiClaw workers to reach services inside this container.
+          # Docker DNS resolves them to the manager's current IP automatically — no hardcoded IPs.
+          - aigw-local.hiclaw.io        # Higress AI Gateway (port 8080) — LLM calls
+          - matrix-local.hiclaw.io      # Tuwunel Matrix server (port 6167)
     healthcheck:
       # MinIO health endpoint — confirms internal MinIO is ready for Workers
       test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
