@@ -1,9 +1,9 @@
 # 企业级知识图谱智能助手项目 - 技术架构与实施全书
 
 > 项目代号：HoneyBadge
-> 文档版本：v2.0
-> 最后更新：2026-04-04
-> 说明：本文档整合了项目启动以来的所有技术讨论、架构决策、选型评估与实施计划，作为项目执行的唯一权威参考。
+> 文档版本：v3.0
+> 最后更新：2026-04-10
+> 说明：本文档整合了项目启动以来的所有技术讨论、架构决策、选型评估与实施计划，作为项目执行的唯一权威参考。v3.0 新增 Phase 1 Approach B 架构实现说明：浏览器直连 Matrix 方案，解决 HiClaw per-channel-peer 会话隔离问题。
 
 ---
 
@@ -85,10 +85,11 @@
 **核心任务**：
 - 编排层：OpenClaw → **HiClaw**（Manager-Worker架构）
 - 图谱库：Neo4j → **NebulaGraph**（分布式，存算分离）
-- AI网关：部署 **Higress** + 对接企业 SSO
+- AI网关：部署 **Higress**（内嵌于 HiClaw Manager）
 - 可观测性：Prometheus + Grafana + Loki + Jaeger
-- 前端：WebSocket 基础聊天界面 + 历史会话
+- 前端：**matrix-js-sdk 直连聊天界面**（Approach B）
 - 防幻觉框架：五层 Cypher 校验 + 全链路审计日志
+- **Approach B — 每用户独立 Matrix 账号**：解决 HiClaw per-channel-peer 设计下的会话隔离问题（详见 5.3 节）
 
 ### 2.3 Phase 2：业务能力扩展
 
@@ -123,10 +124,46 @@
 
 ### 3.1 架构图
 
+#### Phase 1 实现架构（Approach B — 当前）
+
+```
+     ┌───────────────────┐
+     │     前端 Web        │  Vue 3 + matrix-js-sdk
+     └──┬─────────────┬───┘
+        │             │
+   POST /login    matrix-js-sdk
+        │         (直连 Matrix)
+        ↓             ↓
+ ┌────────────┐  ┌──────────────────────────────────────────────┐
+ │honeybadge  │  │      HiClaw Manager (all-in-one 容器)         │
+ │  -auth     │  │                                              │
+ │  :8091     │  │  Tuwunel Matrix (:6167) ← 浏览器直连          │
+ │            │  │  MinIO (worker 配置)                         │
+ │ 认证用户   │  │  Higress AI Gateway (:8080)                   │
+ │ 创建 Matrix│  │  Element Web (:18888)                        │
+ │ 账号       │  │                                              │
+ │ 返回 token │  │  Manager Agent ──→ graph-worker              │
+ └────────────┘  │                ──→ analytics-worker          │
+                 └──────────────────────────────────────────────┘
+                                       ↓ MCP
+                 ┌──────────────────────────────────────────────┐
+                 │  MCP Servers (nebula-mcp / audit-mcp / ...)  │
+                 └──────────────────────────────────────────────┘
+                                       ↓
+     ┌──────────────────────────────────────────────────────────┐
+     │                   基础设施层                              │
+     │  NebulaGraph │ PostgreSQL │ Redis │ (Milvus — Phase 2)   │
+     └──────────────────────────────────────────────────────────┘
+
+     honeybadge-server (:8090) — 审计 REST API（不再处理聊天）
+```
+
+#### 目标架构（Phase 3+）
+
 ```
                         ┌─────────────┐
                         │   前端 Web    │
-                        │  (WebSocket)  │
+                        │  (matrix-sdk) │
                         └──────┬───────┘
                                ↓
                         ┌──────────────┐
@@ -162,7 +199,8 @@
 | 消息队列 | 从一开始就使用 Kafka | 避免后期 CDC 场景迁移 |
 | 数据范围 | 聚焦狭义 ERP（PTP + OTC + 主数据） | 先做深做透一个域 |
 | 数据同步 | Phase 1-2 用 T+1，Phase 3 按需升级 CDC | T+1 匹配 ERP 业务节奏 |
-| 前后端通信 | WebSocket 为主，HTTP REST 为辅 | Agent 执行需要流式输出和中间状态推送 |
+| 前后端通信 | matrix-js-sdk 直连（Approach B） | 解决 HiClaw per-channel-peer 会话碰撞；浏览器直连 Tuwunel，无需代理层 |
+| 用户 Matrix 身份 | 每用户独立 `@hb-{user}` 账号 | 共享网关账号导致 Manager 只响应第一个 DM 房间；per-user 账号彻底隔离 |
 | 数据入图策略 | 交易明细必须入图（非联邦查询） | 虚假交易检测等核心场景依赖明细数据 |
 
 ---
@@ -203,6 +241,18 @@ Matrix Room 是极轻量的消息通道（创建成本几乎为零），Worker �
 用户 C ←→ Matrix Room C ←→
 ```
 每个用户有独立的 Room（隔离会话），但共享 Worker Pool（节省资源）。
+
+**Phase 1 关键实现细节：per-channel-peer 与用户身份**
+
+HiClaw Manager 的 `per-channel-peer` 设计：每个通信 peer（Matrix 用户 ID）只维护一个活跃的 DM 会话。
+
+这意味着：**不能用单一共享 Matrix 账号（如 `@honeybadge-gateway`）代表所有用户**。若这样做，所有用户的消息来源都是同一个 peer，Manager 只会响应第一个建立的 DM 房间，后续用户发起的新 DM 房间将永远超时等待响应——这正是 Phase 0 遗留架构的根本性 bug（Approach A 的失败原因）。
+
+**Approach B 解决方案**：
+- 登录时由 `honeybadge-auth` 服务在 Tuwunel 中创建用户专属账号 `@hb-{username}:matrix-local.hiclaw.io`
+- 每个用户用自己的 Matrix 身份与 Manager 建立 DM，Manager 为每个不同的 peer 独立维护会话
+- 浏览器通过 `matrix-js-sdk` 直接连接 Tuwunel（:6167），无需 honeybadge-server 代理
+- 权限信息通过消息中的 `x-hb-auth` 字段（roles JWT）传递给 graph-worker
 
 ### 4.2 图谱存储：NebulaGraph
 
@@ -451,28 +501,53 @@ HiClaw 基于 Python（OpenClaw 生态），而权限服务是 Java SDK，通过
 
 ### 5.3 多用户会话隔离
 
-**需求**：不同用户登录后保有自己的历史查询结果，区分不同用户行为（不同于 OpenClaw 不区分用户）。
+**需求**：不同用户登录后保有自己的历史查询结果，各用户会话完全独立。
 
-**方案：HiClaw Matrix Room 天然隔离 + 持久化存储**
+#### 5.3.1 根本性挑战：HiClaw per-channel-peer 设计
+
+HiClaw Manager 对每个 Matrix peer（用户 ID）只维护一个活跃的 DM 房间。如果多个用户共用同一 Matrix 账号，它们的消息来源对 Manager 来说是同一个 peer，Manager 只会响应最初的那个 DM 房间，新用户建立的 DM 永远等不到响应。
+
+这一问题在 Phase 1 实现中被彻底解决（**Approach B**）。
+
+#### 5.3.2 Approach B：每用户独立 Matrix 身份
 
 ```
-用户 A 登录（SSO）→ 获得 user_id + token
-       ↓
-HiClaw 为用户 A 创建/恢复专属 Matrix Room
-       ↓
-会话上下文存储：
-  - 短期（当前对话）：Redis Hash  key=session:{user_id}:{session_id}
-  - 长期（历史查询）：PostgreSQL/MongoDB  按 user_id 分区
-  - 向量记忆（语义搜索历史）：Milvus  按 user_id 做 partition
+用户 A 登录 → honeybadge-auth 创建 @hb-admin:matrix-local.hiclaw.io
+      ↓
+浏览器用 @hb-admin 的 access_token 连接 Tuwunel
+      ↓
+用户 A 与 Manager 建立独立 DM 房间（Room-A）
+Manager 将 Room-A 与 @hb-admin peer 绑定
 
-用户 A 下次登录 → 恢复 Matrix Room + 加载历史
+用户 B 登录 → honeybadge-auth 创建 @hb-analyst:matrix-local.hiclaw.io
+      ↓
+浏览器用 @hb-analyst 的 access_token 连接 Tuwunel
+      ↓
+用户 B 与 Manager 建立独立 DM 房间（Room-B）
+Manager 将 Room-B 与 @hb-analyst peer 绑定（与 Room-A 完全独立）
 ```
 
-关键实现点：
-- HiClaw Matrix Room = 用户会话容器，天然隔离不同用户
-- 历史查询结果持久化到数据库，按 user_id 索引
-- 前端展示历史对话列表，类似 ChatGPT 的 conversation history
-- 支持用户手动删除/归档历史会话
+**Matrix 密码派生**：`HMAC-SHA256(MATRIX_USER_SECRET, username)`，由 honeybadge-auth 在服务端派生，不存储在数据库中。
+
+**会话上下文存储**（Phase 1 已实现基础，Phase 2 完善）：
+- 当前对话：Matrix Room 历史（天然持久化在 Tuwunel）
+- 长期历史：PostgreSQL，按 user_id 分区
+- 向量记忆（Phase 2）：Milvus，按 user_id 做 partition
+
+#### 5.3.3 x-hb-auth：权限上下文传递
+
+用户的角色和组织权限通过 Matrix 消息中的 `x-hb-auth` 字段传递给 graph-worker：
+
+```json
+{
+  "msgtype": "m.text",
+  "body": "查询采购订单",
+  "x-hb-auth": "<roles_jwt>",
+  "x-honeybadge": { "contract": "001", "trace_id": "..." }
+}
+```
+
+graph-worker 从 `x-hb-auth` 中解码出 `{user_id, roles, org_id}`，传入 `validate_and_execute` MCP 工具作为 `user_context`，实现 L3 权限校验。
 
 ### 5.4 数据入图策略
 
@@ -568,32 +643,63 @@ NebulaGraph 只存高价值的实体关系网络，其余数据通过 MCP 按需
 
 ### 5.8 前后端集成方案
 
-**决策：WebSocket 为主通道，HTTP REST 为辅助通道。**
+#### 5.8.1 Phase 1 实现：matrix-js-sdk 直连（Approach B）
 
-| 维度 | HTTP（请求-响应） | WebSocket（长连接） |
-|------|-------------------|---------------------|
-| 流式输出 | 需要 SSE 模拟 | 原生支持 |
-| 长时间查询 | 容易超时 | 天然适合 |
-| Token 流式展示 | 需要额外处理 | 逐 token 推送，体验好 |
-| 多步 Agent 过程 | 无法展示中间状态 | 可以推送每步进展 |
-| 实现复杂度 | 低 | 中 |
-| 负载均衡 | 简单 | 需要 sticky session 或 Manager 转发 |
-
-**推荐方案**：
+**决策：浏览器通过 matrix-js-sdk 直接连接 Tuwunel，不再使用 WebSocket 代理。**
 
 ```
-主通道：WebSocket
-  - Agent 执行过程的流式输出（思考过程、中间结果、最终答案）
-  - 类似 ChatGPT 的逐字输出体验
-  - HiClaw 基于 Matrix 协议，本身就是长连接模式，WebSocket 是自然选择
+登录流程：
+  浏览器 POST /login → honeybadge-auth
+                         ├─ 验证用户名密码
+                         ├─ 在 Tuwunel 创建/登录 @hb-{user} 账号
+                         └─ 返回 { matrix_access_token, matrix_homeserver, roles_jwt }
 
-辅助通道：HTTP REST API
-  - 用户登录/登出
-  - 历史会话列表查询
-  - 配额查询
-  - 管理接口（用户管理、权限配置等）
-  - 健康检查
+聊天流程：
+  浏览器 matrix-js-sdk.createClient(homeserver, access_token)
+    ↓
+  client.startClient() → 建立 Matrix 长连接（SSE/长轮询）
+    ↓
+  findOrCreateManagerDmRoom() → 查找/创建与 @manager 的 DM 房间
+    ↓
+  sendEvent(roomId, 'm.room.message', { body, x-honeybadge, x-hb-auth })
+    ↓
+  监听 Room.timeline 事件 → 接收 Manager/Worker 的回复
 ```
+
+**与 WebSocket 代理方案的对比**：
+
+| 维度 | WebSocket 代理（旧） | matrix-js-sdk 直连（当前） |
+|------|---------------------|--------------------------|
+| 会话隔离 | ❌ 共享账号导致冲突 | ✅ 每用户独立 Matrix 身份 |
+| 中间层 | honeybadge-server 代理 | 无（浏览器直连） |
+| 流式输出 | WebSocket 推送 | Matrix Room 事件流 |
+| 可审计性 | 代理层审计 | Matrix Room 历史天然可审计 |
+| 复杂度 | 代理状态管理复杂 | 标准 Matrix SDK，无代理状态 |
+
+#### 5.8.2 各通道职责
+
+```
+主通道：matrix-js-sdk（聊天 + Agent 响应流）
+  - 用户发送问题 → Matrix DM 消息（x-honeybadge contract: 001）
+  - 接收进度推送 → 纯文本 Matrix 事件（流式感知）
+  - 接收最终结果 → Matrix 事件（x-honeybadge contract: 002）
+  - 接收错误 → Matrix 事件（x-honeybadge contract: 003）
+
+辅助通道：HTTP REST（honeybadge-auth + honeybadge-server）
+  - POST /login（honeybadge-auth）：认证 + Matrix 账号创建
+  - GET /api/health（honeybadge-server）：基础设施健康状态
+  - GET /api/audit/{trace_id}（honeybadge-server）：审计查询（Phase 2）
+  - GET /api/sessions（honeybadge-server）：历史会话列表（Phase 2）
+```
+
+#### 5.8.3 x-honeybadge 消息协议
+
+| Contract | 方向 | 说明 |
+|----------|------|------|
+| 001 | 浏览器 → Manager | 用户查询请求 |
+| 002 | graph-worker → 浏览器 | 查询结果（含 trace_id、raw_data） |
+| 003 | graph-worker → 浏览器 | 错误响应 |
+| 纯文本 | graph-worker → 浏览器 | 中间进度（思考过程、验证状态） |
 
 ### 5.9 可观测性体系
 
@@ -1221,3 +1327,4 @@ Phase 3 (24周): 7-8 人 × 24 周 = 168-192 人周
 |------|------|----------|
 | v1.0 | 2026-04-03 | 初始技术讨论纪要 |
 | v2.0 | 2026-04-04 | 整合全部架构讨论：四阶段演进、防幻觉体系、数据入图策略修正、权限集成方案、容量规划（两场景）、团队配置、学习曲线计划、业界实践对比分析 |
+| v3.0 | 2026-04-10 | Phase 1 Approach B 实现说明：（1）5.3 节—多用户会话隔离根因分析与 per-user Matrix 账号方案；（2）5.8 节—前后端通信从 WebSocket 代理改为 matrix-js-sdk 直连；（3）4.1 节—HiClaw per-channel-peer 机制与 Approach B 关系说明；（4）3.1 节—更新 Phase 1 实际架构图；（5）新增 honeybadge-auth 微服务说明 |
