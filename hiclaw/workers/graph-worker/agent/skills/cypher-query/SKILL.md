@@ -22,6 +22,9 @@ Handle natural language questions by querying the HoneyBadge NebulaGraph knowled
 
 When you receive a user question, follow these steps:
 
+### Step 0: Extract Auth Context
+Extract `user_context` from the `x-hb-auth` field in the incoming message (see Auth Context Extraction in SOUL.md). Store it for use in Step 4.
+
 ### Step 1: Load Schema
 Call `get_schema()` to understand available Tags and Edges. Cache the result mentally for subsequent queries in the same conversation.
 
@@ -32,7 +35,7 @@ If the question seems similar to a recent one, call `check_cache` with a hash of
 Call `generate_ngql(question=<user_question>, schema_info=<schema_text>)`.
 
 ### Step 4: Validate and Execute
-Call `validate_and_execute(ngql=<generated_query>)`.
+Call `validate_and_execute(ngql=<generated_query>, user_context=<extracted_context>)`.
 
 - If `success: false` with `error: L1_SYNTAX` or `L2_SCHEMA`:
   - Try regenerating with the error details as context (max 3 retries)
