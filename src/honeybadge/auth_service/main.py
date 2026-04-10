@@ -153,7 +153,18 @@ async def _provision_matrix_account(username: str, password: str) -> str:
             reg_response = await client.post(register_url, json=register_payload)
 
             if reg_response.status_code in (200, 201):
-                data = reg_response.json()
+                try:
+                    data = reg_response.json()
+                except ValueError:
+                    logger.error(
+                        "matrix_response_invalid_json",
+                        status=reg_response.status_code,
+                        body=reg_response.text[:200],
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Invalid response from Matrix homeserver",
+                    )
                 access_token: str = data["access_token"]
                 logger.info(
                     "matrix_register_success",
@@ -161,7 +172,18 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                 )
                 return access_token
 
-            reg_data = reg_response.json()
+            try:
+                reg_data = reg_response.json()
+            except ValueError:
+                logger.error(
+                    "matrix_response_invalid_json",
+                    status=reg_response.status_code,
+                    body=reg_response.text[:200],
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail="Invalid response from Matrix homeserver",
+                )
             errcode = reg_data.get("errcode", "")
 
             if reg_response.status_code == 400 and errcode == "M_USER_IN_USE":
@@ -181,7 +203,18 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                 login_response = await client.post(login_url, json=login_payload)
 
                 if login_response.status_code == 200:
-                    login_data = login_response.json()
+                    try:
+                        login_data = login_response.json()
+                    except ValueError:
+                        logger.error(
+                            "matrix_response_invalid_json",
+                            status=login_response.status_code,
+                            body=login_response.text[:200],
+                        )
+                        raise HTTPException(
+                            status_code=502,
+                            detail="Invalid response from Matrix homeserver",
+                        )
                     access_token = login_data["access_token"]
                     logger.info(
                         "matrix_login_success",
