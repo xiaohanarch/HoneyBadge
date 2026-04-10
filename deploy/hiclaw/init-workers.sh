@@ -107,30 +107,132 @@ docker exec "$MANAGER_CONTAINER" bash -c \
     || warn "  create-worker.sh for analytics-worker failed (may already exist)"
 
 # ---------------------------------------------------------------------------
-# 4. Per-user Matrix accounts (Approach B)
-#    Per-user Matrix accounts are now provisioned at login time by the
-#    honeybadge-auth service (src/honeybadge/auth_service/main.py).
-#    The shared @honeybadge-gateway account is no longer needed.
+# 3b. Fix worker LLM baseUrl: hiclaw-manager:8080 → aigw-local.hiclaw.io:8080
+#
+#     create-worker.sh generates openclaw.json with baseUrl=http://hiclaw-manager:8080/v1.
+#     Higress requires Host: aigw-local.hiclaw.io to route AI requests.
+#     docker-compose.yaml gives hiclaw-manager a network alias aigw-local.hiclaw.io,
+#     so workers resolve this name to the manager's current IP via Docker DNS —
+#     no hardcoded IPs needed.
 # ---------------------------------------------------------------------------
+log "Fixing worker LLM baseUrl (hiclaw-manager → aigw-local.hiclaw.io)..."
+for worker in graph-worker analytics-worker; do
+    docker exec "$MANAGER_CONTAINER" bash -c "
+python3 << 'EOF'
+import json, os, sys
+
+paths = [
+    '/tmp/${worker}-workspace/openclaw.json',
+    '/root/hiclaw-fs/agents/${worker}/openclaw.json',
+]
+
+# Find the worker's openclaw.json (location varies by HiClaw version)
+cfg_path = None
+for p in paths:
+    if os.path.exists(p):
+        cfg_path = p
+        break
+
+if cfg_path is None:
+    print('openclaw.json not found for ${worker}', file=sys.stderr)
+    sys.exit(0)
+
+with open(cfg_path) as f:
+    cfg = json.load(f)
+
+providers = cfg.get('models', {}).get('providers', {})
+for name, p in providers.items():
+    old = p.get('baseUrl', '')
+    if 'hiclaw-manager:8080' in old:
+        p['baseUrl'] = old.replace('hiclaw-manager:8080', 'aigw-local.hiclaw.io:8080')
+        print(f'Patched {name}: {old} -> {p[\"baseUrl\"]}')
+
+with open(cfg_path, 'w') as f:
+    json.dump(cfg, f, indent=2)
+print('done')
+EOF
+" && log "  → ${worker} baseUrl patched" || warn "  Failed to patch ${worker} baseUrl"
+
+    # Sync patched config to MinIO
+    docker exec "$MANAGER_CONTAINER" bash -c \
+        "mc cp /root/hiclaw-fs/agents/${worker}/openclaw.json hiclaw/hiclaw-storage/agents/${worker}/openclaw.json 2>/dev/null && echo synced || true" \
+        && log "  → ${worker} openclaw.json synced to MinIO" || warn "  MinIO sync skipped for ${worker}"
+done
 
 # ---------------------------------------------------------------------------
-# 5. Register MCP servers in Higress AI Gateway
+# 4. Per-user Matrix accounts (Approach B) + patch Manager allowlist
+#    Per-user Matrix accounts are provisioned at login time by honeybadge-auth.
+#    We must patch Manager's openclaw.json to allow @hb-* users to DM Manager.
 # ---------------------------------------------------------------------------
-log "Registering MCP servers in Higress..."
-if docker exec "$MANAGER_CONTAINER" which setup-mcp-server.sh &>/dev/null; then
-    # Copy MCP yaml configs into Manager, then register them
-    for yaml_file in "$SCRIPT_DIR"/mcp-honeybadge-*.yaml; do
-        fname=$(basename "$yaml_file")
-        docker cp "$yaml_file" "$MANAGER_CONTAINER:/tmp/$fname"
-        docker exec "$MANAGER_CONTAINER" bash -c \
-            "HIGRESS_ADMIN_URL=http://localhost:8001 setup-mcp-server.sh /tmp/$fname 2>&1" \
-            && log "  → registered $fname" \
-            || warn "  Failed to register $fname (may already exist)"
+log "Patching Manager allowlist for @hb-* users (Approach B)..."
+docker exec "$MANAGER_CONTAINER" bash -c "
+python3 -c \"
+import json
+
+cfg_path = '/root/manager-workspace/openclaw.json'
+with open(cfg_path) as f:
+    cfg = json.load(f)
+
+hb_users = [
+    '@admin:${MATRIX_DOMAIN}',
+    '@hb-admin:${MATRIX_DOMAIN}',
+    '@hb-analyst:${MATRIX_DOMAIN}',
+    '@hb-auditor:${MATRIX_DOMAIN}',
+    '@honeybadge-gateway:${MATRIX_DOMAIN}'
+]
+
+cfg['channels']['matrix']['dm'] = {'policy': 'allowlist', 'allowFrom': hb_users}
+cfg['channels']['matrix']['groupAllowFrom'] = hb_users
+
+with open(cfg_path, 'w') as f:
+    json.dump(cfg, f, indent=2)
+print('allowlist patched')
+\"
+" && log "  → Manager allowlist updated" || warn "  Failed to patch Manager allowlist"
+
+# Sync to MinIO so it survives restarts
+docker exec "$MANAGER_CONTAINER" bash -c \
+    "mc cp /root/manager-workspace/openclaw.json hiclaw/hiclaw-storage/agents/manager/openclaw.json 2>/dev/null && echo synced || true" \
+    && log "  → Synced to MinIO" || warn "  MinIO sync skipped (optional)"
+
+# ---------------------------------------------------------------------------
+# 5. Register MCP servers in each worker via mcporter config add
+#
+#    We bypass setup-mcp-server.sh (which requires a session cookie from the
+#    Higress Console and can expire).  mcporter's CLI directly writes
+#    /root/hiclaw-fs/config/mcporter.json inside the worker container, then
+#    we persist that file to MinIO so it survives restarts.
+# ---------------------------------------------------------------------------
+log "Registering MCP servers in workers via mcporter..."
+
+# Map: server-name → SSE endpoint inside the Docker network
+declare -A MCP_SERVERS=(
+    [honeybadge-nebula]="http://honeybadge-nebula-mcp:8000/sse"
+    [honeybadge-audit]="http://honeybadge-audit-mcp:8000/sse"
+    [honeybadge-cache]="http://honeybadge-cache-mcp:8000/sse"
+)
+
+for worker in graph-worker analytics-worker; do
+    WORKER_CONTAINER="honeybadge-${worker}"
+    log "  Configuring $worker..."
+    for server_name in "${!MCP_SERVERS[@]}"; do
+        endpoint="${MCP_SERVERS[$server_name]}"
+        docker exec "$WORKER_CONTAINER" bash -c \
+            "mcporter config add '$server_name' '$endpoint' --allow-http --yes 2>&1" \
+            && log "    → $server_name added" \
+            || warn "    $server_name already exists or failed"
     done
-else
-    warn "setup-mcp-server.sh not found in Manager container."
-    warn "Register MCP servers manually via Higress console: http://localhost:18001"
-fi
+
+    # Persist mcporter.json to MinIO so it survives container restarts
+    docker cp "${WORKER_CONTAINER}:/root/hiclaw-fs/config/mcporter.json" \
+        "/tmp/${worker}-mcporter.json" 2>/dev/null && \
+    docker cp "/tmp/${worker}-mcporter.json" \
+        "${MANAGER_CONTAINER}:/tmp/${worker}-mcporter.json" && \
+    docker exec "$MANAGER_CONTAINER" bash -c \
+        "mc cp /tmp/${worker}-mcporter.json hiclaw/hiclaw-storage/agents/${worker}/config/mcporter.json 2>&1 | tail -1" \
+        && log "    → mcporter.json synced to MinIO" \
+        || warn "    MinIO sync failed (config still active in running container)"
+done
 
 # ---------------------------------------------------------------------------
 # Done

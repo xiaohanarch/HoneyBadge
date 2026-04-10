@@ -24,7 +24,8 @@ async def get_current_user(
     if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
-    if payload.get("type") != "access":
+    # Accept both server-issued tokens (type="access") and auth-service tokens (iss="honeybadge-auth")
+    if payload.get("type") != "access" and payload.get("iss") != "honeybadge-auth":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
 
     return payload
