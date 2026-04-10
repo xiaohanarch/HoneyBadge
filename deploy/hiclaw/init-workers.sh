@@ -196,23 +196,43 @@ docker exec "$MANAGER_CONTAINER" bash -c \
     && log "  → Synced to MinIO" || warn "  MinIO sync skipped (optional)"
 
 # ---------------------------------------------------------------------------
-# 5. Register MCP servers in Higress AI Gateway
+# 5. Register MCP servers in each worker via mcporter config add
+#
+#    We bypass setup-mcp-server.sh (which requires a session cookie from the
+#    Higress Console and can expire).  mcporter's CLI directly writes
+#    /root/hiclaw-fs/config/mcporter.json inside the worker container, then
+#    we persist that file to MinIO so it survives restarts.
 # ---------------------------------------------------------------------------
-log "Registering MCP servers in Higress..."
-if docker exec "$MANAGER_CONTAINER" which setup-mcp-server.sh &>/dev/null; then
-    # Copy MCP yaml configs into Manager, then register them
-    for yaml_file in "$SCRIPT_DIR"/mcp-honeybadge-*.yaml; do
-        fname=$(basename "$yaml_file")
-        docker cp "$yaml_file" "$MANAGER_CONTAINER:/tmp/$fname"
-        docker exec "$MANAGER_CONTAINER" bash -c \
-            "HIGRESS_ADMIN_URL=http://localhost:8001 setup-mcp-server.sh /tmp/$fname 2>&1" \
-            && log "  → registered $fname" \
-            || warn "  Failed to register $fname (may already exist)"
+log "Registering MCP servers in workers via mcporter..."
+
+# Map: server-name → SSE endpoint inside the Docker network
+declare -A MCP_SERVERS=(
+    [honeybadge-nebula]="http://honeybadge-nebula-mcp:8000/sse"
+    [honeybadge-audit]="http://honeybadge-audit-mcp:8000/sse"
+    [honeybadge-cache]="http://honeybadge-cache-mcp:8000/sse"
+)
+
+for worker in graph-worker analytics-worker; do
+    WORKER_CONTAINER="honeybadge-${worker}"
+    log "  Configuring $worker..."
+    for server_name in "${!MCP_SERVERS[@]}"; do
+        endpoint="${MCP_SERVERS[$server_name]}"
+        docker exec "$WORKER_CONTAINER" bash -c \
+            "mcporter config add '$server_name' '$endpoint' --allow-http --yes 2>&1" \
+            && log "    → $server_name added" \
+            || warn "    $server_name already exists or failed"
     done
-else
-    warn "setup-mcp-server.sh not found in Manager container."
-    warn "Register MCP servers manually via Higress console: http://localhost:18001"
-fi
+
+    # Persist mcporter.json to MinIO so it survives container restarts
+    docker cp "${WORKER_CONTAINER}:/root/hiclaw-fs/config/mcporter.json" \
+        "/tmp/${worker}-mcporter.json" 2>/dev/null && \
+    docker cp "/tmp/${worker}-mcporter.json" \
+        "${MANAGER_CONTAINER}:/tmp/${worker}-mcporter.json" && \
+    docker exec "$MANAGER_CONTAINER" bash -c \
+        "mc cp /tmp/${worker}-mcporter.json hiclaw/hiclaw-storage/agents/${worker}/config/mcporter.json 2>&1 | tail -1" \
+        && log "    → mcporter.json synced to MinIO" \
+        || warn "    MinIO sync failed (config still active in running container)"
+done
 
 # ---------------------------------------------------------------------------
 # Done
