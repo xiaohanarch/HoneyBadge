@@ -232,6 +232,10 @@ services:
       - HICLAW_MATRIX_DOMAIN=matrix-local.hiclaw.io
       # Registration token — used by create-worker.sh to create Matrix accounts
       - HICLAW_REGISTRATION_TOKEN=${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}
+      # LLM API key — used by HiClaw startup to configure the Higress AI Gateway route.
+      # Without this, HiClaw skips auto-config (the route persists in the data volume,
+      # but after "docker compose down -v" a fresh start would have no LLM route).
+      - HICLAW_LLM_API_KEY=${LLM_API_KEY}
       - TZ=Asia/Shanghai
     volumes:
       - hiclaw_manager_data:/data    # Persists MinIO data + Tuwunel DB
