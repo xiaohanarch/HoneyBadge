@@ -23,11 +23,6 @@ class ServerConfig:
     port: int = field(default=8090)
 
     # -------------------------------------------------------------------------
-    # Orchestrator selection
-    # -------------------------------------------------------------------------
-    orchestrator_type: str = field(default="direct")
-
-    # -------------------------------------------------------------------------
     # NebulaGraph connection
     # -------------------------------------------------------------------------
     nebula_host: str = field(default="localhost")
@@ -78,18 +73,6 @@ class ServerConfig:
     matrix_url: str = field(default="")
     hiclaw_manager_url: str = field(default="")
 
-    # -------------------------------------------------------------------------
-    # Matrix client (honeybadge-gateway bot user, connects to HiClaw Tuwunel :6167)
-    # -------------------------------------------------------------------------
-    matrix_homeserver_url: str = field(default="http://localhost:6167")
-    matrix_user_id: str = field(default="@honeybadge-gateway:matrix-local.hiclaw.io")
-    matrix_user_password: str = field(default="")
-
-    # -------------------------------------------------------------------------
-    # HiClaw orchestrator settings
-    # -------------------------------------------------------------------------
-    hiclaw_query_timeout: float = field(default=60.0)
-
     @classmethod
     def from_env(cls) -> "ServerConfig":
         """Create a ServerConfig by reading environment variables.
@@ -104,8 +87,6 @@ class ServerConfig:
             # Server networking
             host=os.environ.get("SERVER_HOST", "0.0.0.0"),
             port=int(os.environ.get("SERVER_PORT", "8090")),
-            # Orchestrator
-            orchestrator_type=os.environ.get("ORCHESTRATOR_TYPE", "direct"),
             # NebulaGraph
             nebula_host=os.environ.get("NEBULA_HOST", "localhost"),
             nebula_port=int(os.environ.get("NEBULA_PORT", "9669")),
@@ -136,10 +117,4 @@ class ServerConfig:
             # Reserved URLs
             matrix_url=os.environ.get("MATRIX_URL", ""),
             hiclaw_manager_url=os.environ.get("HICLAW_MANAGER_URL", ""),
-            # Matrix client
-            matrix_homeserver_url=os.environ.get("MATRIX_HOMESERVER_URL", "http://localhost:6167"),
-            matrix_user_id=os.environ.get("MATRIX_USER_ID", "@honeybadge-gateway:matrix-local.hiclaw.io"),
-            matrix_user_password=os.environ.get("MATRIX_USER_PASSWORD", ""),
-            # HiClaw
-            hiclaw_query_timeout=float(os.environ.get("HICLAW_QUERY_TIMEOUT", "60")),
         )
