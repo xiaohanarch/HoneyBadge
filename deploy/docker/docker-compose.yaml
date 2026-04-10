@@ -266,7 +266,7 @@ services:
       - HICLAW_WORKER_NAME=graph-worker
       - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
-      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin}
+      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       - TZ=Asia/Shanghai
     networks:
       - honeybadge-net
@@ -283,7 +283,7 @@ services:
       - HICLAW_WORKER_NAME=analytics-worker
       - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
-      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin}
+      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       - TZ=Asia/Shanghai
     networks:
       - honeybadge-net

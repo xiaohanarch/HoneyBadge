@@ -60,7 +60,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -107,7 +107,7 @@ def _derive_matrix_password(username: str) -> str:
     Uses HMAC-SHA256 keyed on MATRIX_USER_SECRET so the same username always
     produces the same Matrix password across service restarts.
     """
-    return hmac.new(
+    return hmac.HMAC(
         MATRIX_USER_SECRET.encode(),
         username.encode(),
         hashlib.sha256,
@@ -226,7 +226,7 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                     "matrix_login_failed",
                     matrix_user_id=matrix_user_id,
                     status_code=login_response.status_code,
-                    body=login_response.text,
+                    body=login_response.text[:200],
                 )
                 raise HTTPException(
                     status_code=502,
@@ -239,7 +239,7 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                 matrix_user_id=matrix_user_id,
                 status_code=reg_response.status_code,
                 errcode=errcode,
-                body=reg_response.text,
+                body=reg_response.text[:200],
             )
             raise HTTPException(
                 status_code=502,

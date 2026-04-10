@@ -61,7 +61,8 @@ export function useMatrixChat() {
   }
 
   // @ts-ignore — event/room are typed as any here for flexibility
-  function handleRoomEvent(event: any, room: any) {
+  function handleRoomEvent(event: any, room: any, toStartOfTimeline: boolean) {
+    if (toStartOfTimeline) return  // ignore historical replay on sync
     if (room?.roomId !== dmRoomId) return
     if (event.getType() !== 'm.room.message') return
     if (event.getSender() === authStore.matrixUserId) return // ignore own messages
