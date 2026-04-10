@@ -21,15 +21,29 @@ export async function findOrCreateManagerDmRoom(
   await client.startClient({ initialSyncLimit: 10 })
 
   // Wait for initial sync
-  await new Promise<void>((resolve) => {
-    const checkSync = () => {
-      if (client.getSyncState() === 'PREPARED' || client.getSyncState() === 'SYNCING') {
+  await new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      client.removeListener('sync' as any, onSync)
+      resolve() // resolve anyway after 5s — room data may or may not be ready
+    }, 5000)
+
+    const onSync = (state: string) => {
+      if (state === 'PREPARED' || state === 'ERROR' || state === 'STOPPED') {
+        clearTimeout(timeoutId)
+        client.removeListener('sync' as any, onSync)
         resolve()
-      } else {
-        setTimeout(checkSync, 200)
       }
     }
-    checkSync()
+
+    // Check if already synced
+    const currentState = client.getSyncState()
+    if (currentState === 'PREPARED') {
+      clearTimeout(timeoutId)
+      resolve()
+      return
+    }
+
+    client.on('sync' as any, onSync)
   })
 
   // Look in existing direct rooms

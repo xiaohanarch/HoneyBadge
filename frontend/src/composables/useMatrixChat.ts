@@ -24,6 +24,7 @@ export function useMatrixChat() {
   // eslint-disable-next-line prefer-const
   let matrixClient: MatrixClient | null = null
   let dmRoomId: string | null = null
+  let initPromise: Promise<boolean> | null = null
 
   async function initMatrix(): Promise<boolean> {
     const token = authStore.matrixToken
@@ -50,6 +51,13 @@ export function useMatrixChat() {
       ElMessage.error('Matrix 连接失败')
       return false
     }
+  }
+
+  async function ensureInitialized(): Promise<boolean> {
+    if (matrixClient && dmRoomId) return true
+    if (initPromise) return initPromise
+    initPromise = initMatrix().finally(() => { initPromise = null })
+    return initPromise
   }
 
   // @ts-ignore — event/room are typed as any here for flexibility
@@ -93,12 +101,10 @@ export function useMatrixChat() {
   }
 
   async function sendQueryMessage(question: string) {
-    if (!matrixClient || !dmRoomId) {
-      const ok = await initMatrix()
-      if (!ok) {
-        ElMessage.error('Matrix 连接未就绪')
-        return
-      }
+    const ok = await ensureInitialized()
+    if (!ok) {
+      ElMessage.error('Matrix 连接未就绪')
+      return
     }
 
     const userMessage: ChatMessage = {
@@ -181,6 +187,7 @@ export function useMatrixChat() {
 
   function disconnect() {
     if (matrixClient) {
+      matrixClient.removeListener('Room.timeline' as any, handleRoomEvent)
       matrixClient.stopClient()
       matrixClient = null
       dmRoomId = null
