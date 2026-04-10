@@ -3,7 +3,7 @@
 **企业知识图谱智能助手** — 基于 ERP 系统（Oracle EBS / 定制 ERP）构建的自然语言问答系统，支持采购/供应链数据查询、欺诈检测和三单匹配异常检测。
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/xiaohanarch/HoneyBadge)
-[![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 
 ---
@@ -19,7 +19,6 @@
 - [项目结构](#项目结构)
 - [配置说明](#配置说明)
 - [API 文档](#api-文档)
-- [测试](#测试)
 - [常见问题](#常见问题)
 - [贡献指南](#贡献指南)
 - [联系与支持](#联系与支持)
@@ -40,14 +39,15 @@ HoneyBadge 旨在为企业提供：
 ## 核心特性
 
 ### 1. 知识图谱引擎
-- **NebulaGraph** 分布式图数据库
+- **NebulaGraph** 分布式图数据库（v3.8）
 - 完整 PTP（采购到付款）+ OTC（订单到收款）数据模型
-- 34 种标签（Tag）+ 38 种边类型（Edge Type）
+- 27 种标签（Tag）+ 38 种边类型（Edge Type）
 
 ### 2. 智能 Agent 编排
-- **HiClaw** 阿里巴巴开源的多 Agent 协作框架
+- **HiClaw** 阿里巴巴开源的多 Agent 协作框架（v1.0.6）
 - Manager-Worker 架构，任务解耦与弹性伸缩
 - Matrix 协议通信，所有交互可审计
+- **每个用户独立 Matrix 账号**（`@hb-{用户名}:matrix-local.hiclaw.io`），彻底隔离会话
 
 ### 3. 五层防幻觉框架
 
@@ -59,10 +59,10 @@ HoneyBadge 旨在为企业提供：
 | L4 | 结果透传 | LLM 仅格式化输出，不修改数据 |
 | L5 | 全链路审计 | PostgreSQL 记录 question → Cypher → result → summary |
 
-### 4. AI 网关
-- **Higress** 统一入口（Phase 2 完善 SSO）
-- CORS、限流、请求转换
-- JWT 认证与用户身份透传
+### 4. 原生 Matrix 通信（Approach B）
+- 浏览器通过 **matrix-js-sdk** 直接连接 Tuwunel Matrix 服务器
+- 登录时由 `honeybadge-auth` 服务自动在 Tuwunel 中创建用户专属 Matrix 账号
+- 权限 JWT（roles_jwt）随 Matrix 消息传递给 graph-worker
 
 ### 5. 可观测性
 - **Prometheus** 指标采集
@@ -74,74 +74,71 @@ HoneyBadge 旨在为企业提供：
 
 ## 技术架构
 
-### 整体架构图
+### Phase 1 架构图（Approach B — 当前）
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              用户请求流程                                     │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                          用户请求流程                                │
+└────────────────────────────────────────────────────────────────────┘
 
      ┌───────────────┐
-     │   前端 Web     │  Vue 3 + TypeScript + WebSocket
-     └───────┬───────┘
-             │ WebSocket / HTTP
-             ↓
-     ┌───────────────────┐
-     │   Higress 网关     │  SSO/OAuth2 + 限流 + CORS + 请求转换
-     └───────┬───────────┘
-             │ HTTP/WS
-             ↓
-     ┌───────────────────┐
-     │ HoneyBadge Server │  FastAPI + JWT 认证 + Session 管理
-     │   (port 8090)     │  WebSocket 处理器 + Matrix Client
-     └───────┬───────────┘
-             │ Matrix Protocol (DM)
-             ↓
-     ┌───────────────────┐
-     │  HiClaw Manager   │  Agent 编排 + 任务分发
-     │  (Matrix Room)    │  多副本无状态
-     └───────┬───────────┘
-             │ Matrix Protocol
-      ┌──────┼──────┬──────────┐
-      ↓      ↓      ↓          ↓
- ┌────────┐┌────────┐┌────────┐┌────────┐
- │ Graph  ││Analytics││  MCP   ││ Nebula │
- │ Worker ││ Worker ││ Worker ││  MCP   │
- └────────┘└────────┘└────────┘└────────┘
-     │        │         │         │
-     └────────┼─────────┼─────────┘
-              ↓         ↓
-     ┌─────────────────────────┐
-     │     基础设施层           │
-     │ NebulaGraph │ Redis │   │
-     │ PostgreSQL │ Milvus │   │
-     └─────────────────────────┘
+     │   前端 Web     │  Vue 3 + TypeScript + matrix-js-sdk
+     └──┬────────┬───┘
+        │        │
+        │ POST   │ matrix-js-sdk (直连 Matrix)
+        │ /login │
+        ↓        ↓
+ ┌──────────┐  ┌────────────────────────────────────────────────────┐
+ │honeybadge│  │         HiClaw Manager (all-in-one 容器)           │
+ │  -auth   │  │  ┌─────────────────────────────────────────────┐  │
+ │ :8091    │  │  │  Tuwunel Matrix Server (:6167)               │  │
+ │          │  │  │  ← 浏览器 matrix-js-sdk 直接连接             │  │
+ │ 1. 认证  │  │  └──────────────┬──────────────────────────────┘  │
+ │ 2. 创建  │  │                 │ Matrix DM (per-user room)        │
+ │    Matrix│  │  ┌──────────────↓──────────────────────────────┐  │
+ │    账号  │  │  │         Manager Agent (OpenClaw)             │  │
+ │ 3. 返回  │  │  └──────┬──────────────────┬────────────────────┘  │
+ │  token   │  │         │ Matrix           │ Matrix                 │
+ └──────────┘  │  ┌──────↓──────┐  ┌────────↓──────┐               │
+               │  │graph-worker │  │analytics-worker│               │
+               │  └──────┬──────┘  └───────────────-┘               │
+               │         │ MCP (Higress AI Gateway)                  │
+               │  ┌──────↓──────────────────────────────────────┐   │
+               │  │  MCP Servers: nebula-mcp / audit-mcp / ...  │   │
+               │  └──────────────────────────────────────────────┘  │
+               └────────────────────────────────────────────────────┘
+                           ↓ SQL / nGQL
+     ┌──────────────────────────────────────────────────────────┐
+     │                      基础设施层                           │
+     │  NebulaGraph (:9669) │ PostgreSQL (:5432) │ Redis (:6379) │
+     └──────────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              基础设施                                        │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-  │ NebulaGraph │  │    Redis    │  │  PostgreSQL │  │   Milvus    │
-  │  图数据库    │  │  缓存/会话   │  │   审计日志   │  │  向量检索   │
-  │  (9669)    │  │   (6379)    │  │   (5432)    │  │  (19530)   │
-  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘
+     ┌──────────────────────────────────────────────────────────┐
+     │              honeybadge-server（审计 REST API）           │
+     │              :8090  — 历史会话 / 审计查询                 │
+     └──────────────────────────────────────────────────────────┘
 ```
+
+**Approach B 的核心设计：**
+- 每个用户登录时，`honeybadge-auth` 在 Tuwunel 中创建专属 Matrix 账号 `@hb-{username}`
+- 浏览器拿到 `matrix_access_token` 后直接用 matrix-js-sdk 建立连接
+- 每个用户与 Manager 的 DM 房间完全独立，符合 HiClaw per-channel-peer 设计
+- `honeybadge-server` 仅提供审计 REST API，不再作为 Matrix 代理
 
 ### 核心技术栈
 
 | 组件 | 选型 | 版本 | 说明 |
 |------|------|------|------|
-| 图数据库 | NebulaGraph | 3.8+ | 分布式，存算分离 |
-| Agent 编排 | HiClaw | 1.0+ | 阿里巴巴开源 |
-| AI 网关 | Higress | latest | 基于 Envoy |
-| 前端框架 | Vue 3 | 3.4+ | Composition API |
+| 图数据库 | NebulaGraph | 3.8 | 分布式，存算分离 |
+| Agent 编排 | HiClaw | 1.0.6 | 阿里巴巴开源 |
+| Matrix 服务器 | Tuwunel | - | 内嵌于 HiClaw Manager |
+| AI 网关 | Higress | - | 内嵌于 HiClaw Manager |
+| 前端框架 | Vue 3 | 3.4+ | Composition API + matrix-js-sdk |
 | 后端框架 | FastAPI | 0.115+ | async/await |
-| LLM | GLM-4 / Qwen | - | 昇腾 910B 适配 |
-| 向量数据库 | Milvus | 2.3+ | 本体检索（Phase 2） |
-| 缓存 | Redis | 7+ | Session + 查询缓存 |
-| 消息队列 | Kafka | 3.6+ | CDC（Phase 3） |
-| 数据质量 | Great Expectations | 0.18+ | ETL 校验 |
+| 认证服务 | honeybadge-auth | 1.0 | 专属 Matrix 账号 + JWT |
+| LLM | MiniMax / GLM | - | OpenAI 兼容接口 |
+| 缓存 | Redis | 7+ | 查询缓存 |
+| 审计 | PostgreSQL | 16 | 不可篡改审计日志 |
 
 ---
 
@@ -153,32 +150,26 @@ HoneyBadge 旨在为企业提供：
 用户问题 → LLM 生成 Cypher → 执行查询 → 原始结果 → LLM 格式化 → 用户
 ```
 
-LLM 永远不会直接回答数据问题，只负责：
-- 生成 Cypher/nGQL 查询
-- 将结构化结果格式化为自然语言
-
 ### 2. 权限在 AST 层注入，不使用字符串拼接
 
 ```python
 # 错误方式（SQL 注入风险）
 cypher = f"MATCH (n) WHERE n.org_id = '{user.org_id}'"
 
-# 正确方式（AST 级别注入）
-validator.inject_permission_filter(ast, user.org_id, user.roles)
+# 正确方式（AST 级别注入，由 validate_and_execute MCP 工具处理）
+validate_and_execute(ngql=cypher, user_context={"user_id": ..., "roles": [...], "org_id": ...})
 ```
 
 ### 3. 每个查询都有 trace_id
 
 ```
 trace_id = HB-20260408-001
-       = HB-{日期}-{序号}
-
 全链路：question → Cypher → result → summary → audit_log
 ```
 
-### 4. 事务明细数据必须存在于图谱中
+### 4. 每个用户有独立 Matrix 身份
 
-用于欺诈检测的关联分析需要完整的交易链路数据。
+HiClaw 的 per-channel-peer 设计要求每个通信对象有独立的 Matrix DM 房间。使用共享网关账号会导致所有用户的 DM 指向同一个 peer，Manager 只能响应最初建立的那个房间。Approach B 通过为每个用户创建独立的 Matrix 账号彻底解决了这一问题。
 
 ### 5. 配置与代码分离
 
@@ -197,15 +188,16 @@ trace_id = HB-20260408-001
 
 ### Phase 1 — 基础设施升级（当前）
 
-**目标**：生产级基础设施切换
+**目标**：生产级基础设施切换 + Approach B 直连架构
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| NebulaGraph Schema | ✅ | 34 Tags, 38 Edges |
+| NebulaGraph Schema | ✅ | 27 Tags, 38 Edges |
 | HiClaw Manager-Worker | ✅ | Matrix 协议通信 |
 | 五层防幻觉框架 | ✅ | L1-L3 已实现 |
-| Higress 网关 | ✅ | Docker Compose 集成 |
-| Vue 3 前端 | 🔄 | WebSocket 聊天界面 |
+| honeybadge-auth 服务 | ✅ | 每用户 Matrix 账号 + JWT |
+| matrix-js-sdk 前端 | ✅ | 浏览器直连 Tuwunel |
+| MCP 工具服务 | ✅ | nebula/audit/cache MCP |
 | 可观测性 | 🔄 | 配置就绪，收集器开发中 |
 | ETL Pipeline | ⏸ | ODS 层定义，Phase 2 完善 |
 
@@ -229,9 +221,7 @@ trace_id = HB-20260408-001
 
 ### 前置要求
 
-- **Docker** & **Docker Compose** (v2.0+)
-- **Python** 3.10+
-- **Node.js** 18+ (前端开发)
+- **Docker** & **Docker Compose** v2.0+
 - **Git**
 
 ### 1. 克隆项目
@@ -241,99 +231,82 @@ git clone https://github.com/xiaohanarch/HoneyBadge.git
 cd HoneyBadge
 ```
 
-### 2. 启动基础设施
+### 2. 配置环境变量
+
+`deploy/docker/.env` 已包含开发默认值，开箱即用。生产环境务必修改：
 
 ```bash
-cd deploy/docker
-
-# 启动所有服务（包括 Higress、NebulaGraph、Redis、PostgreSQL、Matrix）
-docker-compose up -d
-
-# 查看服务状态
-docker-compose ps
-
-# 查看特定服务日志
-docker-compose logs -f nebula-graphd
+# 关键配置（生产环境必须修改）
+JWT_SECRET=your-random-64-char-secret
+MATRIX_USER_SECRET=your-random-secret-for-matrix-passwords
+LLM_API_KEY=your-llm-api-key
 ```
 
-### 3. 配置环境变量
+### 3. 启动所有容器
 
 ```bash
-cd ../..
-
-# 复制环境变量模板
-cp .env.example .env
-
-# 编辑 .env 文件，配置必要的 API Key
-nano .env
+# 从项目根目录运行
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env up -d
 ```
 
-**关键配置项：**
+等待约 60 秒，HiClaw Manager 内部启动 Tuwunel + MinIO + Higress。
+
+### 4. 初始化 NebulaGraph Schema（仅第一次）
 
 ```bash
-# LLM 配置
-LLM_ENDPOINT=https://your-llm-api.com/v1
-LLM_API_KEY=your-api-key
-LLM_MODEL=glm-4-flash
-
-# JWT 密钥（生产环境必须修改）
-JWT_SECRET=your-secure-secret-key
+bash deploy/docker/init-nebula.sh
 ```
 
-### 4. 安装后端依赖
+执行 ADD HOSTS、建 Space、应用 Schema、重建索引，约 30 秒完成。
+
+### 5. 注册 HiClaw Workers（仅第一次）
 
 ```bash
-# 使用 uv（推荐）
-uv sync
-
-# 或使用 pip
-pip install -r requirements.txt
+bash deploy/hiclaw/init-workers.sh
 ```
 
-### 5. 初始化数据库
+上传 Worker 的 SOUL.md + 技能文件到 MinIO，注册 MCP Server 到 Higress。
+
+### 6. 重启 Workers
 
 ```bash
-# 导入 NebulaGraph Schema
-docker exec -it honeybadge-nebula-console \
-  nebula-console -addr nebula-graphd -port 9669 -user root -password nebula \
-  -e "CREATE SPACE IF NOT EXISTS honeybadge; USE honeybadge; :play nebulaGraph;"
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env \
+  restart hiclaw-graph-worker hiclaw-analytics-worker
 ```
 
-### 6. 启动后端服务
+### 7. 验证服务健康
 
 ```bash
-# 开发模式（热重载）
-uvicorn honeybadge.server.app:create_app --factory --reload --port 8090
+# 所有关键服务应显示 (healthy)
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env ps
 
-# 或使用脚本
-python -m honeybadge
-```
+# 审计 API 健康检查
+curl http://localhost:8090/api/health
 
-### 7. 启动前端（可选）
+# Auth 服务健康检查
+curl http://localhost:8091/health
 
-```bash
-cd frontend
-npm install
-npm run dev
+# Matrix 服务器
+curl http://localhost:6167/_matrix/client/versions
 ```
 
 ### 8. 访问服务
 
-| 服务 | 地址 | 说明 |
+| 服务 | 地址 | 凭证 |
 |------|------|------|
-| 前端 | http://localhost:5173 | Vue 3 开发服务器 |
-| API 健康检查 | http://localhost:8090/api/health | 后端状态 |
-| Higress 网关 | http://localhost:80 | 统一入口 |
+| **前端（聊天界面）** | http://localhost:3000 | admin/admin123 · analyst/analyst123 · auditor/auditor123 |
+| Element Web（Agent 监控） | http://localhost:18888 | 任意 Matrix 用户 |
+| MinIO Console | http://localhost:19001 | admin/admin1234 |
+| Higress Console | http://localhost:18001 | admin/admin1234 |
 
 ### 停止服务
 
 ```bash
-# 停止容器
-cd deploy/docker
-docker-compose down
+# 停止，保留数据
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env down
 
-# 停止并清除数据（完全重置）
-docker-compose down -v
+# 停止并清除所有数据（重置后需重新执行步骤 4-6）
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env down -v
 ```
 
 ---
@@ -344,155 +317,130 @@ docker-compose down -v
 HoneyBadge/
 ├── src/honeybadge/              # Python 后端源码
 │   ├── core/                    # 核心模块
-│   │   ├── constants.py        # 常量定义
-│   │   ├── exceptions.py       # 异常类型
-│   │   └── trace.py            # trace_id 生成
-│   ├── db/                     # 数据库客户端
-│   │   ├── nebula.py           # NebulaGraph
-│   │   ├── postgres.py         # PostgreSQL
-│   │   └── redis.py            # Redis
-│   ├── gateway/                # 网关层
-│   │   ├── matrix_client.py     # Matrix 客户端
-│   │   ├── room_manager.py     # Session-Room 映射
-│   │   └── schema_cache.py     # Schema 缓存
-│   ├── llm/                    # LLM 适配层
-│   │   ├── adapter.py          # OpenAI 兼容接口
-│   │   ├── minimax_adapter.py  # 智谱 GLM
-│   │   └── claude_adapter.py  # Anthropic Claude
-│   ├── protocols/              # 协议定义
-│   │   ├── messages.py         # 消息类型定义
-│   │   └── validator.py        # L1-L5 校验器
-│   ├── server/                 # FastAPI 服务
-│   │   ├── app.py              # 应用入口
-│   │   ├── auth.py             # JWT 认证
-│   │   ├── config.py           # 配置管理
-│   │   └── websocket.py        # WebSocket 处理
-│   ├── etl/                    # ETL 管道
-│   │   ├── quality.py          # 数据质量校验
-│   │   └── transform.py        # 数据转换
-│   └── metrics/                # 可观测性
-│       └── collectors.py       # Prometheus 收集器
+│   │   ├── constants.py
+│   │   ├── exceptions.py
+│   │   └── trace.py
+│   ├── db/                      # 数据库客户端
+│   │   ├── nebula.py
+│   │   ├── postgres.py
+│   │   └── redis.py
+│   ├── auth_service/            # Auth 微服务（Approach B）
+│   │   ├── main.py              # POST /login → Matrix token + roles JWT
+│   │   └── Dockerfile
+│   ├── server/                  # 审计 REST API（仅）
+│   │   ├── app.py               # FastAPI 应用入口
+│   │   ├── auth.py              # 用户表 + JWT 工具
+│   │   ├── config.py
+│   │   └── health.py
+│   └── metrics/
+│       └── collectors.py
 │
-├── workers/                     # HiClaw Workers
-│   ├── graph-worker/           # 图查询 Worker
-│   ├── analytics-worker/       # 分析 Worker
-│   └── mcp-worker/             # MCP 协议 Worker
+├── hiclaw/workers/              # HiClaw Worker 配置
+│   ├── graph-worker/
+│   │   └── agent/
+│   │       ├── SOUL.md          # 包含 x-hb-auth 提取逻辑
+│   │       └── skills/cypher-query/SKILL.md
+│   └── analytics-worker/
+│       └── agent/
+│           ├── SOUL.md
+│           └── skills/multi-step-analysis/SKILL.md
 │
-├── mcp-servers/                # MCP Server 实现
-│   ├── honeybadge-nebula-mcp/  # NebulaGraph MCP
-│   ├── honeybadge-audit-mcp/   # 审计日志 MCP
-│   └── honeybadge-cache-mcp/   # 缓存 MCP
+├── mcp-servers/                 # MCP 工具服务
+│   ├── honeybadge-nebula-mcp/   # NebulaGraph 查询工具
+│   ├── honeybadge-audit-mcp/    # 审计日志读写工具
+│   └── honeybadge-cache-mcp/    # Redis 缓存工具
 │
 ├── frontend/                    # Vue 3 前端
-│   ├── src/
-│   │   ├── views/             # 页面组件
-│   │   ├── stores/            # Pinia 状态管理
-│   │   ├── composables/       # 组合式函数
-│   │   └── api/               # API 客户端
-│   └── package.json
+│   └── src/
+│       ├── api/
+│       │   └── matrix.ts        # matrix-js-sdk 封装
+│       ├── composables/
+│       │   ├── useAuth.ts       # 登录 → 获取 matrix_access_token
+│       │   └── useMatrixChat.ts # Matrix 聊天逻辑（替代 WebSocket）
+│       ├── stores/
+│       │   └── auth.ts          # 含 matrixToken / rolesJwt 字段
+│       └── views/
+│           └── ChatView.vue
 │
-├── deploy/                      # 部署配置
-│   ├── docker/                 # Docker Compose
-│   │   ├── docker-compose.yaml
-│   │   ├── higress.conf       # Higress 配置
-│   │   └── gateway/config/    # 网关路由/CORS/限流
-│   ├── hiclaw/                # HiClaw Docker 配置
-│   └── nebula/                # NebulaGraph Schema
+├── deploy/
+│   ├── docker/
+│   │   ├── docker-compose.yaml  # 完整服务编排
+│   │   ├── .env                 # 环境变量（含 MATRIX_USER_SECRET）
+│   │   ├── Dockerfile.server    # honeybadge-server 镜像
+│   │   ├── init-nebula.sh       # NebulaGraph Schema 初始化
+│   │   ├── nebula-schema.ngql   # 27 Tags + 索引
+│   │   └── nebula-edges.ngql    # 38 Edges + 索引
+│   └── hiclaw/
+│       ├── init-workers.sh      # Worker 注册脚本
+│       └── mcp-honeybadge-nebula.yaml  # Higress MCP 注册配置
 │
-├── tests/                       # 测试套件
-│   ├── test_*.py              # 单元测试
-│   └── test_integration_*.py  # 集成测试
-│
-├── docs/                        # 详细文档
-│   ├── phase1/                # Phase 1 设计文档
-│   │   ├── 00-overview.md     # 总览
-│   │   ├── 01-nebula-schema.md
-│   │   ├── 02-hiclaw-orchestration.md
-│   │   ├── 03-anti-hallucination.md
-│   │   ├── 04-llm-adapter.md
-│   │   ├── 05-frontend.md
-│   │   ├── 06-data-pipeline.md
-│   │   ├── 07-gateway.md
-│   │   ├── 08-observability.md
-│   │   ├── 09-deployment.md
-│   │   └── 10-ontology.md
-│   └── superpowers/           # AI 辅助规划
-│
-├── scripts/                     # 工具脚本
-│   └── generate_test_data.py  # 测试数据生成
-│
-├── starter.md                   # 架构文档（中文）
+├── starter.md                   # 架构设计文档（中文）
 ├── CLAUDE.md                    # Claude Code 指南
-├── pyproject.toml               # Python 项目配置
-├── requirements.txt             # pip 依赖
-└── README.md                    # 本文档
+├── pyproject.toml
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
 ## 配置说明
 
-### 环境变量
-
-完整的环境变量列表：
+### 环境变量（`deploy/docker/.env`）
 
 ```bash
-# ============ 数据库 ============
-NEBULA_HOST=nebula-graphd
-NEBULA_PORT=9669
+# ============ LLM ============
+LLM_PROVIDER=minimax
+LLM_ENDPOINT=https://api.minimax.chat/v1
+LLM_API_KEY=your-key
+LLM_MODEL=MiniMax-Text-01
+
+# ============ 图数据库 ============
 NEBULA_USER=root
 NEBULA_PASSWORD=nebula
 NEBULA_SPACE=honeybadge
 
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_PASSWORD=redis123
-
-PG_HOST=postgres
-PG_PORT=5432
+# ============ PostgreSQL ============
 PG_USER=honeybadge
 PG_PASSWORD=honeybadge123
-PG_DATABASE=honeybadge_audit
+PG_DB=honeybadge_audit
 
-# ============ LLM ============
-LLM_ENDPOINT=http://host.docker.internal:8000/v1
-LLM_API_KEY=
-LLM_MODEL=glm-4-flash
+# ============ Redis ============
+REDIS_PASSWORD=redis123
 
-# ============ 认证 ============
-JWT_SECRET=change-me-in-production
+# ============ HiClaw Manager ============
+HICLAW_ADMIN_USER=admin
+HICLAW_ADMIN_PASSWORD=admin1234       # MinIO 要求 >= 8 字符
+HICLAW_REGISTRATION_TOKEN=honeybadge-reg-token
 
-# ============ Matrix ============
-MATRIX_HOMESERVER_URL=http://matrix:8008
-MATRIX_USER_ID=@honeybadge-gateway:matrix.local
-MATRIX_USER_PASSWORD=
-
-# ============ 服务端口 ============
-SERVER_PORT=8090
+# ============ Auth（重要，生产环境必须修改）============
+MATRIX_USER_SECRET=hb-user-secret-dev    # 用于派生用户 Matrix 密码
+JWT_SECRET=change-this-to-a-random-64-char-string-in-production
 ```
 
 ### 端口映射
 
 | 端口 | 服务 | 说明 |
 |------|------|------|
-| 80 | Higress | HTTP 统一入口 |
-| 443 | Higress | HTTPS（未来） |
-| 8090 | HoneyBadge Server | REST/WebSocket API |
-| 9669 | NebulaGraph | 图数据库 |
-| 6379 | Redis | 缓存 |
+| 3000 | 前端 | Vue 3 开发服务器 |
+| 6167 | Tuwunel Matrix | 浏览器 matrix-js-sdk 直连 |
+| 8090 | honeybadge-server | 审计 REST API |
+| 8091 | honeybadge-auth | 登录 + Matrix 账号创建 |
+| 9669 | NebulaGraph graphd | 图数据库查询端口 |
 | 5432 | PostgreSQL | 审计日志 |
-| 8008 | Matrix | Agent 通信 |
-| 19530 | Milvus | 向量检索 |
+| 6379 | Redis | 缓存 |
+| 18001 | Higress Console | AI 网关管理 |
+| 18080 | Higress Gateway | 对外 AI 网关 |
+| 18888 | Element Web | Matrix Agent 监控 |
+| 19001 | MinIO Console | Worker 配置管理 |
 
 ---
 
 ## API 文档
 
-### 认证
+### 登录（`honeybadge-auth`）
 
 ```bash
-# 登录获取 Token
-POST /api/auth/login
+POST http://localhost:8091/login
 Content-Type: application/json
 
 {
@@ -502,128 +450,110 @@ Content-Type: application/json
 
 # 响应
 {
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "token_type": "bearer"
+  "matrix_access_token": "eksx9...",          # 供 matrix-js-sdk 使用
+  "matrix_homeserver": "http://localhost:6167",
+  "matrix_user_id": "@hb-admin:matrix-local.hiclaw.io",
+  "roles_jwt": "eyJhbGci...",                 # 权限 JWT，随 Matrix 消息传递
+  "user": {
+    "username": "admin",
+    "roles": ["admin"],
+    "org_id": 1
+  }
 }
 ```
 
-### WebSocket 查询
+首次登录会在 Tuwunel 中自动创建 `@hb-admin:matrix-local.hiclaw.io` 账号，之后登录直接获取 token。
 
-```bash
-# 连接 WebSocket
-ws://localhost:8090/ws?token={access_token}
+### 发起查询（前端通过 matrix-js-sdk）
 
-# 发送查询消息
-{
-  "type": "query",
-  "question": "查询供应商 V001 的所有订单",
-  "trace_id": "HB-20260408-001"
-}
+前端调用 `useMatrixChat` composable，内部通过 matrix-js-sdk 向 `@manager:matrix-local.hiclaw.io` 发送 DM：
 
-# 接收响应（流式）
+```json
 {
-  "type": "progress",
-  "phase": "validating",
-  "message": "L1 语法校验通过"
-}
-{
-  "type": "result",
-  "trace_id": "HB-20260408-001",
-  "data": {
-    "rows": [...],
-    "columns": [...]
+  "msgtype": "m.text",
+  "body": "查询最近10个采购订单",
+  "x-honeybadge": {
+    "v": "1",
+    "contract": "001",
+    "trace_id": "HB-20260410-001",
+    "payload": { "question": "查询最近10个采购订单" }
   },
-  "summary": "查询到 5 条订单记录"
+  "x-hb-auth": "<roles_jwt>"
 }
 ```
 
-### 健康检查
+Manager 将消息路由给 graph-worker，graph-worker 解析 `x-hb-auth` 获取用户权限上下文，调用 MCP 工具执行 nGQL 查询，结果通过 Matrix 消息返回。
+
+### 审计 API（`honeybadge-server`）
 
 ```bash
-GET /api/health
-GET /api/version
-```
+# 健康检查
+GET http://localhost:8090/api/health
 
-完整 API 文档：https://honeybadge-api-docs.example.com
-
----
-
-## 测试
-
-### 运行所有测试
-
-```bash
-# 使用 uv
-uv run pytest
-
-# 或使用 pip
-pytest
-```
-
-### 运行特定测试
-
-```bash
-# 单元测试
-pytest tests/test_validator.py -v
-
-# 集成测试
-pytest tests/test_integration_e2e.py -v
-
-# HiClaw 集成测试
-pytest tests/test_matrix_hiclaw_integration.py -v
-```
-
-### 测试覆盖率
-
-```bash
-pytest --cov=src/honeybadge --cov-report=html
-# 查看 htmlcov/index.html
-```
-
-### Docker 内测试
-
-```bash
-# 在容器中运行测试
-docker exec -it honeybadge-server pytest
+# 响应
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "services": {
+    "redis": {"status": "up"},
+    "postgres": {"status": "up"},
+    "nebula": {"status": "up"}
+  }
+}
 ```
 
 ---
 
 ## 常见问题
 
-### Q: NebulaGraph 连接失败？
+### `honeybadge-auth` 启动失败
 
+等待 60 秒让 HiClaw Manager 完全启动，然后：
 ```bash
-# 检查 NebulaGraph 是否就绪
-docker-compose logs nebula-graphd | grep "Storage service is ready"
-
-# 确认端口
-docker exec -it honeybadge-nebula-console \
-  nebula-console -addr localhost -port 9669 -user root -password nebula
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env restart honeybadge-auth
 ```
 
-### Q: Matrix 无法连接？
+### 登录返回 503
 
+Tuwunel 未就绪。检查 Manager 健康状态：
 ```bash
-# 检查 Matrix 服务
-docker-compose logs matrix-conduit
-
-# 确认 Matrix 服务健康
-curl http://localhost:8008/health
+docker logs honeybadge-hiclaw-manager | tail -20
 ```
 
-### Q: LLM API 调用失败？
+### `matrix_access_token` 缺失
 
-1. 确认 `LLM_ENDPOINT` 和 `LLM_API_KEY` 配置正确
-2. 检查 LLM 服务是否可访问
-3. 查看服务日志：`docker-compose logs honeybadge-server`
+查看 auth 服务日志：
+```bash
+docker logs honeybadge-auth
+```
 
-### Q: WebSocket 连接被拒绝？
+### NebulaGraph 为空（SHOW TAGS 无结果）
 
-1. 确认 Token 未过期
-2. 检查 `JWT_SECRET` 配置一致
-3. 确认 Higress 端口 80 未被占用
+重新运行 Schema 初始化：
+```bash
+bash deploy/docker/init-nebula.sh
+```
+
+如果 storaged 未注册（`SHOW HOSTS` 为空），脚本会自动执行 `ADD HOSTS`。
+
+### Workers 无法连接
+
+MinIO 配置缺失，重新运行 init-workers.sh 然后重启：
+```bash
+bash deploy/hiclaw/init-workers.sh
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env \
+  restart hiclaw-graph-worker hiclaw-analytics-worker
+```
+
+### `honeybadge-nebula-mcp` 一直重启
+
+重新构建镜像：
+```bash
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env \
+  build honeybadge-nebula-mcp && \
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env \
+  up -d --force-recreate honeybadge-nebula-mcp
+```
 
 ---
 
@@ -644,18 +574,10 @@ curl http://localhost:8008/health
 - 前端: 使用 `eslint` + `prettier`
 - 提交信息: 遵循 Conventional Commits
 
-```bash
-# 格式化代码
-uv run ruff format .
-
-# 类型检查
-uv run mypy src/
-```
-
 ### 分支策略
 
 - `master`: 主分支，稳定版本
-- `phase1-implementation`: Phase 1 开发分支
+- `feature/approach-b-*`: Approach B 架构相关特性
 - `feature/*`: 功能分支
 - `fix/*`: 修复分支
 
@@ -665,15 +587,12 @@ uv run mypy src/
 
 - **项目主页**: https://github.com/xiaohanarch/HoneyBadge
 - **问题反馈**: https://github.com/xiaohanarch/HoneyBadge/issues
-- **讨论组**: https://github.com/xiaohanarch/HoneyBadge/discussions
+- **PR #7（Approach B 实现）**: https://github.com/xiaohanarch/HoneyBadge/pull/7
 
 ### 相关文档
 
-- [架构设计文档](./starter.md) - 详细技术架构说明
-- [Phase 1 设计](./docs/phase1/00-overview.md) - Phase 1 详细设计
-- [NebulaGraph Schema](./docs/phase1/01-nebula-schema.md) - 图谱模型定义
-- [HiClaw 编排](./docs/phase1/02-hiclaw-orchestration.md) - Agent 编排设计
-- [防幻觉框架](./docs/phase1/03-anti-hallucination.md) - 五层校验设计
+- [架构设计文档](./starter.md) — 详细技术架构说明（含四阶段演进、容量规划）
+- [start-all-service 技能](~/.claude/skills/start-all-service/SKILL.md) — 本地部署一站式指南
 
 ---
 

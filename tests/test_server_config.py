@@ -143,6 +143,8 @@ class TestConfigFromEnv:
         """Partial env vars should override only those fields."""
         monkeypatch.setenv("SERVER_PORT", "8888")
         monkeypatch.setenv("NEBULA_SPACE", "test_space")
+        # Clear env vars that may be set in container environments
+        monkeypatch.delenv("NEBULA_HOST", raising=False)
 
         config = ServerConfig.from_env()
 
