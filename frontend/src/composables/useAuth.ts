@@ -3,7 +3,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { authApi } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
-import type { User, LoginResponse } from '@/types';
+import type { User, MatrixLoginResponse } from '@/types';
 
 export function useAuth() {
   const router = useRouter();
@@ -15,21 +15,35 @@ export function useAuth() {
 
   async function login(username: string, password: string): Promise<boolean> {
     loading.value = true;
-
     try {
-      const response = await authApi.login(username, password);
-      const { token, refresh_token, user } = response.data;
+      const authUrl = import.meta.env.VITE_AUTH_URL || 'http://localhost:8091';
+      const resp = await fetch(`${authUrl}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!resp.ok) {
+        throw new Error('Invalid credentials');
+      }
+      const data: MatrixLoginResponse = await resp.json();
 
-      // 存储 token
-      localStorage.setItem('token', token);
-      localStorage.setItem('refresh_token', refresh_token);
+      // Store tokens
+      localStorage.setItem('token', data.roles_jwt);
+      localStorage.setItem('matrix_token', data.matrix_access_token);
+      localStorage.setItem('matrix_user_id', data.matrix_user_id);
+      localStorage.setItem('matrix_homeserver', data.matrix_homeserver);
 
-      // 更新 store
-      authStore.setAuth(token, refresh_token, user);
+      // Update stores
+      authStore.setAuth(data.roles_jwt, '', data.user);
+      authStore.setMatrixAuth(
+        data.matrix_access_token,
+        data.matrix_homeserver,
+        data.matrix_user_id,
+        data.roles_jwt
+      );
 
-      ElMessage.success(`欢迎回来，${user.display_name}`);
+      ElMessage.success(`欢迎回来，${data.user.display_name}`);
       router.push('/chat');
-
       return true;
     } catch (error) {
       console.error('Login failed:', error);
@@ -49,6 +63,9 @@ export function useAuth() {
       // 清除本地存储
       localStorage.removeItem('token');
       localStorage.removeItem('refresh_token');
+      localStorage.removeItem('matrix_token');
+      localStorage.removeItem('matrix_user_id');
+      localStorage.removeItem('matrix_homeserver');
 
       // 重置 store
       authStore.clearAuth();
@@ -74,6 +91,9 @@ export function useAuth() {
       // Token 可能过期，清除
       localStorage.removeItem('token');
       localStorage.removeItem('refresh_token');
+      localStorage.removeItem('matrix_token');
+      localStorage.removeItem('matrix_user_id');
+      localStorage.removeItem('matrix_homeserver');
       authStore.clearAuth();
       return null;
     }
@@ -81,10 +101,15 @@ export function useAuth() {
 
   function checkAuth(): boolean {
     const token = localStorage.getItem('token');
-    const refreshToken = localStorage.getItem('refresh_token');
+    const matrixToken = localStorage.getItem('matrix_token');
+    const matrixUserId = localStorage.getItem('matrix_user_id');
+    const matrixHomeserver = localStorage.getItem('matrix_homeserver');
 
-    if (token && refreshToken) {
-      authStore.setAuth(token, refreshToken, authStore.user!);
+    if (token && authStore.user) {
+      authStore.setAuth(token, '', authStore.user);
+      if (matrixToken && matrixUserId && matrixHomeserver) {
+        authStore.setMatrixAuth(matrixToken, matrixHomeserver, matrixUserId, token);
+      }
       return true;
     }
 

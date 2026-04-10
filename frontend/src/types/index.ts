@@ -104,6 +104,14 @@ export interface LoginResponse {
   user: User;
 }
 
+export interface MatrixLoginResponse {
+  matrix_access_token: string;
+  matrix_homeserver: string;
+  matrix_user_id: string;
+  roles_jwt: string;
+  user: User;
+}
+
 export interface AuthState {
   token: string | null;
   refreshToken: string | null;
