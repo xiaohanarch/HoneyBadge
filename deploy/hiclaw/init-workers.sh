@@ -8,7 +8,7 @@
 #      → creates Matrix user accounts in Tuwunel
 #      → creates Higress consumer entries
 #      → generates openclaw.json in MinIO (workers need this to start)
-#   3. Creates the honeybadge-gateway Matrix account (used by honeybadge-server)
+#   3. (Approach B) Per-user Matrix accounts are provisioned at login via honeybadge-auth
 #   4. Registers HoneyBadge MCP servers in Higress AI Gateway
 #
 # After this script succeeds, workers will start on next restart (they keep
@@ -28,7 +28,6 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MANAGER_CONTAINER="${MANAGER_CONTAINER:-honeybadge-hiclaw-manager}"
 REG_TOKEN="${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}"
 MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
-GATEWAY_PASSWORD="${MATRIX_GATEWAY_PASSWORD:-gateway-dev-pass}"
 
 # ANSI colors
 GREEN='\033[0;32m'
@@ -108,23 +107,11 @@ docker exec "$MANAGER_CONTAINER" bash -c \
     || warn "  create-worker.sh for analytics-worker failed (may already exist)"
 
 # ---------------------------------------------------------------------------
-# 4. Create honeybadge-gateway Matrix account (used by honeybadge-server)
-#    honeybadge-server connects to Tuwunel as this user to send DMs to Manager
+# 4. Per-user Matrix accounts (Approach B)
+#    Per-user Matrix accounts are now provisioned at login time by the
+#    honeybadge-auth service (src/honeybadge/auth_service/main.py).
+#    The shared @honeybadge-gateway account is no longer needed.
 # ---------------------------------------------------------------------------
-log "Creating honeybadge-gateway Matrix account..."
-docker exec "$MANAGER_CONTAINER" bash -c "
-    register_appservice_user() {
-        curl -sf -X POST http://localhost:6167/_matrix/client/v3/register \
-            -H 'Content-Type: application/json' \
-            -d '{
-                \"username\": \"honeybadge-gateway\",
-                \"password\": \"${GATEWAY_PASSWORD}\",
-                \"auth\": {\"type\": \"m.login.registration_token\", \"token\": \"${REG_TOKEN}\"}
-            }' 2>&1
-    }
-    register_appservice_user
-" && log "  → honeybadge-gateway account created" \
-  || warn "  Gateway account creation failed (may already exist — safe to ignore)"
 
 # ---------------------------------------------------------------------------
 # 5. Register MCP servers in Higress AI Gateway
@@ -154,8 +141,8 @@ echo ""
 echo "  Next steps:"
 echo "  1. Restart workers to pick up their new MinIO config:"
 echo "       docker compose restart hiclaw-graph-worker hiclaw-analytics-worker"
-echo "  2. Restart honeybadge-server to connect to Matrix:"
-echo "       docker compose restart honeybadge-server"
+echo "  2. Start honeybadge-auth service (provisions Matrix accounts at login):"
+echo "       docker compose up -d honeybadge-auth"
 echo "  3. Access the UI: http://localhost:3000"
 echo "     Login: admin/admin123"
 echo ""
