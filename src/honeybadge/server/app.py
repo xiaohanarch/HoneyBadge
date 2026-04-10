@@ -1,6 +1,5 @@
 """FastAPI application factory for HoneyBadge backend server."""
 
-import asyncio
 from contextlib import asynccontextmanager
 
 import structlog
@@ -35,14 +34,6 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             from honeybadge.db.nebula import NebulaGraphClient
             from honeybadge.db.postgres import PostgreSQLClient
             from honeybadge.db.redis import RedisClient
-            from honeybadge.llm.adapter import OpenAICompatibleAdapter
-            from honeybadge.protocols.validator import NgqlValidator
-            from honeybadge.server.orchestrator import create_orchestrator
-            from honeybadge.gateway import MatrixClient, SchemaCache, RoomManager
-            from honeybadge.protocols.messages import (
-                ErrorCode, ErrorMessage, ErrorPayload,
-                ResponseMessage, ResponsePayload, serialize_message,
-            )
 
             nebula = NebulaGraphClient(
                 host=config.nebula_host, port=config.nebula_port,
@@ -67,122 +58,22 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             await redis.connect()
             app.state.redis = redis
 
-            llm = OpenAICompatibleAdapter(config={
-                "endpoint": config.llm_endpoint,
-                "api_key": config.llm_api_key,
-                "model": config.llm_model,
-            })
-            app.state.llm = llm
-
-            validator = NgqlValidator()
-            app.state.validator = validator
-
-            # Gateway components — created before create_orchestrator so that
-            # matrix_client can be injected when ORCHESTRATOR_TYPE=hiclaw.
-            schema_cache = SchemaCache()
-            room_manager = RoomManager()
-
-            async def on_matrix_result(msg):
-                app.state.pending_traces.discard(msg.trace_id)
-                session_id = room_manager.get_session_id_by_trace(msg.trace_id)
-                if session_id:
-                    ws = app.state.active_ws_sessions.get(session_id)
-                    if ws:
-                        raw_data = msg.data.get("rows", []) if msg.data else []
-                        response = ResponseMessage(
-                            payload=ResponsePayload(
-                                summary=msg.summary,
-                                raw_data=raw_data,
-                                columns=msg.data.get("columns", []) if msg.data else [],
-                                cypher=msg.data.get("cypher", "") if msg.data else "",
-                                trace_id=msg.trace_id,
-                                execution_time_ms=msg.data.get("execution_time_ms", 0) if msg.data else 0,
-                                row_count=len(raw_data),
-                            ),
-                        )
-                        await ws.send_json(serialize_message(response))
-
-            async def on_matrix_error(msg):
-                app.state.pending_traces.discard(msg.trace_id)
-                session_id = room_manager.get_session_id_by_trace(msg.trace_id)
-                if session_id:
-                    ws = app.state.active_ws_sessions.get(session_id)
-                    if ws:
-                        error = ErrorMessage(
-                            payload=ErrorPayload(
-                                code=ErrorCode.EXECUTION_ERROR,
-                                message=msg.error_message,
-                                trace_id=msg.trace_id,
-                            ),
-                        )
-                        await ws.send_json(serialize_message(error))
-
-            matrix_client = MatrixClient(
-                homeserver_url=config.matrix_homeserver_url,
-                user_id=config.matrix_user_id,
-                password=config.matrix_user_password,
-                room_manager=room_manager,
-                on_result=on_matrix_result,
-                on_error=on_matrix_error,
-            )
-
-            app.state.matrix_client = matrix_client
-            app.state.schema_cache = schema_cache
-            app.state.room_manager = room_manager
-            app.state.active_ws_sessions = {}
-            app.state.pending_traces: set[str] = set()
-
-            # Create orchestrator — passes matrix_client for hiclaw mode
-            orchestrator = create_orchestrator(
-                config, nebula, llm, pg, redis, validator,
-                matrix_client=matrix_client,
-            )
-            app.state.orchestrator = orchestrator
-
-            # Connect to Matrix homeserver.
-            # Skip bootstrap_schema in hiclaw mode — schema is fetched internally
-            # by the HiClaw Worker via the get_schema MCP tool.
-            try:
-                await matrix_client.connect()
-                if config.orchestrator_type != "hiclaw":
-                    await matrix_client.bootstrap_schema(schema_cache)
-            except Exception as exc:
-                logger.error("matrix_bootstrap_failed", error=str(exc))
-
-            logger.info(
-                "gateway_ready",
-                schema_tags=len(schema_cache.get_tags()),
-                schema_edges=len(schema_cache.get_edges()),
-            )
-            logger.info("server_ready", services="nebula,pg,redis,llm")
+            logger.info("server_ready", services="nebula,pg,redis")
         except Exception as e:
             logger.error("startup_failed", error=str(e))
-            for attr in (
-                "nebula", "pg", "redis", "llm", "orchestrator", "validator",
-                "matrix_client", "schema_cache", "room_manager",
-            ):
+            for attr in ("nebula", "pg", "redis"):
                 if not hasattr(app.state, attr):
                     setattr(app.state, attr, None)
 
         yield
 
         logger.info("server_shutting_down")
-        if hasattr(app.state, "active_ws_sessions") and app.state.active_ws_sessions:
-            for ws in app.state.active_ws_sessions.values():
-                try:
-                    await ws.close()
-                except Exception:
-                    pass
         if hasattr(app.state, "nebula") and app.state.nebula:
             await app.state.nebula.disconnect()
         if hasattr(app.state, "pg") and app.state.pg:
             await app.state.pg.disconnect()
         if hasattr(app.state, "redis") and app.state.redis:
             await app.state.redis.disconnect()
-        if hasattr(app.state, "llm") and app.state.llm:
-            await app.state.llm.close()
-        if hasattr(app.state, "matrix_client") and app.state.matrix_client:
-            await app.state.matrix_client.disconnect()
 
     app = FastAPI(title="HoneyBadge", version=VERSION, lifespan=lifespan)
     app.state.config = config
@@ -190,7 +81,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -243,11 +134,9 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     # --- Mount routers ---
     from honeybadge.server.health import router as health_router
     from honeybadge.server.sessions import router as sessions_router
-    from honeybadge.server.websocket import router as ws_router
 
     app.include_router(health_router)
     app.include_router(sessions_router)
-    app.include_router(ws_router)
 
     return app
 

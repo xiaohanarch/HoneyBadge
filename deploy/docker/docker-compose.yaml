@@ -2,8 +2,9 @@
 # Docker Compose — Phase 1 (HiClaw Mode)
 #
 # Architecture:
-#   Browser → Frontend (3000) → proxy → HoneyBadge Server (8090)
-#                                          ↓ Matrix DM (:6167 internal)
+#   Browser → Frontend (3000)        (static assets + audit API proxy)
+#   Browser → honeybadge-auth (8091) (POST /login → Matrix token + roles JWT)
+#   Browser → Tuwunel (6167)         (matrix-js-sdk direct connection)
 #                                   HiClaw Manager (all-in-one)
 #                                     ├─ Tuwunel Matrix server
 #                                     ├─ MinIO (worker config storage)
@@ -215,11 +216,13 @@ services:
     hostname: hiclaw-manager
     restart: unless-stopped
     ports:
+      - "6167:6167"     # Tuwunel Matrix — browser connects here directly (Approach B)
       - "18888:18888"    # Element Web — Matrix chat UI for agent monitoring
       - "19001:9001"     # MinIO Console — inspect/manage worker config files
       - "18001:8001"     # Higress Admin Console — register/manage MCP tools
       - "18080:8080"     # Higress AI Gateway — external gateway access
-      # Note: Tuwunel (:6167) and MinIO API (:9000) are internal only
+      # Note: Tuwunel (:6167) is exposed on host for browser matrix-js-sdk (Approach B)
+      # MinIO API (:9000) is internal only
     environment:
       # Admin credentials — used for MinIO root user and Higress console login
       # MinIO requires password >= 8 chars; use .env to override
@@ -263,7 +266,7 @@ services:
       - HICLAW_WORKER_NAME=graph-worker
       - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
-      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin}
+      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       - TZ=Asia/Shanghai
     networks:
       - honeybadge-net
@@ -280,7 +283,7 @@ services:
       - HICLAW_WORKER_NAME=analytics-worker
       - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
-      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin}
+      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       - TZ=Asia/Shanghai
     networks:
       - honeybadge-net
@@ -359,8 +362,7 @@ services:
 
   # =============================================================================
   # HoneyBadge Backend Server
-  # ORCHESTRATOR_TYPE=hiclaw: delegates queries to HiClaw Manager via Matrix DM.
-  # honeybadge-gateway bot user sends DMs to the Manager; Manager routes to Workers.
+  # Serves audit API and static assets. Auth is handled by honeybadge-auth.
   # =============================================================================
 
   honeybadge-server:
@@ -395,15 +397,7 @@ services:
       - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
       # Auth
       - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
-      # Orchestration — HiClaw mode
-      - ORCHESTRATOR_TYPE=hiclaw
       - SERVER_PORT=8090
-      # Matrix / HiClaw Manager connection
-      # Tuwunel listens on :6167 inside hiclaw-manager container
-      # User ID domain must match HICLAW_MATRIX_DOMAIN set on hiclaw-manager
-      - MATRIX_HOMESERVER_URL=http://hiclaw-manager:6167
-      - MATRIX_USER_ID=@honeybadge-gateway:matrix-local.hiclaw.io
-      - MATRIX_USER_PASSWORD=${MATRIX_GATEWAY_PASSWORD:-gateway-dev-pass}
       - TZ=Asia/Shanghai
     depends_on:
       nebula-graphd:
@@ -418,6 +412,41 @@ services:
       - honeybadge-net
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8090/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # =============================================================================
+  # HoneyBadge Auth Service (Approach B)
+  # Provisions per-user Matrix accounts in Tuwunel at login time.
+  # Browser calls POST /login → gets matrix_access_token + roles_jwt
+  # =============================================================================
+
+  honeybadge-auth:
+    build:
+      context: ../..
+      dockerfile: src/honeybadge/auth_service/Dockerfile
+    container_name: honeybadge-auth
+    hostname: honeybadge-auth
+    restart: unless-stopped
+    ports:
+      - "8091:8091"
+    environment:
+      - TUWUNEL_URL=http://hiclaw-manager:6167
+      - MATRIX_DOMAIN=matrix-local.hiclaw.io
+      - HICLAW_REGISTRATION_TOKEN=${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}
+      - MATRIX_USER_SECRET=${MATRIX_USER_SECRET:-hb-user-secret-dev}
+      - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
+      - MATRIX_HOMESERVER_PUBLIC=http://localhost:6167
+      - TZ=Asia/Shanghai
+    depends_on:
+      hiclaw-manager:
+        condition: service_healthy
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('localhost', 8091), 2); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -442,6 +471,8 @@ services:
     environment:
       - VITE_API_TARGET=http://honeybadge-server:8090
       - VITE_WS_TARGET=ws://honeybadge-server:8090
+      - VITE_AUTH_URL=http://localhost:8091
+      - VITE_MATRIX_HOMESERVER=http://localhost:6167
       - TZ=Asia/Shanghai
     volumes:
       - ../../frontend:/app
@@ -450,6 +481,8 @@ services:
       - honeybadge-net
     depends_on:
       honeybadge-server:
+        condition: service_started
+      honeybadge-auth:
         condition: service_started
 
   # =============================================================================

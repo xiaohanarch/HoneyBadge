@@ -128,13 +128,13 @@ import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, MoreFilled, Promotion, UserFilled } from '@element-plus/icons-vue';
 import { useAuth } from '@/composables/useAuth';
-import { useChat } from '@/composables/useChat';
+import { useMatrixChat } from '@/composables/useMatrixChat';
 import { useChatStore } from '@/stores/chat';
 import ChatMessage from '@/components/chat/ChatMessage.vue';
 
 const router = useRouter();
 const { logout, currentUser, fetchCurrentUser } = useAuth();
-const { connected, loadSessions, createSession, loadMessages, sendQuery, deleteSession, connect } = useChat();
+const { connected, loadSessions, createSession, loadMessages, sendQuery, deleteSession, connect } = useMatrixChat();
 const chatStore = useChatStore();
 
 const question = ref('');

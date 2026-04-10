@@ -20,11 +20,6 @@ class TestDefaultConfig:
         config = ServerConfig()
         assert config.port == 8090
 
-    def test_default_orchestrator_type(self):
-        """Should default orchestrator_type to 'direct'."""
-        config = ServerConfig()
-        assert config.orchestrator_type == "direct"
-
     def test_default_nebula_fields(self):
         """Should have sensible NebulaGraph defaults."""
         config = ServerConfig()
@@ -76,19 +71,11 @@ class TestDefaultConfig:
         assert config.matrix_url == ""
         assert config.hiclaw_manager_url == ""
 
-    def test_default_matrix_fields(self):
-        """Should have Matrix client defaults pointing to HiClaw Tuwunel."""
-        config = ServerConfig()
-        assert config.matrix_homeserver_url == "http://localhost:6167"
-        assert config.matrix_user_id == "@honeybadge-gateway:matrix-local.hiclaw.io"
-        assert config.matrix_user_password == ""
-
     def test_default_config(self):
         """test_default_config: verify all defaults are correct types."""
         config = ServerConfig()
         assert isinstance(config.host, str)
         assert isinstance(config.port, int)
-        assert isinstance(config.orchestrator_type, str)
         assert isinstance(config.jwt_access_expire_minutes, int)
         assert isinstance(config.jwt_refresh_expire_days, int)
 
@@ -100,7 +87,6 @@ class TestConfigFromEnv:
         """test_config_from_env: env vars should override defaults."""
         monkeypatch.setenv("SERVER_HOST", "127.0.0.1")
         monkeypatch.setenv("SERVER_PORT", "9000")
-        monkeypatch.setenv("ORCHESTRATOR_TYPE", "hiclaw")
         monkeypatch.setenv("NEBULA_HOST", "nebula-server")
         monkeypatch.setenv("NEBULA_PORT", "9670")
         monkeypatch.setenv("NEBULA_USER", "admin")
@@ -124,15 +110,11 @@ class TestConfigFromEnv:
         monkeypatch.setenv("MILVUS_PORT", "19531")
         monkeypatch.setenv("MATRIX_URL", "http://matrix.example.com")
         monkeypatch.setenv("HICLAW_MANAGER_URL", "http://hiclaw.example.com")
-        monkeypatch.setenv("MATRIX_HOMESERVER_URL", "http://hiclaw.example.com:6167")
-        monkeypatch.setenv("MATRIX_USER_ID", "@honeybadge-gateway:hiclaw.example.com")
-        monkeypatch.setenv("MATRIX_USER_PASSWORD", "secret")
 
         config = ServerConfig.from_env()
 
         assert config.host == "127.0.0.1"
         assert config.port == 9000
-        assert config.orchestrator_type == "hiclaw"
         assert config.nebula_host == "nebula-server"
         assert config.nebula_port == 9670
         assert config.nebula_user == "admin"
@@ -156,9 +138,6 @@ class TestConfigFromEnv:
         assert config.milvus_port == 19531
         assert config.matrix_url == "http://matrix.example.com"
         assert config.hiclaw_manager_url == "http://hiclaw.example.com"
-        assert config.matrix_homeserver_url == "http://hiclaw.example.com:6167"
-        assert config.matrix_user_id == "@honeybadge-gateway:hiclaw.example.com"
-        assert config.matrix_user_password == "secret"
 
     def test_partial_env_override(self, monkeypatch):
         """Partial env vars should override only those fields."""
@@ -173,27 +152,3 @@ class TestConfigFromEnv:
         assert config.host == "0.0.0.0"
         assert config.nebula_host == "localhost"
 
-    def test_from_env_matrix_defaults_to_hiclaw_tuwunel(self, monkeypatch):
-        """When no Matrix env vars are set, from_env() should default to HiClaw Tuwunel."""
-        # Ensure no Matrix env vars are set
-        monkeypatch.delenv("MATRIX_HOMESERVER_URL", raising=False)
-        monkeypatch.delenv("MATRIX_USER_ID", raising=False)
-        monkeypatch.delenv("MATRIX_USER_PASSWORD", raising=False)
-
-        config = ServerConfig.from_env()
-        assert config.matrix_homeserver_url == "http://localhost:6167"
-        assert config.matrix_user_id == "@honeybadge-gateway:matrix-local.hiclaw.io"
-        assert config.matrix_user_password == ""
-
-
-def test_hiclaw_query_timeout_default():
-    from honeybadge.server.config import ServerConfig
-    config = ServerConfig()
-    assert config.hiclaw_query_timeout == 60.0
-
-
-def test_hiclaw_query_timeout_from_env(monkeypatch):
-    monkeypatch.setenv("HICLAW_QUERY_TIMEOUT", "120")
-    from honeybadge.server.config import ServerConfig
-    config = ServerConfig.from_env()
-    assert config.hiclaw_query_timeout == 120.0
