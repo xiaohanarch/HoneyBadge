@@ -166,7 +166,7 @@ def _sign_google_jwt(google_sub: str, email: str, display_name: str) -> str:
     """
     payload = {
         "sub": f"google:{google_sub}",
-        "user_id": f"@google_{google_sub}:{_get_matrix_domain()}",
+        "user_id": f"@hb-google_{google_sub}:{_get_matrix_domain()}",
         "username": f"google_{google_sub}",
         "email": email,
         "display_name": display_name,
