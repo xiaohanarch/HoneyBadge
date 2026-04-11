@@ -485,6 +485,11 @@ services:
       - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
       - MATRIX_HOMESERVER_PUBLIC=http://localhost:6167
       - TZ=Asia/Shanghai
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_ENABLED=${GOOGLE_ENABLED:-false}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://localhost:8091}
+      - DEFAULT_ROLE=${DEFAULT_ROLE:-analyst}
     depends_on:
       hiclaw-manager:
         condition: service_healthy
