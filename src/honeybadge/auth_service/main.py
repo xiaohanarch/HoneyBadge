@@ -421,7 +421,7 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
     # Sign JWT with default analyst role
     roles_jwt = _sign_google_jwt(google_sub, userinfo["email"], userinfo.get("name", ""))
 
-    matrix_user_id = f"@google_{google_sub}:{MATRIX_DOMAIN}"
+    matrix_user_id = f"@hb-{matrix_username}:{MATRIX_DOMAIN}"
 
     # Redirect to frontend with tokens in URL fragment (not sent to server)
     login_response = LoginResponse(
