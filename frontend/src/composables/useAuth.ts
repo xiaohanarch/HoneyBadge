@@ -116,6 +116,65 @@ export function useAuth() {
     return false;
   }
 
+  async function checkGoogleSSOEnabled(): Promise<boolean> {
+    try {
+      const authUrl = import.meta.env.VITE_AUTH_URL || 'http://localhost:8091';
+      const resp = await fetch(`${authUrl}/auth/google/config`);
+      if (!resp.ok) return false;
+      const data = await resp.json();
+      return data.enabled === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function handleGoogleCallback(): Promise<boolean> {
+    // After Google redirects back, browser lands on frontend with tokens in URL fragment
+    // Format: http://localhost:3000/login#matrix_access_token=...&roles_jwt=...
+    const hash = window.location.hash;
+    if (!hash || !hash.startsWith('#')) return false;
+
+    try {
+      const params = new URLSearchParams(hash.substring(1));
+      const data = {
+        matrix_access_token: params.get('matrix_access_token') || '',
+        matrix_user_id: params.get('matrix_user_id') || '',
+        matrix_homeserver: params.get('matrix_homeserver') || '',
+        roles_jwt: params.get('roles_jwt') || '',
+        user: {
+          id: params.get('user_id') || '',
+          username: params.get('user_username') || '',
+          display_name: params.get('user_display_name') || '',
+          roles: (params.get('user_roles') || '').split(',').filter(Boolean),
+          org_id: parseInt(params.get('user_org_id') || '1', 10),
+        },
+      };
+
+      // Validate response structure
+      if (!data.roles_jwt || !data.matrix_access_token || !data.user.id) {
+        throw new Error('Invalid response structure');
+      }
+
+      // Same processing as demo login
+      localStorage.setItem('token', data.roles_jwt);
+      localStorage.setItem('matrix_token', data.matrix_access_token);
+      localStorage.setItem('matrix_user_id', data.matrix_user_id);
+      localStorage.setItem('matrix_homeserver', data.matrix_homeserver);
+      authStore.setAuth(data.roles_jwt, '', data.user);
+      authStore.setMatrixAuth(data.matrix_access_token, data.matrix_homeserver, data.matrix_user_id, data.roles_jwt);
+      ElMessage.success(`欢迎，${data.user.display_name}`);
+      // Clean URL fragment
+      window.history.replaceState({}, '', '/login');
+      router.push('/chat');
+      return true;
+    } catch (error) {
+      console.error('Google callback failed:', error);
+      ElMessage.error('Google 登录失败');
+      window.history.replaceState({}, '', '/login');
+      return false;
+    }
+  }
+
   return {
     loading,
     isAuthenticated,
@@ -124,5 +183,7 @@ export function useAuth() {
     logout,
     fetchCurrentUser,
     checkAuth,
+    checkGoogleSSOEnabled,
+    handleGoogleCallback,
   };
 }

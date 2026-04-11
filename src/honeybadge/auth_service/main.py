@@ -17,11 +17,26 @@ from typing import Any
 import httpx
 import structlog
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from jose import jwt
 from pydantic import BaseModel
 
 from honeybadge.server.auth import authenticate_user
+from .google_oauth import (
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_ENABLED,
+    AUTH_SERVICE_URL,
+    DEFAULT_ROLE,
+    GoogleOAuthError,
+    _build_google_auth_url,
+    _build_state,
+    _exchange_code_for_tokens,
+    _fetch_google_userinfo,
+    _sign_google_jwt,
+    _verify_state,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -94,6 +109,11 @@ class LoginResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     service: str
+
+
+class GoogleConfigResponse(BaseModel):
+    enabled: bool
+    client_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -336,3 +356,111 @@ async def login(body: LoginRequest) -> LoginResponse:
 async def health() -> HealthResponse:
     """Health check endpoint."""
     return HealthResponse(status="ok", service="honeybadge-auth")
+
+
+@app.get("/auth/google", tags=["auth"])
+async def google_auth_redirect():
+    """Redirect to Google OAuth2 authorization page.
+
+    Returns 302 redirect if Google SSO is enabled, 404 if not.
+    """
+    if not GOOGLE_ENABLED:
+        raise HTTPException(status_code=404, detail="Google SSO not enabled")
+
+    state = _build_state()
+    auth_url = _build_google_auth_url(state)
+    return RedirectResponse(url=auth_url, status_code=302)
+
+
+@app.get("/auth/google/callback", response_model=LoginResponse, tags=["auth"])
+async def google_auth_callback(code: str = None, state: str = None, error: str = None):
+    """Handle Google OAuth2 callback.
+
+    Validates state, exchanges code for tokens, fetches user info,
+    provisions Matrix account, and returns JWT tokens.
+    """
+    # Handle error from Google (e.g., user denied)
+    if error:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code or state")
+
+    # Validate state
+    if not _verify_state(state):
+        raise HTTPException(status_code=400, detail="Security check failed")
+
+    # Exchange code for tokens
+    try:
+        tokens = await _exchange_code_for_tokens(code)
+    except GoogleOAuthError as e:
+        logger.error("google_token_exchange_failed", error=str(e))
+        raise HTTPException(status_code=502, detail="Invalid token response from Google")
+
+    if "access_token" not in tokens:
+        raise HTTPException(status_code=502, detail="Invalid token response from Google")
+
+    # Fetch user info
+    try:
+        userinfo = await _fetch_google_userinfo(tokens["access_token"])
+    except GoogleOAuthError as e:
+        logger.error("google_userinfo_fetch_failed", error=str(e))
+        raise HTTPException(status_code=502, detail="Invalid userinfo from Google")
+
+    if "sub" not in userinfo or "email" not in userinfo:
+        raise HTTPException(status_code=502, detail="Invalid userinfo from Google")
+
+    # Build Matrix username from Google sub
+    google_sub = userinfo["sub"]
+    matrix_username = f"google_{google_sub}"
+    matrix_password = _derive_matrix_password(matrix_username)
+
+    # Provision Matrix account (same logic as demo login)
+    matrix_access_token = await _provision_matrix_account(matrix_username, matrix_password)
+
+    # Sign JWT with default analyst role
+    roles_jwt = _sign_google_jwt(google_sub, userinfo["email"], userinfo.get("name", ""))
+
+    matrix_user_id = f"@google_{google_sub}:{MATRIX_DOMAIN}"
+
+    # Redirect to frontend with tokens in URL fragment (not sent to server)
+    login_response = LoginResponse(
+        matrix_access_token=matrix_access_token,
+        matrix_homeserver=MATRIX_HOMESERVER_PUBLIC,
+        matrix_user_id=matrix_user_id,
+        roles_jwt=roles_jwt,
+        user=UserInfo(
+            id=f"google:{google_sub}",
+            username=matrix_username,
+            display_name=userinfo.get("name", userinfo["email"]),
+            roles=[DEFAULT_ROLE],
+            org_id=1,
+        ),
+    )
+
+    # Flatten nested user object for URL fragment encoding
+    data = login_response.model_dump()
+    flat_data = {
+        "matrix_access_token": data["matrix_access_token"],
+        "matrix_homeserver": data["matrix_homeserver"],
+        "matrix_user_id": data["matrix_user_id"],
+        "roles_jwt": data["roles_jwt"],
+        "user_id": data["user"]["id"],
+        "user_username": data["user"]["username"],
+        "user_display_name": data["user"]["display_name"],
+        "user_roles": ",".join(data["user"]["roles"]),
+        "user_org_id": str(data["user"]["org_id"]),
+    }
+    import urllib.parse
+    fragment = urllib.parse.urlencode(flat_data)
+    frontend_url = f"http://localhost:3000/login#{fragment}"
+    return RedirectResponse(url=frontend_url, status_code=302)
+
+
+@app.get("/auth/google/config", response_model=GoogleConfigResponse, tags=["auth"])
+async def google_auth_config():
+    """Return Google SSO configuration for frontend."""
+    return GoogleConfigResponse(
+        enabled=GOOGLE_ENABLED,
+        client_id=GOOGLE_CLIENT_ID or "",
+    )
