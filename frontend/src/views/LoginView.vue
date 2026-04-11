@@ -98,9 +98,8 @@ const ssoEnabled = ref(false);
 const ssoLoading = ref(false);
 
 onMounted(async () => {
-  // Check if this is a Google callback
-  const params = new URLSearchParams(window.location.search);
-  if (params.has('code')) {
+  // Check if this is a Google callback (tokens in URL fragment)
+  if (window.location.hash && window.location.hash.startsWith('#')) {
     const success = await handleGoogleCallback();
     if (success) return;
   }

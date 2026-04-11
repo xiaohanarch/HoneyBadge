@@ -423,7 +423,8 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
 
     matrix_user_id = f"@google_{google_sub}:{MATRIX_DOMAIN}"
 
-    return LoginResponse(
+    # Redirect to frontend with tokens in URL fragment (not sent to server)
+    login_response = LoginResponse(
         matrix_access_token=matrix_access_token,
         matrix_homeserver=MATRIX_HOMESERVER_PUBLIC,
         matrix_user_id=matrix_user_id,
@@ -436,6 +437,12 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
             org_id=1,
         ),
     )
+
+    import json
+    import urllib.parse
+    fragment = urllib.parse.urlencode(login_response.model_dump())
+    frontend_url = f"http://localhost:3000/login#{fragment}"
+    return RedirectResponse(url=frontend_url, status_code=302)
 
 
 @app.get("/auth/google/config", response_model=GoogleConfigResponse, tags=["auth"])
