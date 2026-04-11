@@ -451,6 +451,7 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
         "user_roles": ",".join(data["user"]["roles"]),
         "user_org_id": str(data["user"]["org_id"]),
     }
+    import urllib.parse
     fragment = urllib.parse.urlencode(flat_data)
     frontend_url = f"http://localhost:3000/login#{fragment}"
     return RedirectResponse(url=frontend_url, status_code=302)
