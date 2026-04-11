@@ -16,6 +16,17 @@ from typing import Any
 from jose import jwt
 
 # ---------------------------------------------------------------------------
+# Custom exceptions
+# ---------------------------------------------------------------------------
+
+
+class GoogleOAuthError(Exception):
+    """Raised when Google OAuth operations fail."""
+
+    pass
+
+
+# ---------------------------------------------------------------------------
 # Environment configuration
 # ---------------------------------------------------------------------------
 
@@ -26,6 +37,7 @@ AUTH_SERVICE_URL: str = os.getenv("AUTH_SERVICE_URL", "http://localhost:8091")
 DEFAULT_ROLE: str = os.getenv("DEFAULT_ROLE", "analyst")
 JWT_SECRET: str = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
@@ -115,7 +127,7 @@ async def _exchange_code_for_tokens(code: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(GOOGLE_TOKEN_URL, data=payload)
         if resp.status_code != 200:
-            raise Exception(f"Token exchange failed: {resp.status_code} {resp.text}")
+            raise GoogleOAuthError(f"Token exchange failed: {resp.status_code} {resp.text}")
         return resp.json()
 
 
@@ -135,7 +147,7 @@ async def _fetch_google_userinfo(access_token: str) -> dict[str, Any]:
             headers={"Authorization": f"Bearer {access_token}"},
         )
         if resp.status_code != 200:
-            raise Exception(f"Userinfo fetch failed: {resp.status_code}")
+            raise GoogleOAuthError(f"Userinfo fetch failed: {resp.status_code}")
         return resp.json()
 
 
@@ -161,7 +173,7 @@ def _sign_google_jwt(google_sub: str, email: str, display_name: str) -> str:
         "roles": [DEFAULT_ROLE],
         "org_id": 1,
         "iss": "honeybadge-auth",
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=480),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
