@@ -64,11 +64,13 @@ HoneyBadge 旨在为企业提供：
 - 登录时由 `honeybadge-auth` 服务自动在 Tuwunel 中创建用户专属 Matrix 账号
 - 权限 JWT（roles_jwt）随 Matrix 消息传递给 graph-worker
 
-### 5. 可观测性
+### 5. 可观测性（可选）
 - **Prometheus** 指标采集
-- **Grafana** 可视化看板
+- **Grafana** 可视化看板（端口 3030）
 - **Loki** 日志聚合
-- **Jaeger** 链路追踪
+- **Alertmanager** 告警路由
+
+> 启动方式：`docker compose --profile observability up -d`
 
 ---
 
@@ -290,6 +292,22 @@ curl http://localhost:8091/health
 curl http://localhost:6167/_matrix/client/versions
 ```
 
+### 8. 启动可观测性栈（可选）
+
+```bash
+docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env \
+  --profile observability up -d
+```
+
+| 服务 | 地址 | 说明 |
+|------|------|------|
+| Prometheus | http://localhost:9090 | 指标采集与查询 |
+| Grafana | http://localhost:3030 | admin/admin123 |
+| Loki | http://localhost:3100 | 日志聚合（Promtail 自动采集） |
+| Alertmanager | http://localhost:9093 | 告警路由 |
+
+> 所有 honeybadge-* 服务已添加 `com.honeybadge.service` label，Promtail 通过 Docker Socket 自动发现并收集日志。
+
 ### 8. 访问服务
 
 | 服务 | 地址 | 凭证 |
@@ -305,7 +323,7 @@ curl http://localhost:6167/_matrix/client/versions
 # 停止，保留数据
 docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env down
 
-# 停止并清除所有数据（重置后需重新执行步骤 4-6）
+# 停止并清除所有数据（重置后需重新执行步骤 4-7）
 docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env down -v
 ```
 
