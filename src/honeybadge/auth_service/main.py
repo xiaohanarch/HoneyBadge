@@ -438,9 +438,20 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
         ),
     )
 
-    import json
-    import urllib.parse
-    fragment = urllib.parse.urlencode(login_response.model_dump())
+    # Flatten nested user object for URL fragment encoding
+    data = login_response.model_dump()
+    flat_data = {
+        "matrix_access_token": data["matrix_access_token"],
+        "matrix_homeserver": data["matrix_homeserver"],
+        "matrix_user_id": data["matrix_user_id"],
+        "roles_jwt": data["roles_jwt"],
+        "user_id": data["user"]["id"],
+        "user_username": data["user"]["username"],
+        "user_display_name": data["user"]["display_name"],
+        "user_roles": ",".join(data["user"]["roles"]),
+        "user_org_id": str(data["user"]["org_id"]),
+    }
+    fragment = urllib.parse.urlencode(flat_data)
     frontend_url = f"http://localhost:3000/login#{fragment}"
     return RedirectResponse(url=frontend_url, status_code=302)
 

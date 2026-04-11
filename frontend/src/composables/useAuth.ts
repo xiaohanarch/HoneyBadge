@@ -142,11 +142,11 @@ export function useAuth() {
         matrix_homeserver: params.get('matrix_homeserver') || '',
         roles_jwt: params.get('roles_jwt') || '',
         user: {
-          id: params.get('user.id') || '',
-          username: params.get('user.username') || '',
-          display_name: params.get('user.display_name') || '',
-          roles: (params.get('user.roles') || '').split(',').filter(Boolean),
-          org_id: parseInt(params.get('user.org_id') || '1', 10),
+          id: params.get('user_id') || '',
+          username: params.get('user_username') || '',
+          display_name: params.get('user_display_name') || '',
+          roles: (params.get('user_roles') || '').split(',').filter(Boolean),
+          org_id: parseInt(params.get('user_org_id') || '1', 10),
         },
       };
 
