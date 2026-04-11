@@ -116,6 +116,53 @@ export function useAuth() {
     return false;
   }
 
+  async function checkGoogleSSOEnabled(): Promise<boolean> {
+    try {
+      const authUrl = import.meta.env.VITE_AUTH_URL || 'http://localhost:8091';
+      const resp = await fetch(`${authUrl}/auth/google/config`);
+      if (!resp.ok) return false;
+      const data = await resp.json();
+      return data.enabled === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function handleGoogleCallback(): Promise<boolean> {
+    // After Google redirects back with ?code=xxx&state=yyy,
+    // the browser lands on LoginView. We detect this and process tokens.
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    if (!code || !state) return false;
+
+    try {
+      const authUrl = import.meta.env.VITE_AUTH_URL || 'http://localhost:8091';
+      const resp = await fetch(`${authUrl}/auth/google/callback?code=${code}&state=${state}`);
+      if (!resp.ok) {
+        ElMessage.error('Google 登录失败');
+        return false;
+      }
+      const data = await resp.json();
+      // Same processing as demo login
+      localStorage.setItem('token', data.roles_jwt);
+      localStorage.setItem('matrix_token', data.matrix_access_token);
+      localStorage.setItem('matrix_user_id', data.matrix_user_id);
+      localStorage.setItem('matrix_homeserver', data.matrix_homeserver);
+      authStore.setAuth(data.roles_jwt, '', data.user);
+      authStore.setMatrixAuth(data.matrix_access_token, data.matrix_homeserver, data.matrix_user_id, data.roles_jwt);
+      ElMessage.success(`欢迎，${data.user.display_name}`);
+      // Clean URL params
+      window.history.replaceState({}, '', '/login');
+      router.push('/chat');
+      return true;
+    } catch (error) {
+      console.error('Google callback failed:', error);
+      ElMessage.error('Google 登录失败');
+      return false;
+    }
+  }
+
   return {
     loading,
     isAuthenticated,
@@ -124,5 +171,7 @@ export function useAuth() {
     logout,
     fetchCurrentUser,
     checkAuth,
+    checkGoogleSSOEnabled,
+    handleGoogleCallback,
   };
 }

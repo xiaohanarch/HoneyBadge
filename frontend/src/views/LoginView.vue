@@ -61,27 +61,56 @@
       </div>
 
       <el-button
+        v-if="ssoEnabled"
+        type="default"
+        size="large"
+        class="sso-button"
+        :loading="ssoLoading"
+        @click="handleSSOLogin"
+      >
+        登录 with Google
+      </el-button>
+      <el-button
+        v-else
         type="default"
         size="large"
         class="sso-button"
         disabled
-        title="Phase 1 暂未开放 SSO 登录"
+        title="Google SSO 未启用"
       >
-        SSO 登录 (Phase 1 禁用)
+        Google SSO (未配置)
       </el-button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, FormInstance, FormRules } from 'element-plus';
 import { User, Lock } from '@element-plus/icons-vue';
 import { useAuth } from '@/composables/useAuth';
 
 const router = useRouter();
-const { login, loading } = useAuth();
+const { login, loading, checkGoogleSSOEnabled, handleGoogleCallback } = useAuth();
+
+const ssoEnabled = ref(false);
+const ssoLoading = ref(false);
+
+onMounted(async () => {
+  // Check if this is a Google callback
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('code')) {
+    const success = await handleGoogleCallback();
+    if (success) return;
+  }
+  // Check if Google SSO is enabled
+  ssoEnabled.value = await checkGoogleSSOEnabled();
+});
+
+function handleSSOLogin() {
+  window.location.href = `${import.meta.env.VITE_AUTH_URL || 'http://localhost:8091'}/auth/google`;
+}
 
 const loginFormRef = ref<FormInstance>();
 const loginForm = reactive({
