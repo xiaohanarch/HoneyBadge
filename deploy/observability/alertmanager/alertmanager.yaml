@@ -44,9 +44,6 @@ receivers:
           bearer_token: '${ALERT_WEBHOOK_TOKEN}'
     pagerduty_configs:
       - service_key: '${PAGERDUTY_SERVICE_KEY}'
-        severity_mapping:
-          critical: critical
-          warning: warning
         description: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ .Annotations.description }}\n{{ end }}'
         details:
           service: HoneyBadge

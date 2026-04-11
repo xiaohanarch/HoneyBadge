@@ -1,7 +1,6 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-  retention_days: 30
 
 alerting:
   alertmanagers:
@@ -27,38 +26,27 @@ scrape_configs:
   # HiClaw Workers (graph group)
   - job_name: 'hiclaw-workers-graph'
     static_configs:
-      - targets: ['hiclaw-worker-graph-1:8080', 'hiclaw-worker-graph-2:8080', 'hiclaw-worker-graph-3:8080']
+      - targets: ['hiclaw-graph-worker:8080']
     metrics_path: /metrics
 
   # HiClaw Workers (analytics group)
   - job_name: 'hiclaw-workers-analytics'
     static_configs:
-      - targets: ['hiclaw-worker-analytics-1:8080', 'hiclaw-worker-analytics-2:8080']
+      - targets: ['hiclaw-analytics-worker:8080']
     metrics_path: /metrics
-
-  # HiClaw Workers (MCP group)
-  - job_name: 'hiclaw-workers-mcp'
-    static_configs:
-      - targets: ['hiclaw-worker-mcp:8080']
-    metrics_path: /metrics
-
-  # Higress Gateway (Envoy)
-  - job_name: 'higress'
-    static_configs:
-      - targets: ['higress:15090']
-    metrics_path: /stats/prometheus
 
   # NebulaGraph
   - job_name: 'nebula'
     static_configs:
-      - targets: ['nebula-graphd:13000', 'nebula-storaged:13001']
+      - targets: ['nebula-graphd:19669', 'nebula-storaged:19779']
     metrics_path: /metrics
 
   # NebulaGraph Exporter
-  - job_name: 'nebula-exporter'
-    static_configs:
-      - targets: ['nebula-exporter:9220']
-    metrics_path: /metrics
+  # (commented out — no nebula-exporter container in docker-compose)
+  # - job_name: 'nebula-exporter'
+  #   static_configs:
+  #     - targets: ['nebula-exporter:9220']
+  #   metrics_path: /metrics
 
   # Loki
   - job_name: 'loki'
@@ -69,7 +57,7 @@ scrape_configs:
   # Grafana
   - job_name: 'grafana'
     static_configs:
-      - targets: ['grafana:3000']
+      - targets: ['grafana:3030']
     metrics_path: /metrics
 
   # Alertmanager

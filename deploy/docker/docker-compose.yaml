@@ -70,6 +70,9 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    labels:
+      com.honeybadge.service: "nebula-metad"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   nebula-storaged:
     image: vesoft/nebula-storaged:v3.8.0
@@ -99,6 +102,9 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    labels:
+      com.honeybadge.service: "nebula-storaged"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   nebula-graphd:
     image: vesoft/nebula-graphd:v3.8.0
@@ -129,6 +135,9 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    labels:
+      com.honeybadge.service: "nebula-graphd"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # Interactive nGQL console — only with: docker compose --profile tools up -d
   nebula-console:
@@ -167,6 +176,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    labels:
+      com.honeybadge.service: "redis"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
   # PostgreSQL (Audit Log + Sessions)
@@ -194,6 +206,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    labels:
+      com.honeybadge.service: "postgres"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
   # HiClaw Manager — all-in-one supervisord container
@@ -253,6 +268,9 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s    # Multiple services start via supervisord; allow time
+    labels:
+      com.honeybadge.service: "hiclaw-manager"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
   # HiClaw Workers — lightweight stateless agent containers
@@ -282,6 +300,9 @@ services:
     depends_on:
       hiclaw-manager:
         condition: service_healthy
+    labels:
+      com.honeybadge.service: "hiclaw-graph-worker"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   hiclaw-analytics-worker:
     image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.6
@@ -299,6 +320,9 @@ services:
     depends_on:
       hiclaw-manager:
         condition: service_healthy
+    labels:
+      com.honeybadge.service: "hiclaw-analytics-worker"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
   # MCP Servers — tools exposed to HiClaw Workers via Higress AI Gateway
@@ -330,6 +354,9 @@ services:
     depends_on:
       nebula-graphd:
         condition: service_healthy
+    labels:
+      com.honeybadge.service: "honeybadge-nebula-mcp"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   honeybadge-audit-mcp:
     build:
@@ -350,6 +377,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    labels:
+      com.honeybadge.service: "honeybadge-audit-mcp"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   honeybadge-cache-mcp:
     build:
@@ -368,6 +398,9 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    labels:
+      com.honeybadge.service: "honeybadge-cache-mcp"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
   # HoneyBadge Backend Server
@@ -425,6 +458,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    labels:
+      com.honeybadge.service: "honeybadge-server"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
   # HoneyBadge Auth Service (Approach B)
@@ -460,6 +496,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    labels:
+      com.honeybadge.service: "honeybadge-auth"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
   # Frontend — Vue 3 + Vite dev server
@@ -493,6 +532,9 @@ services:
         condition: service_started
       honeybadge-auth:
         condition: service_started
+    labels:
+      com.honeybadge.service: "frontend"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
   # Milvus Vector DB — Phase 2 semantic cache (optional)
@@ -561,6 +603,124 @@ services:
     networks:
       - honeybadge-net
 
+  # =============================================================================
+  # Observability Stack (Phase 1.5) — enabled with --profile observability
+  # Prometheus + Grafana + Loki + Promtail + Alertmanager
+  # =============================================================================
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: honeybadge-prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    profiles:
+      - observability
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: honeybadge-grafana
+    hostname: grafana
+    restart: unless-stopped
+    profiles:
+      - observability
+    ports:
+      - "3030:3030"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - TZ=Asia/Shanghai
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - honeybadge-net
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3030/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: honeybadge-loki
+    hostname: loki
+    restart: unless-stopped
+    profiles:
+      - observability
+    command: -config.file=/etc/loki/loki-config.yaml
+    volumes:
+      - ../observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: honeybadge-promtail
+    hostname: promtail
+    restart: unless-stopped
+    profiles:
+      - observability
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    volumes:
+      - ../observability/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_positions:/tmp
+    networks:
+      - honeybadge-net
+    depends_on:
+      - loki
+
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: honeybadge-alertmanager
+    hostname: alertmanager
+    restart: unless-stopped
+    profiles:
+      - observability
+    ports:
+      - "9093:9093"
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yaml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ../observability/alertmanager/alertmanager.yaml:/etc/alertmanager/alertmanager.yaml:ro
+      - alertmanager_data:/alertmanager
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 # =============================================================================
 # Networks & Volumes
 # =============================================================================
@@ -590,3 +750,15 @@ volumes:
     name: honeybadge-milvus-minio-data
   milvus_data:
     name: honeybadge-milvus-data
+
+  # Observability (Phase 1.5 — --profile observability)
+  prometheus_data:
+    name: honeybadge-prometheus-data
+  grafana_data:
+    name: honeybadge-grafana-data
+  loki_data:
+    name: honeybadge-loki-data
+  promtail_positions:
+    name: honeybadge-promtail-positions
+  alertmanager_data:
+    name: honeybadge-alertmanager-data
