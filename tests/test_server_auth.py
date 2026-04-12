@@ -20,9 +20,9 @@ _SECRET = "test-jwt-secret-key"
 class TestDemoUsers:
     """Tests for DEMO_USERS dict structure and content."""
 
-    def test_demo_users_has_three_entries(self):
-        """DEMO_USERS should contain exactly three users."""
-        assert len(DEMO_USERS) == 3
+    def test_demo_users_has_five_entries(self):
+        """DEMO_USERS should contain exactly five users."""
+        assert len(DEMO_USERS) == 5
 
     def test_admin_user_exists(self):
         """admin user should be present."""
@@ -35,6 +35,30 @@ class TestDemoUsers:
     def test_auditor_user_exists(self):
         """auditor user should be present."""
         assert "auditor" in DEMO_USERS
+
+    def test_procurement_lead_user_exists(self):
+        """procurement_lead user should be present."""
+        assert "procurement_lead" in DEMO_USERS
+
+    def test_subsidiary_lead_user_exists(self):
+        """subsidiary_lead user should be present."""
+        assert "subsidiary_lead" in DEMO_USERS
+
+    def test_procurement_lead_fields(self):
+        """procurement_lead should have correct fields."""
+        user = DEMO_USERS["procurement_lead"]
+        assert user["username"] == "procurement_lead"
+        assert user["display_name"] == "采购部门领导"
+        assert "analyst" in user["roles"]
+        assert user["org_id"] == 1
+
+    def test_subsidiary_lead_fields(self):
+        """subsidiary_lead should have correct fields and org_id=2."""
+        user = DEMO_USERS["subsidiary_lead"]
+        assert user["username"] == "subsidiary_lead"
+        assert user["display_name"] == "子公司领导"
+        assert "analyst" in user["roles"]
+        assert user["org_id"] == 2
 
     def test_admin_fields(self):
         """admin user should have correct fields."""

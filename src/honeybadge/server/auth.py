@@ -55,6 +55,22 @@ DEMO_USERS: dict[str, dict[str, Any]] = {
         "roles": ["auditor"],
         "org_id": 1,
     },
+    "procurement_lead": {
+        "id": "procurement_lead",
+        "username": "procurement_lead",
+        "password_hash": pwd_context.hash("lead123"),
+        "display_name": "采购部门领导",
+        "roles": ["analyst"],
+        "org_id": 1,
+    },
+    "subsidiary_lead": {
+        "id": "subsidiary_lead",
+        "username": "subsidiary_lead",
+        "password_hash": pwd_context.hash("lead123"),
+        "display_name": "子公司领导",
+        "roles": ["analyst"],
+        "org_id": 2,
+    },
 }
 
 # JWT algorithm
