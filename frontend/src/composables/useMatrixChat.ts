@@ -71,9 +71,23 @@ export function useMatrixChat() {
     const xhb = content['x-honeybadge']
 
     if (!xhb) {
-      // Plain text — progress update from Worker
       const body = content.body || ''
-      if (body && chatStore.loading) {
+      if (!body) return
+      // If the Manager itself replies in plain text (conversational / non-structured),
+      // treat it as a final answer and release the loading state.
+      if (event.getSender() === MANAGER_USER_ID) {
+        chatStore.finalizeAssistantMessage({
+          summary: body,
+          rawData: [],
+          columns: [],
+          cypher: '',
+          traceId: '',
+          executionTimeMs: 0,
+          rowCount: 0,
+        })
+        chatStore.setLoading(false)
+      } else if (chatStore.loading) {
+        // Plain text from Worker — progress update
         chatStore.appendStreamContent(body + '\n')
       }
       return
@@ -182,8 +196,8 @@ export function useMatrixChat() {
     }
   }
 
-  function connect() {
-    initMatrix()
+  async function connect() {
+    await initMatrix()
   }
 
   function disconnect() {

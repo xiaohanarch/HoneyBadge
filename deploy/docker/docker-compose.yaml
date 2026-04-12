@@ -251,6 +251,16 @@ services:
       # Without this, HiClaw skips auto-config (the route persists in the data volume,
       # but after "docker compose down -v" a fresh start would have no LLM route).
       - HICLAW_LLM_API_KEY=${LLM_API_KEY}
+      # Use openai-compat provider instead of built-in qwen.
+      # Built-in qwen type hardcodes dashscope.aliyuncs.com (standard API, no /v1 path).
+      # openai-compat uses HICLAW_OPENAI_BASE_URL, allowing us to specify
+      # coding.dashscope.aliyuncs.com (OpenAI-compatible endpoint at /v1/).
+      # This is idempotent: setup-higress.sh does PUT on existing service sources.
+      - HICLAW_LLM_PROVIDER=openai-compat
+      - HICLAW_OPENAI_BASE_URL=https://coding.dashscope.aliyuncs.com/v1
+      # AI Gateway domain for Manager's openclaw.json template (envsubst uses this var).
+      # Without this, manager-openclaw.json.tmpl generates baseUrl: http://:8080/v1 (broken).
+      - HICLAW_AI_GATEWAY_DOMAIN=aigw-local.hiclaw.io
       - TZ=Asia/Shanghai
     volumes:
       - hiclaw_manager_data:/data    # Persists MinIO data + Tuwunel DB

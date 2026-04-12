@@ -62,6 +62,11 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 3000,
+    watch: {
+      // Windows Docker volume mounts don't emit inotify events — use polling
+      usePolling: true,
+      interval: 500,
+    },
     proxy: {
       '/api': {
         // In Docker Compose: set VITE_API_TARGET=http://honeybadge-server:8090
