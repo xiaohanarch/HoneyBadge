@@ -234,6 +234,9 @@ watch(
 );
 
 onMounted(async () => {
+  // 确保加载状态是干净的
+  chatStore.setLoading(false);
+
   // 获取当前用户
   await fetchCurrentUser();
   // 加载会话列表
@@ -247,7 +250,7 @@ onMounted(async () => {
   }
 
   // 建立 WebSocket 连接
-  connect();
+  await connect();
 });
 </script>
 

@@ -108,17 +108,26 @@ docker exec "$MANAGER_CONTAINER" bash -c \
 
 # ---------------------------------------------------------------------------
 # 3b. Fix worker LLM baseUrl: hiclaw-manager:8080 → aigw-local.hiclaw.io:8080
+#     and update model name to qwen3.5-plus
 #
 #     create-worker.sh generates openclaw.json with baseUrl=http://hiclaw-manager:8080/v1.
 #     Higress requires Host: aigw-local.hiclaw.io to route AI requests.
 #     docker-compose.yaml gives hiclaw-manager a network alias aigw-local.hiclaw.io,
 #     so workers resolve this name to the manager's current IP via Docker DNS —
 #     no hardcoded IPs needed.
+#
+#     CRITICAL: baseUrl MUST end with /v1. OpenAI JS SDK v6 appends /chat/completions
+#     directly (no /v1). Without /v1 in baseUrl, path is /chat/completions which
+#     misses the /v1/ route → falls to internal route with no API key → 404.
+#
+#     IRON RULE: Workers NEVER call any LLM directly. ALL LLM calls MUST route
+#     through Higress AI Gateway at http://aigw-local.hiclaw.io:8080/v1. No exceptions.
 # ---------------------------------------------------------------------------
-log "Fixing worker LLM baseUrl (hiclaw-manager → aigw-local.hiclaw.io)..."
+log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ qwen3.5-plus)..."
+# baseUrl MUST include /v1: OpenAI JS SDK appends /chat/completions directly
+# Without /v1: path becomes /chat/completions → misses llm-minimax-route → no API key → 404
 for worker in graph-worker analytics-worker; do
-    docker exec "$MANAGER_CONTAINER" bash -c "
-python3 << 'EOF'
+    docker exec "$MANAGER_CONTAINER" python3 -c "
 import json, os, sys
 
 paths = [
@@ -126,7 +135,6 @@ paths = [
     '/root/hiclaw-fs/agents/${worker}/openclaw.json',
 ]
 
-# Find the worker's openclaw.json (location varies by HiClaw version)
 cfg_path = None
 for p in paths:
     if os.path.exists(p):
@@ -134,7 +142,7 @@ for p in paths:
         break
 
 if cfg_path is None:
-    print('openclaw.json not found for ${worker}', file=sys.stderr)
+    print('openclaw.json not found for ${worker}')
     sys.exit(0)
 
 with open(cfg_path) as f:
@@ -143,21 +151,90 @@ with open(cfg_path) as f:
 providers = cfg.get('models', {}).get('providers', {})
 for name, p in providers.items():
     old = p.get('baseUrl', '')
-    if 'hiclaw-manager:8080' in old:
-        p['baseUrl'] = old.replace('hiclaw-manager:8080', 'aigw-local.hiclaw.io:8080')
-        print(f'Patched {name}: {old} -> {p[\"baseUrl\"]}')
+    if 'aigw-local.hiclaw.io:8080/v1' not in old:
+        p['baseUrl'] = 'http://aigw-local.hiclaw.io:8080/v1'
+        print('Patched ' + name + ' baseUrl: ' + old + ' -> ' + p['baseUrl'])
+    for model in p.get('models', []):
+        old_id = model.get('id', '')
+        if old_id != 'qwen3.5-plus':
+            model['id'] = 'qwen3.5-plus'
+            model['name'] = 'qwen3.5-plus'
+            print('Updated model: ' + old_id + ' -> qwen3.5-plus')
+        # Always remove reasoning:true — openclaw thinking mode sends Claude-style
+        # thinking blocks that DashScope rejects with role-ordering 400 errors.
+        model.pop('reasoning', None)
+
+agents = cfg.get('agents', {}).get('defaults', {}).get('model', {})
+old_primary = agents.get('primary', '')
+if 'qwen3.5-plus' not in old_primary:
+    for name in providers.keys():
+        agents['primary'] = name + '/qwen3.5-plus'
+        print('Updated primary: ' + old_primary + ' -> ' + agents['primary'])
+        break
 
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)
 print('done')
-EOF
-" && log "  → ${worker} baseUrl patched" || warn "  Failed to patch ${worker} baseUrl"
+" && log "  → ${worker} baseUrl and model patched" || warn "  Failed to patch ${worker}"
 
     # Sync patched config to MinIO
     docker exec "$MANAGER_CONTAINER" bash -c \
         "mc cp /root/hiclaw-fs/agents/${worker}/openclaw.json hiclaw/hiclaw-storage/agents/${worker}/openclaw.json 2>/dev/null && echo synced || true" \
         && log "  → ${worker} openclaw.json synced to MinIO" || warn "  MinIO sync skipped for ${worker}"
 done
+
+# (Step 3c-pre removed: no longer patching McpBridge YAML directly.
+#  HICLAW_LLM_PROVIDER=openai-compat in docker-compose.yaml makes setup-higress.sh
+#  create openai-compat.dns → coding.dashscope.aliyuncs.com on every startup via
+#  idempotent PUT. The llm-minimax-route (step 3c) uses openai-compat.dns as backend.)
+
+# ---------------------------------------------------------------------------
+# 3c. Ensure Higress LLM route for DashScope (qwen3.5-plus) exists
+#
+#     setup-higress.sh (HICLAW_LLM_PROVIDER=openai-compat) creates an
+#     auto-generated route at / that has NO API key injected.
+#     We create (or update) a more-specific route at /v1/ that takes priority
+#     and injects the real DashScope API key into all LLM requests.
+#
+#     Backend: openai-compat.dns (→ coding.dashscope.aliyuncs.com:443)
+#     This service source is created by setup-higress.sh on every startup and
+#     is idempotent (PUT), so it always points to coding.dashscope.aliyuncs.com.
+#
+#     IRON RULE: ALL LLM calls MUST go through Higress. Workers never call any
+#     LLM endpoint directly. This route is the single exit point for all LLM traffic.
+# ---------------------------------------------------------------------------
+log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → DashScope/qwen3.5-plus)..."
+HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
+LLM_API_KEY="${LLM_API_KEY:-${HICLAW_LLM_API_KEY:-}}"
+
+# Wait for openai-compat.dns service source to exist (created by setup-higress.sh)
+log "  Waiting for openai-compat.dns service source..."
+for i in $(seq 1 20); do
+    SVC=$(docker exec "$MANAGER_CONTAINER" sh -c \
+        "curl -sf 'http://localhost:8001/v1/service-sources/openai-compat' 2>/dev/null" || true)
+    if echo "$SVC" | grep -q '"name":"openai-compat"'; then
+        log "  → openai-compat.dns ready"
+        break
+    fi
+    sleep 3
+done
+
+# PUT to update if exists, POST to create if not
+RESULT=$(docker exec "$MANAGER_CONTAINER" sh -c \
+    "curl -sf -X PUT 'http://localhost:8001/v1/routes/llm-minimax-route' \
+      -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
+      -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.6\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1")
+
+if echo "$RESULT" | grep -q '"name":"llm-minimax-route"'; then
+    log "  → llm-minimax-route updated (openai-compat.dns → coding.dashscope.aliyuncs.com)"
+else
+    docker exec "$MANAGER_CONTAINER" sh -c \
+        "curl -sf -X POST 'http://localhost:8001/v1/routes' \
+          -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
+          -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.6\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
+        && log "  → llm-minimax-route created (openai-compat.dns → coding.dashscope.aliyuncs.com)" \
+        || warn "  Failed to create/update LLM route (Higress not ready?)"
+fi
 
 # ---------------------------------------------------------------------------
 # 4. Per-user Matrix accounts (Approach B) + patch Manager allowlist
@@ -184,9 +261,16 @@ hb_users = [
 cfg['channels']['matrix']['dm'] = {'policy': 'allowlist', 'allowFrom': hb_users}
 cfg['channels']['matrix']['groupAllowFrom'] = hb_users
 
+# Remove reasoning:true from all models — openclaw's thinking mode sends Claude-style
+# thinking content blocks that DashScope/qwen3.5-plus rejects with a 400 role error,
+# causing 'Message ordering conflict' on every user message.
+for p in cfg.get('models', {}).get('providers', {}).values():
+    for m in p.get('models', []):
+        m.pop('reasoning', None)
+
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)
-print('allowlist patched')
+print('allowlist patched, reasoning removed')
 \"
 " && log "  → Manager allowlist updated" || warn "  Failed to patch Manager allowlist"
 
