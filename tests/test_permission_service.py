@@ -83,3 +83,44 @@ class TestPermissionConfig:
         assert "OTC" in ctx.allowed_processes
         assert ctx.org_ids is None
         assert ctx.data_scope == "ALL"
+
+
+class TestPermissionServiceAPI:
+    """Tests for the FastAPI service endpoints."""
+
+    @pytest.fixture
+    def client(self):
+        from fastapi.testclient import TestClient
+        from honeybadge.permission_service.main import app
+        return TestClient(app)
+
+    def test_health_returns_ok(self, client):
+        r = client.get("/health")
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
+
+    def test_known_user_returns_200(self, client):
+        r = client.get("/permissions/admin")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["user_id"] == "admin"
+        assert "PTP" in data["allowed_processes"]
+        assert "OTC" in data["allowed_processes"]
+        assert data["org_ids"] is None
+        assert data["data_scope"] == "ALL"
+
+    def test_subsidiary_lead_restricted(self, client):
+        r = client.get("/permissions/subsidiary_lead")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["org_ids"] == [2]
+        assert data["data_scope"] == "ORG"
+
+    def test_unknown_user_returns_404(self, client):
+        r = client.get("/permissions/nonexistent_user")
+        assert r.status_code == 404
+
+    def test_all_demo_users_reachable(self, client):
+        for username in ["admin", "procurement_lead", "subsidiary_lead", "analyst", "auditor"]:
+            r = client.get(f"/permissions/{username}")
+            assert r.status_code == 200, f"Failed for {username}"
