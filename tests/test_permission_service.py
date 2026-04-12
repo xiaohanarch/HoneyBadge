@@ -1,8 +1,10 @@
 """Tests for permission service models and config."""
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
+from dataclasses import asdict
 from honeybadge.permission_service.models import PermissionContext
 from honeybadge.permission_service.config import PROCESS_TAGS, PERMISSION_CONFIG
 
@@ -22,7 +24,6 @@ class TestPermissionContext:
         assert ctx.data_scope == "ALL"
 
     def test_asdict(self):
-        from dataclasses import asdict
         ctx = PermissionContext("analyst", ["PTP"], [1], None, "ORG")
         d = asdict(ctx)
         assert d["user_id"] == "analyst"
@@ -81,3 +82,4 @@ class TestPermissionConfig:
         assert "PTP" in ctx.allowed_processes
         assert "OTC" in ctx.allowed_processes
         assert ctx.org_ids is None
+        assert ctx.data_scope == "ALL"

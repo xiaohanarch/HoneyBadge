@@ -1,6 +1,7 @@
 """Permission service data models."""
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass
@@ -15,7 +16,7 @@ class PermissionContext:
         data_scope: Data scope level ("ALL" / "ORG" / "DEPT")
     """
     user_id: str
-    allowed_processes: list[str]
+    allowed_processes: list[Literal["PTP", "OTC", "MASTER"]]
     org_ids: list[int] | None
     dept_ids: list[int] | None
-    data_scope: str
+    data_scope: Literal["ALL", "ORG", "DEPT"]
