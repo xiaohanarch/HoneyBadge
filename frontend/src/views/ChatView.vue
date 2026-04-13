@@ -98,11 +98,12 @@
             v-model="question"
             type="textarea"
             :rows="2"
-            placeholder="请输入你的问题..."
+            placeholder="请输入你的问题... (Enter 发送, Shift+Enter 换行)"
             resize="none"
             :disabled="loading"
-            @keydown.enter.meta="handleSend"
-            @keydown.enter.ctrl="handleSend"
+            @keydown.enter.exact.prevent="handleSend"
+            @keydown.enter.meta.prevent="handleSend"
+            @keydown.enter.ctrl.prevent="handleSend"
           />
           <el-button
             type="primary"

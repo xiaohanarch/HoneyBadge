@@ -46,9 +46,20 @@ export function useMatrixChat() {
 
       connected.value = true
       return true
-    } catch (error) {
+    } catch (error: any) {
       console.error('Matrix init failed:', error)
-      ElMessage.error('Matrix 连接失败')
+      const statusCode = error?.httpStatus || error?.statusCode
+      const errMsg = error?.data?.error || error?.message || '未知错误'
+      if (statusCode === 401) {
+        ElMessage.error(`Matrix 认证失败: ${errMsg}，请重新登录`)
+      } else {
+        ElMessage.error(`Matrix 连接失败: ${errMsg}`)
+      }
+      // Clean up failed client
+      if (matrixClient) {
+        try { matrixClient.stopClient() } catch {}
+        matrixClient = null
+      }
       return false
     }
   }
@@ -135,11 +146,20 @@ export function useMatrixChat() {
 
     try {
       await sendQuery(matrixClient!, dmRoomId!, question, authStore.rolesJwt || '')
-    } catch (error) {
+    } catch (error: any) {
       console.error('Send query failed:', error)
-      chatStore.setError('发送消息失败')
+      const statusCode = error?.httpStatus || error?.statusCode
+      const errMsg = error?.data?.error || error?.message || '未知错误'
+      if (statusCode === 401) {
+        chatStore.setError('Matrix 认证已过期，请重新登录')
+        ElMessage.error('Matrix 认证已过期，请重新登录')
+        // Reset so next attempt re-inits
+        disconnect()
+      } else {
+        chatStore.setError(`发送消息失败: ${errMsg}`)
+        ElMessage.error(`发送消息失败: ${errMsg}`)
+      }
       chatStore.setLoading(false)
-      ElMessage.error('发送消息失败')
     }
   }
 
