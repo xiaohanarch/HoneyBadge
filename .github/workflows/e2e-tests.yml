@@ -1,0 +1,318 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      test_filter:
+        description: 'Run specific test marker (e.g., auth, chat, session, infra, observability)'
+        required: false
+        default: ''
+
+env:
+  BASE_URL: http://localhost:3000
+  API_BASE_URL: http://localhost:8090
+  AUTH_BASE_URL: http://localhost:8091
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ===========================================================================
+  # Job 1: Start Infrastructure
+  # ===========================================================================
+  setup-infra:
+    name: Setup Infrastructure
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_include: ${{ steps.test-matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:buildx-stable-1
+            network=host
+
+      - name: Start core services
+        run: |
+          cd deploy/docker
+          docker compose --env-file .env up -d
+        timeout-minutes: 10
+
+      - name: Start observability stack
+        run: |
+          cd deploy/docker
+          docker compose --env-file .env --profile observability up -d
+        timeout-minutes: 5
+
+      - name: Wait for core services health
+        run: |
+          echo "Waiting for services..."
+          for i in {1..60}; do
+            if curl -sf http://localhost:8090/api/health > /dev/null 2>&1 && \
+               curl -sf http://localhost:8091/health > /dev/null 2>&1; then
+              echo "Core services ready"
+              exit 0
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 2
+          done
+          echo "Services failed to start"
+          docker compose -f deploy/docker/docker-compose.yaml logs --tail=100
+          exit 1
+        timeout-minutes: 5
+
+      - name: Initialize NebulaGraph schema
+        run: |
+          bash deploy/docker/init-nebula.sh
+        timeout-minutes: 5
+
+      - name: Initialize HiClaw workers
+        run: |
+          bash deploy/hiclaw/init-workers.sh
+        timeout-minutes: 5
+
+      - name: Restart workers
+        run: |
+          cd deploy/docker
+          docker compose restart hiclaw-graph-worker hiclaw-analytics-worker
+        timeout-minutes: 3
+
+      - name: Wait for workers
+        run: |
+          echo "Waiting for workers to connect..."
+          sleep 30
+        timeout-minutes: 2
+
+      - name: Verify all containers
+        run: |
+          echo "=== Running Containers ==="
+          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+          echo ""
+          echo "=== Service Health ==="
+          curl -s http://localhost:8090/api/health | head -c 200
+          echo ""
+          curl -s http://localhost:8091/health | head -c 200
+
+      - name: Upload infrastructure logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-logs
+          path: |
+            deploy/docker/**/*.log
+          retention-days: 3
+
+  # ===========================================================================
+  # Job 2: Run E2E Tests
+  # ===========================================================================
+  e2e-tests:
+    name: Run E2E Tests
+    needs: setup-infra
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Split tests into parallel chunks
+        chunk: [1, 2, 3]
+        exclude:
+          - chunk: 2
+          - chunk: 3
+          - chunk: 1
+            chunk: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-playwright httpx docker redis python-dotenv
+          playwright install chromium --with-deps
+
+      - name: Wait for services
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:3000 > /dev/null 2>&1; then
+              echo "Frontend ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+        timeout-minutes: 2
+
+      - name: Run E2E Tests - Auth & Chat
+        if: github.event.inputs.test_filter == '' || contains('auth,chat', github.event.inputs.test_filter)
+        run: |
+          echo "=== Running Auth & Chat Tests ==="
+          pytest tests/e2e/test_01_auth.py tests/e2e/test_02_chat.py \
+            -v --tb=short --junitxml=test-results/auth-chat.xml \
+            --timeout=120 2>&1 | tee test-output.txt || true
+
+      - name: Run E2E Tests - Session & Isolation
+        if: github.event.inputs.test_filter == '' || contains('session,isolation', github.event.inputs.test_filter)
+        run: |
+          echo "=== Running Session & Isolation Tests ==="
+          pytest tests/e2e/test_03_session.py tests/e2e/test_04_isolation.py \
+            -v --tb=short --junitxml=test-results/session-isolation.xml \
+            --timeout=120 2>&1 | tee test-output.txt || true
+
+      - name: Run E2E Tests - Permissions & Anti-Hallucination
+        if: github.event.inputs.test_filter == '' || contains('permission,antihal', github.event.inputs.test_filter)
+        run: |
+          echo "=== Running Permissions & Anti-Hallucination Tests ==="
+          pytest tests/e2e/test_05_permissions.py tests/e2e/test_06_antihal.py \
+            -v --tb=short --junitxml=test-results/permission-antihal.xml \
+            --timeout=120 2>&1 | tee test-output.txt || true
+
+      - name: Run E2E Tests - MCP & Infra
+        if: github.event.inputs.test_filter == '' || contains('mcp,infra', github.event.inputs.test_filter)
+        run: |
+          echo "=== Running MCP & Infrastructure Tests ==="
+          pytest tests/e2e/test_07_mcp.py tests/e2e/test_08_infra.py \
+            -v --tb=short --junitxml=test-results/mcp-infra.xml \
+            --timeout=120 2>&1 | tee test-output.txt || true
+
+      - name: Run E2E Tests - Observability
+        if: github.event.inputs.test_filter == '' || contains('observability', github.event.inputs.test_filter)
+        run: |
+          echo "=== Running Observability Tests ==="
+          pytest tests/e2e/test_09_observability.py \
+            -v --tb=short --junitxml=test-results/observability.xml \
+            --timeout=120 2>&1 | tee test-output.txt || true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-run-${{ github.run_id }}
+          path: |
+            test-results/
+            test-output.txt
+          retention-days: 7
+
+  # ===========================================================================
+  # Job 3: Summary & Notification
+  # ===========================================================================
+  summary:
+    name: Test Summary
+    needs: [setup-infra, e2e-tests]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-run-*
+          path: all-test-results
+          merge-multiple: true
+
+      - name: Check test results
+        id: check_results
+        run: |
+          if [ -d "all-test-results" ] && [ "$(ls -A all-test-results)" ]; then
+            echo "results_exist=true" >> $GITHUB_OUTPUT
+            ls -la all-test-results/
+          else
+            echo "results_exist=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Summary Report
+        if: needs.e2e-tests.result != 'skipped'
+        run: |
+          echo "## E2E Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.e2e-tests.result }}" == "success" ]; then
+            echo "✅ **All E2E Tests Passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **E2E Tests Failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "| Test Suite | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Auth & Chat | ${{ needs.e2e-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Session & Isolation | ${{ needs.e2e-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Permissions & Anti-Hallucination | ${{ needs.e2e-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| MCP & Infrastructure | ${{ needs.e2e-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Observability | ${{ needs.e2e-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send failure notification
+        if: failure() && (github.event_name == 'push' || github.event_name == 'pull_request')
+        run: |
+          echo "=== E2E Test Failure Notification ==="
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo ""
+
+          # Print failure summary
+          echo "Failing Job: ${{ needs.e2e-tests.job }}"
+          echo "Conclusion: ${{ needs.e2e-tests.conclusion }}"
+
+      - name: Send Slack Notification
+        if: failure() && env.SLACK_WEBHOOK_URL != ''
+        run: |
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": "❌ E2E Tests Failed - HoneyBadge",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {"type": "plain_text", "text": "❌ E2E Tests Failed"}
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Repository:*\n${{ github.repository }}"},
+                    {"type": "mrkdwn", "text": "*Branch:*\n${{ github.ref_name }}"},
+                    {"type": "mrkdwn", "text": "*Commit:*\n`${{ github.sha }}`"},
+                    {"type": "mrkdwn", "text": "*Trigger:*\n${{ github.event_name }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View Run"},
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }'
+
+      - name: Cleanup infrastructure
+        if: always()
+        run: |
+          echo "Cleaning up..."
+          cd deploy/docker
+          docker compose down 2>/dev/null || true

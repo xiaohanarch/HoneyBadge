@@ -1,0 +1,9 @@
+# E2E Test Dependencies
+pytest>=8.0.0
+pytest-playwright>=0.4.0
+pytest-xdist>=3.5.0
+pytest-html>=4.0.0
+httpx>=0.27.0
+docker>=7.0.0
+redis>=5.0.0
+python-dotenv>=1.0.0
