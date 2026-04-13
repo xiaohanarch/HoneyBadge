@@ -45,21 +45,28 @@ docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.en
 
 All key services should show `(healthy)` or `Up`:
 ```
-honeybadge-auth          Up (healthy)   :8091   ← NEW: auth + Matrix provisioning
-honeybadge-server        Up (healthy)   :8090   (audit REST API only)
-honeybadge-nebula-mcp    Up (healthy)   :8000
-honeybadge-hiclaw-manager Up (healthy)  :6167/:18080/:18001/:18888/:19001
-nebula-graphd            Up (healthy)   :9669
-nebula-metad             Up (healthy)   :9559
-nebula-storaged          Up (healthy)   :9779
-postgres                 Up (healthy)   :5432
-redis                    Up (healthy)   :6379
+honeybadge-auth              Up (healthy)   :8091
+honeybadge-server            Up (healthy)   :8090   (audit REST API only)
+honeybadge-permissions       Up (healthy)   :8092
+honeybadge-nebula-mcp        Up (healthy)   :8000
+honeybadge-audit-mcp         Up (healthy)   :8000
+honeybadge-cache-mcp         Up (healthy)   :8000
+honeybadge-hiclaw-manager    Up (healthy)   :6167/:18080/:18001/:18888/:19001
+honeybadge-graph-worker      Up            :8001
+honeybadge-analytics-worker  Up            :8001
+nebula-graphd                Up (healthy)   :9669
+nebula-metad                 Up (healthy)   :9559
+nebula-storaged              Up (healthy)   :9779
+postgres                     Up (healthy)   :5432
+redis                        Up (healthy)   :6379
+frontend                     Up            :3000
 ```
 
 Health checks:
 ```bash
 curl http://localhost:8090/api/health          # server: redis/postgres/nebula
 curl http://localhost:8091/health              # auth: {"status":"ok","service":"honeybadge-auth"}
+curl http://localhost:8092/health              # permissions
 curl http://localhost:6167/_matrix/client/versions  # Tuwunel Matrix server
 ```
 - `llm: degraded` = **normal** (MiniMax doesn't expose `/v1/models`; LLM calls work fine)
@@ -104,8 +111,17 @@ docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.en
 | Grafana | http://localhost:3030 | admin/admin123 |
 | Loki | http://localhost:3100 | Log aggregation (Promtail auto-collects from all honeybadge-* containers) |
 | Alertmanager | http://localhost:9093 | Alert routing |
+| Jaeger UI | http://localhost:16686 | Distributed tracing |
 
 All honeybadge-* services are labeled with `com.honeybadge.service` — Promtail auto-discovers them via Docker socket.
+
+Observability health checks:
+```bash
+curl http://localhost:9090/-/healthy           # Prometheus
+curl http://localhost:3000/api/health          # Grafana
+curl http://localhost:3100/ready               # Loki
+curl http://localhost:9093/-/healthy           # Alertmanager
+```
 
 Prometheus scrapes:
 - HiClaw Manager (metrics at :8080/metrics)
@@ -122,9 +138,11 @@ Prometheus scrapes:
 | Login fails with 503 | Tuwunel not reachable from auth container | Check `docker logs honeybadge-auth`; verify hiclaw-manager healthy |
 | `matrix_access_token` missing | honeybadge-auth returned error | Check `docker logs honeybadge-auth`; re-run `init-workers.sh` |
 | Workers not connecting | MinIO config missing | Re-run init-workers.sh → restart workers |
-| `honeybadge-nebula-mcp` restarting | Stale image | `docker compose build honeybadge-nebula-mcp && docker compose up -d --force-recreate honeybadge-nebula-mcp` |
+| `honeybadge-nebula-mcp` restarting | Stale image or permissions not healthy | `docker compose build honeybadge-nebula-mcp && docker compose up -d --force-recreate honeybadge-nebula-mcp`; ensure honeybadge-permissions is healthy first |
 | NebulaGraph has only 10 tags | init-nebula.sh not run | Re-run `bash deploy/docker/init-nebula.sh` |
 | Browser Matrix DM timeout | Manager SOUL.md not routed to graph-worker | Check `docker logs honeybadge-graph-worker`; restart workers after init |
+| Grafana shows unhealthy (HTTP 000) | Grafana healthcheck hitting wrong port | Ensure port mapping is `3030:3000` (Grafana internal 3000, exposed 3030); check `docker compose ps grafana` |
+| `honeybadge-permissions` not starting | Container issue | Check `docker logs honeybadge-permissions`; ensure permissions service Dockerfile exists |
 
 ## Notes
 
