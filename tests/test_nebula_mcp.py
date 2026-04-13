@@ -25,6 +25,7 @@ _spec.loader.exec_module(_mod)
 
 get_schema_impl = _mod.get_schema_impl
 validate_and_execute_impl = _mod.validate_and_execute_impl
+get_user_permissions_impl = _mod.get_user_permissions_impl
 _schema_cache = _mod._schema_cache
 
 
@@ -188,3 +189,134 @@ async def test_validate_and_execute_rejects_empty_query():
     assert result["error"] == "L1_SYNTAX"
     assert any(d["code"] == "E001" for d in result["details"])
     assert "trace_id" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_user_permissions_impl
+# ---------------------------------------------------------------------------
+
+
+class TestGetUserPermissions:
+    """Tests for the get_user_permissions_impl function."""
+
+    @pytest.mark.asyncio
+    async def test_known_user_returns_permissions(self):
+        result = await get_user_permissions_impl("admin")
+        assert result["user_id"] == "admin"
+        assert "PTP" in result["allowed_processes"]
+        assert result["data_scope"] == "ALL"
+
+    @pytest.mark.asyncio
+    async def test_procurement_lead_permissions(self):
+        result = await get_user_permissions_impl("procurement_lead")
+        assert result["user_id"] == "procurement_lead"
+        assert result["allowed_processes"] == ["PTP"]
+        assert result["org_ids"] is None  # full org access
+
+    @pytest.mark.asyncio
+    async def test_subsidiary_lead_permissions(self):
+        result = await get_user_permissions_impl("subsidiary_lead")
+        assert result["user_id"] == "subsidiary_lead"
+        assert result["org_ids"] == [2]
+
+    @pytest.mark.asyncio
+    async def test_unknown_user_returns_restrictive_default(self):
+        result = await get_user_permissions_impl("google_sso_12345")
+        # Unknown Google SSO users get restrictive default
+        assert result["allowed_processes"] == ["PTP"]
+        assert result["org_ids"] == [1]
+        assert result["user_id"] == "google_sso_12345"
+
+
+# ---------------------------------------------------------------------------
+# Tests for PermissionEnforcer integration inside validate_and_execute_impl
+# ---------------------------------------------------------------------------
+
+
+class TestValidateAndExecuteWithPermissions:
+    """Tests for permission enforcement inside validate_and_execute_impl."""
+
+    @pytest.fixture
+    def nebula(self):
+        return FakeNebulaClient({
+            "MATCH": NebulaQueryResult(
+                columns=["po_number"], rows=[{"po_number": "PO-001"}],
+                execution_time_ms=1, success=True,
+            ),
+        })
+
+    @pytest.fixture
+    def validator(self):
+        return NgqlValidator()
+
+    @pytest.mark.asyncio
+    async def test_forbidden_process_returns_permission_denied(self, nebula, validator):
+        user_context = {
+            "user_id": "analyst",
+            "permissions": {
+                "user_id": "analyst",
+                "allowed_processes": ["PTP"],
+                "org_ids": [1],
+                "dept_ids": None,
+                "data_scope": "ORG",
+            },
+        }
+        result = await validate_and_execute_impl(
+            nebula, validator,
+            "MATCH (so:SalesOrder) RETURN so.status",
+            user_context=user_context,
+        )
+        assert result["success"] is False
+        assert result["error"] == "L3_PERMISSION"
+        assert "SalesOrder" in result["details"][0]["message"]
+
+    @pytest.mark.asyncio
+    async def test_org_filter_auto_injected(self, nebula, validator):
+        user_context = {
+            "user_id": "subsidiary_lead",
+            "permissions": {
+                "user_id": "subsidiary_lead",
+                "allowed_processes": ["PTP", "OTC"],
+                "org_ids": [2],
+                "dept_ids": None,
+                "data_scope": "ORG",
+            },
+        }
+        result = await validate_and_execute_impl(
+            nebula, validator,
+            "MATCH (po:PurchaseOrder) RETURN po.po_number",
+            user_context=user_context,
+        )
+        assert result["success"] is True
+        assert "warnings" in result
+        assert any("PERMISSION WARNING" in w for w in result["warnings"])
+
+    @pytest.mark.asyncio
+    async def test_allowed_query_with_full_access_has_empty_warnings(self, nebula, validator):
+        user_context = {
+            "user_id": "admin",
+            "permissions": {
+                "user_id": "admin",
+                "allowed_processes": ["PTP", "OTC"],
+                "org_ids": None,
+                "dept_ids": None,
+                "data_scope": "ALL",
+            },
+        }
+        result = await validate_and_execute_impl(
+            nebula, validator,
+            "MATCH (po:PurchaseOrder) RETURN po.po_number",
+            user_context=user_context,
+        )
+        assert result["success"] is True
+        assert result["warnings"] == []
+
+    @pytest.mark.asyncio
+    async def test_no_user_context_has_empty_warnings(self, nebula, validator):
+        result = await validate_and_execute_impl(
+            nebula, validator,
+            "MATCH (po:PurchaseOrder) RETURN po.po_number",
+            user_context=None,
+        )
+        assert result["success"] is True
+        assert result["warnings"] == []

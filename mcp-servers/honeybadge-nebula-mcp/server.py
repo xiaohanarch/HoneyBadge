@@ -15,7 +15,9 @@ import sys
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(_project_root, "src"))
 
+import httpx
 import structlog
+from dataclasses import asdict
 from fastmcp import FastMCP
 
 from honeybadge.core.trace import generate_trace_id
@@ -26,6 +28,13 @@ from honeybadge.llm.adapter import (
     summarize_results as llm_summarize_results,
 )
 from honeybadge.protocols.validator import NgqlValidator
+
+# Add mcp-servers/honeybadge-nebula-mcp to path for permission_enforcer
+_nebula_mcp_path = os.path.dirname(os.path.abspath(__file__))
+if _nebula_mcp_path not in sys.path:
+    sys.path.insert(0, _nebula_mcp_path)
+from permission_enforcer import PermissionEnforcer, PermissionViolationError
+from honeybadge.permission_service.config import PERMISSION_CONFIG
 
 logger = structlog.get_logger()
 
@@ -74,6 +83,22 @@ _WRITE_OPS = re.compile(
     r"^\s*(INSERT|UPDATE|UPSERT|DELETE|DROP|CREATE|ALTER)\b",
     re.IGNORECASE,
 )
+
+# ---------------------------------------------------------------------------
+# Permission service
+# ---------------------------------------------------------------------------
+
+PERMISSION_SERVICE_URL: str = os.environ.get(
+    "PERMISSION_SERVICE_URL", "http://honeybadge-permissions:8092"
+)
+
+_DEFAULT_PERMISSION = {
+    "user_id": "unknown",
+    "allowed_processes": ["PTP"],
+    "org_ids": [1],
+    "dept_ids": None,
+    "data_scope": "ORG",
+}
 
 # ---------------------------------------------------------------------------
 # Lazy singletons (initialized from env vars on first use)
@@ -292,16 +317,23 @@ async def validate_and_execute_impl(
             "trace_id": trace_id,
         }
 
-    # --- L3: Permission filters -----------------------------------------
-    if user_context:
-        l3 = validator.validate_permissions(ngql, user_context)
-        if not l3.valid:
+    # --- L3: Permission enforcement (PermissionEnforcer) ----------------
+    if user_context and user_context.get("permissions"):
+        from honeybadge.permission_service.models import PermissionContext
+        try:
+            perm_dict = user_context["permissions"]
+            ctx = PermissionContext(**perm_dict)
+            enforcer = PermissionEnforcer()
+            ngql, perm_warnings = enforcer.enforce(ngql, ctx)
+        except PermissionViolationError as exc:
             return {
                 "success": False,
                 "error": "L3_PERMISSION",
-                "details": [{"code": e.code, "message": e.message} for e in l3.errors],
+                "details": [{"code": "E300", "message": str(exc)}],
                 "trace_id": trace_id,
             }
+    else:
+        perm_warnings = []
 
     # --- Execute --------------------------------------------------------
     result: NebulaQueryResult = await nebula.execute(ngql, space=target_space)
@@ -320,6 +352,7 @@ async def validate_and_execute_impl(
         "row_count": result.row_count,
         "execution_time_ms": result.execution_time_ms,
         "trace_id": trace_id,
+        "warnings": perm_warnings,
     }
 
 
@@ -350,6 +383,33 @@ async def explain_ngql_impl(
     }
 
 
+async def get_user_permissions_impl(user_id: str) -> dict:
+    """Fetch PermissionContext for a user, with local fallback.
+
+    Checks PERMISSION_CONFIG (local dict) first for an instant lookup.
+    Falls back to HTTP call to PERMISSION_SERVICE_URL.
+    Unknown users (e.g. Google SSO users not in the local config) receive
+    a restrictive default (PTP only, org_id=[1]).
+    """
+    # Local fast path
+    ctx = PERMISSION_CONFIG.get(user_id)
+    if ctx is not None:
+        return asdict(ctx)
+
+    # Remote call
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(f"{PERMISSION_SERVICE_URL}/permissions/{user_id}")
+            if r.status_code == 200:
+                return r.json()
+    except Exception as exc:
+        logger.warning("permission_service_unreachable", user_id=user_id, error=str(exc))
+
+    # Default: restrictive (PTP only, org_id=[1])
+    logger.warning("using_default_permissions", user_id=user_id)
+    return {**_DEFAULT_PERMISSION, "user_id": user_id}
+
+
 async def summarize_query_results_impl(
     llm: OpenAICompatibleAdapter,
     question: str,
@@ -377,6 +437,20 @@ async def summarize_query_results_impl(
 # ---------------------------------------------------------------------------
 # MCP Tool wrappers (use lazy singletons)
 # ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def get_user_permissions(user_id: str) -> dict:
+    """Fetch PermissionContext for a user from the PermissionResolver service.
+
+    Workers MUST call this as the first step before any query.
+    Returns a PermissionContext dict with allowed_processes, org_ids, data_scope.
+
+    Args:
+        user_id: Plain username (e.g. 'admin', 'subsidiary_lead').
+                 Extract from the 'username' claim in the x-hb-auth JWT.
+    """
+    return await get_user_permissions_impl(user_id)
 
 
 @mcp.tool()
