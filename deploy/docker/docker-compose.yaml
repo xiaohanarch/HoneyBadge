@@ -358,11 +358,14 @@ services:
       - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      - PERMISSION_SERVICE_URL=http://honeybadge-permissions:8092
       - TZ=Asia/Shanghai
     networks:
       - honeybadge-net
     depends_on:
       nebula-graphd:
+        condition: service_healthy
+      honeybadge-permissions:
         condition: service_healthy
     labels:
       com.honeybadge.service: "honeybadge-nebula-mcp"
@@ -513,6 +516,33 @@ services:
       start_period: 30s
     labels:
       com.honeybadge.service: "honeybadge-auth"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
+
+  # =============================================================================
+  # HoneyBadge Permission Service
+  # Returns PermissionContext per user for L3 enforcement.
+  # Internal URL: http://honeybadge-permissions:8092
+  # =============================================================================
+
+  honeybadge-permissions:
+    build:
+      context: ../..
+      dockerfile: src/honeybadge/permission_service/Dockerfile
+    container_name: honeybadge-permissions
+    hostname: honeybadge-permissions
+    restart: unless-stopped
+    ports:
+      - "8092:8092"
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('localhost',8092),2); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      com.honeybadge.service: "honeybadge-permissions"
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
