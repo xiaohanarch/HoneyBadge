@@ -49,11 +49,23 @@ router.beforeEach(async (to, from, next) => {
         const response = await authApi.getCurrentUser();
         const user = response.data as any;
         authStore.setAuth(token, refreshToken || '', user);
+
+        // 恢复 Matrix auth state（登录时存储在 localStorage）
+        const matrixToken = localStorage.getItem('matrix_token');
+        const matrixHomeserver = localStorage.getItem('matrix_homeserver');
+        const matrixUserId = localStorage.getItem('matrix_user_id');
+        if (matrixToken && matrixHomeserver && matrixUserId) {
+          authStore.setMatrixAuth(matrixToken, matrixHomeserver, matrixUserId, token);
+        }
+
         next();
       } catch {
         // token 无效，清除并跳转登录
         localStorage.removeItem('token');
         localStorage.removeItem('refresh_token');
+        localStorage.removeItem('matrix_token');
+        localStorage.removeItem('matrix_user_id');
+        localStorage.removeItem('matrix_homeserver');
         authStore.clearAuth();
         next('/login');
       }
