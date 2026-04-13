@@ -1,0 +1,134 @@
+name: E2E Failure Notification
+
+on:
+  workflow_run:
+    workflows: ["E2E Tests"]
+    types: [completed]
+    workflows:
+      - E2E Tests
+
+jobs:
+  notify:
+    name: Send Notification
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'failure'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        if: github.event.workflow_run.conclusion == 'success'
+        with:
+          name: test-results
+          path: test-results
+
+      - name: Get PR Information
+        id: pr_info
+        run: |
+          # Extract PR number from workflow run
+          PR_NUMBER=$(echo '${{ github.event.workflow_run.pull_requests }}' | jq -r '.[0].number // empty')
+          PR_TITLE=$(echo '${{ github.event.workflow_run.pull_requests }}' | jq -r '.[0].title // empty')
+          PR_URL=$(echo '${{ github.event.workflow_run.pull_requests }}' | jq -r '.[0].html_url // empty')
+
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "PR_TITLE=$PR_TITLE" >> $GITHUB_OUTPUT
+          echo "PR_URL=$PR_URL" >> $GITHUB_OUTPUT
+
+      - name: Send Email Notification
+        if: env.SMTP_SERVER != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server: ${{ env.SMTP_SERVER }}
+          port: ${{ env.SMTP_PORT || '587' }}
+          username: ${{ env.SMTP_USERNAME }}
+          password: ${{ env.SMTP_PASSWORD }}
+          from: ${{ env.SMTP_FROM || 'noreply@github.com' }}
+          to: ${{ env.NOTIFY_EMAIL }}
+          subject: "❌ E2E Tests Failed - HoneyBadge - PR #${{ steps.pr_info.outputs.PR_NUMBER }}"
+          body: |
+            E2E Tests Failed
+
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.event.workflow_run.head_branch }}
+            Commit: ${{ github.event.workflow_run.head_sha }}
+
+            PR: ${{ steps.pr_info.outputs.PR_TITLE }}
+            URL: ${{ steps.pr_info.outputs.PR_URL }}
+
+            Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+
+            Please check the test results and fix the failing tests.
+
+      - name: Send Slack Notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "❌ E2E Tests Failed - HoneyBadge",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {"type": "plain_text", "text": "❌ E2E Tests Failed"}
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Repository:*\n${{ github.repository }}"},
+                    {"type": "mrkdwn", "text": "*Branch:*\n${{ github.event.workflow_run.head_branch }}"},
+                    {"type": "mrkdwn", "text": "*Commit:*\n`${{ github.event.workflow_run.head_sha }}`"},
+                    {"type": "mrkdwn", "text": "*Trigger:*\n${{ github.event.workflow_run.event }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View Run"},
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View PR"},
+                      "url": "${{ steps.pr_info.outputs.PR_URL }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Send Teams Notification
+        if: env.TEAMS_WEBHOOK_URL != ''
+        run: |
+          curl -s -X POST "$TEAMS_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": "FF0000",
+              "summary": "E2E Tests Failed",
+              "sections": [{
+                "activityTitle": "❌ E2E Tests Failed - HoneyBadge",
+                "facts": [
+                  {"name": "Repository", "value": "${{ github.repository }}"},
+                  {"name": "Branch", "value": "${{ github.event.workflow_run.head_branch }}"},
+                  {"name": "Commit", "value": "${{ github.event.workflow_run.head_sha }}"},
+                  {"name": "Trigger", "value": "${{ github.event.workflow_run.event }}"}
+                ],
+                "potentialAction": [
+                  {
+                    "@type": "OpenUri",
+                    "name": "View Run",
+                    "targets": [{"os": "default", "uri": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}"}]
+                  }
+                ]
+              }]
+            }'
+        env:
+          TEAMS_WEBHOOK_URL: ${{ env.TEAMS_WEBHOOK_URL }}
