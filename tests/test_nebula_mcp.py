@@ -35,12 +35,18 @@ _schema_cache = _mod._schema_cache
 
 
 class FakeNebulaClient:
-    """Fake NebulaGraphClient that returns canned results keyed by nGQL."""
+    """Fake NebulaGraphClient that returns canned results keyed by nGQL.
+
+    Records the last nGQL string received so tests can assert on
+    what was actually sent (e.g., to verify org_id filter injection).
+    """
 
     def __init__(self, responses: dict[str, NebulaQueryResult]):
         self._responses = responses
+        self.last_ngql: str = ""
 
     async def execute(self, ngql: str, space: str | None = None) -> NebulaQueryResult:
+        self.last_ngql = ngql
         # Try exact match first, then prefix match for flexibility
         if ngql in self._responses:
             return self._responses[ngql]
@@ -222,10 +228,64 @@ class TestGetUserPermissions:
     @pytest.mark.asyncio
     async def test_unknown_user_returns_restrictive_default(self):
         result = await get_user_permissions_impl("google_sso_12345")
-        # Unknown Google SSO users get restrictive default
+        # Unknown Google SSO users get restrictive default (HTTP call will fail
+        # since no real service is running in tests)
         assert result["allowed_processes"] == ["PTP"]
         assert result["org_ids"] == [1]
         assert result["user_id"] == "google_sso_12345"
+
+    @pytest.mark.asyncio
+    async def test_http_200_response_used_when_not_in_local_config(self, monkeypatch):
+        """When user is not in PERMISSION_CONFIG, use HTTP 200 response."""
+        import httpx
+
+        class FakeResponse:
+            status_code = 200
+            def json(self):
+                return {
+                    "user_id": "remote_user",
+                    "allowed_processes": ["OTC"],
+                    "org_ids": [5],
+                    "dept_ids": None,
+                    "data_scope": "ORG",
+                }
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *_):
+                pass
+            async def get(self, url):
+                return FakeResponse()
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **_: FakeClient())
+
+        result = await get_user_permissions_impl("remote_user")
+        assert result["allowed_processes"] == ["OTC"]
+        assert result["org_ids"] == [5]
+
+    @pytest.mark.asyncio
+    async def test_http_non_200_falls_back_to_default(self, monkeypatch):
+        """Non-200 HTTP response results in restrictive default."""
+        import httpx
+
+        class FakeResponse:
+            status_code = 404
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *_):
+                pass
+            async def get(self, url):
+                return FakeResponse()
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **_: FakeClient())
+
+        result = await get_user_permissions_impl("not_found_user")
+        assert result["allowed_processes"] == ["PTP"]
+        assert result["org_ids"] == [1]
+        assert result["user_id"] == "not_found_user"
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +350,8 @@ class TestValidateAndExecuteWithPermissions:
         assert result["success"] is True
         assert "warnings" in result
         assert any("PERMISSION WARNING" in w for w in result["warnings"])
+        # Verify the org_id filter was actually present in the query sent to NebulaGraph
+        assert "po.org_id IN [2]" in nebula.last_ngql
 
     @pytest.mark.asyncio
     async def test_allowed_query_with_full_access_has_empty_warnings(self, nebula, validator):

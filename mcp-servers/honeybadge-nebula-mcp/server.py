@@ -35,6 +35,7 @@ if _nebula_mcp_path not in sys.path:
     sys.path.insert(0, _nebula_mcp_path)
 from permission_enforcer import PermissionEnforcer, PermissionViolationError
 from honeybadge.permission_service.config import PERMISSION_CONFIG
+from honeybadge.permission_service.models import PermissionContext
 
 logger = structlog.get_logger()
 
@@ -92,8 +93,11 @@ PERMISSION_SERVICE_URL: str = os.environ.get(
     "PERMISSION_SERVICE_URL", "http://honeybadge-permissions:8092"
 )
 
-_DEFAULT_PERMISSION = {
-    "user_id": "unknown",
+# Template for unknown users — note: user_id is always overridden at the
+# call site with the actual user_id so this field is intentionally a placeholder.
+# org_ids=[1] is a POC default; in production replace with org_ids=[] or
+# derive from the user's provisioning record.
+_DEFAULT_PERMISSION_TEMPLATE = {
     "allowed_processes": ["PTP"],
     "org_ids": [1],
     "dept_ids": None,
@@ -107,6 +111,7 @@ _DEFAULT_PERMISSION = {
 _nebula_client: NebulaGraphClient | None = None
 _llm_adapter: OpenAICompatibleAdapter | None = None
 _validator: NgqlValidator | None = None
+_enforcer: PermissionEnforcer | None = None
 
 
 def _get_nebula() -> NebulaGraphClient:
@@ -139,6 +144,13 @@ def _get_validator() -> NgqlValidator:
     if _validator is None:
         _validator = NgqlValidator()
     return _validator
+
+
+def _get_enforcer() -> PermissionEnforcer:
+    global _enforcer
+    if _enforcer is None:
+        _enforcer = PermissionEnforcer()
+    return _enforcer
 
 
 def _default_space() -> str:
@@ -319,12 +331,10 @@ async def validate_and_execute_impl(
 
     # --- L3: Permission enforcement (PermissionEnforcer) ----------------
     if user_context and user_context.get("permissions"):
-        from honeybadge.permission_service.models import PermissionContext
         try:
             perm_dict = user_context["permissions"]
             ctx = PermissionContext(**perm_dict)
-            enforcer = PermissionEnforcer()
-            ngql, perm_warnings = enforcer.enforce(ngql, ctx)
+            ngql, perm_warnings = _get_enforcer().enforce(ngql, ctx)
         except PermissionViolationError as exc:
             return {
                 "success": False,
@@ -333,6 +343,8 @@ async def validate_and_execute_impl(
                 "trace_id": trace_id,
             }
     else:
+        if user_context is None:
+            logger.warning("l3_skipped_no_user_context", trace_id=trace_id)
         perm_warnings = []
 
     # --- Execute --------------------------------------------------------
@@ -402,12 +414,17 @@ async def get_user_permissions_impl(user_id: str) -> dict:
             r = await client.get(f"{PERMISSION_SERVICE_URL}/permissions/{user_id}")
             if r.status_code == 200:
                 return r.json()
+            logger.warning(
+                "permission_service_non_200",
+                user_id=user_id,
+                status_code=r.status_code,
+            )
     except Exception as exc:
         logger.warning("permission_service_unreachable", user_id=user_id, error=str(exc))
 
     # Default: restrictive (PTP only, org_id=[1])
     logger.warning("using_default_permissions", user_id=user_id)
-    return {**_DEFAULT_PERMISSION, "user_id": user_id}
+    return {"user_id": user_id, **_DEFAULT_PERMISSION_TEMPLATE}
 
 
 async def summarize_query_results_impl(
@@ -498,7 +515,10 @@ async def validate_and_execute(ngql: str, space: str = "", user_context: dict | 
     Args:
         ngql: nGQL statement to validate and execute.
         space: NebulaGraph space name. Uses NEBULA_SPACE env var if empty.
-        user_context: Optional dict with user_id, org_id, roles for L3 permission check.
+        user_context: Optional dict with shape {"user_id": str, "permissions": {...}}
+                      where "permissions" is a PermissionContext dict containing
+                      allowed_processes, org_ids, dept_ids, data_scope.
+                      Obtain via get_user_permissions(user_id) before calling this tool.
     """
     return await validate_and_execute_impl(
         _get_nebula(), _get_validator(), ngql, space=space, user_context=user_context
