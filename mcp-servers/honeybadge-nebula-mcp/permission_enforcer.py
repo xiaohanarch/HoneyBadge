@@ -36,9 +36,10 @@ def _get_tag_category(tag: str) -> str | None:
 
 def _has_org_filter(ngql: str, var: str) -> bool:
     """Return True if ngql already contains an org_id filter for the given variable."""
-    # Matches: var.org_id IN [ or var.org_id ==
-    pattern = re.compile(rf'{re.escape(var)}\.org_id\s+IN\b', re.IGNORECASE)
-    return bool(pattern.search(ngql))
+    # Matches: var.org_id IN [...] or var.org_id == <value>
+    in_pattern = re.compile(rf'{re.escape(var)}\.org_id\s+IN\b', re.IGNORECASE)
+    eq_pattern = re.compile(rf'{re.escape(var)}\.org_id\s*==', re.IGNORECASE)
+    return bool(in_pattern.search(ngql) or eq_pattern.search(ngql))
 
 
 def _inject_org_filter(ngql: str, var: str, org_ids: list[int]) -> str:
@@ -47,6 +48,10 @@ def _inject_org_filter(ngql: str, var: str, org_ids: list[int]) -> str:
     condition = f"{var}.org_id IN [{ids_str}]"
 
     # If WHERE already exists, append AND
+    # Note: leading space before AND/WHERE guards against token-run-together if
+    # the preceding character is not whitespace.
+    # Limitation: pipe-chained queries (|) are not supported — insert targets
+    # the first RETURN/YIELD, which may be inside a subquery, not at the root.
     where_re = re.compile(r'\bWHERE\b', re.IGNORECASE)
     if where_re.search(ngql):
         # Insert before RETURN/YIELD by finding the first of those keywords
@@ -54,8 +59,9 @@ def _inject_org_filter(ngql: str, var: str, org_ids: list[int]) -> str:
         match = return_re.search(ngql)
         if match:
             insert_pos = match.start()
-            return ngql[:insert_pos] + f"AND {condition} " + ngql[insert_pos:]
-        # Fallback: append at end
+            return ngql[:insert_pos] + f" AND {condition} " + ngql[insert_pos:]
+        # Fallback: append at end (only reachable for syntactically incomplete
+        # queries that lack RETURN/YIELD; these should be rejected by L1 first)
         return ngql + f" AND {condition}"
     else:
         # Insert WHERE before RETURN/YIELD
@@ -63,7 +69,8 @@ def _inject_org_filter(ngql: str, var: str, org_ids: list[int]) -> str:
         match = return_re.search(ngql)
         if match:
             insert_pos = match.start()
-            return ngql[:insert_pos] + f"WHERE {condition} " + ngql[insert_pos:]
+            return ngql[:insert_pos] + f" WHERE {condition} " + ngql[insert_pos:]
+        # Fallback: append at end (same caveat as above)
         return ngql + f" WHERE {condition}"
 
 
