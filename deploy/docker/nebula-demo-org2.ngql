@@ -1,0 +1,38 @@
+# ============================================================
+# HoneyBadge NebulaGraph Demo Data — Subsidiary (org_id=2)
+#
+# Run after init-nebula.sh to load org_id=2 demo data:
+#   bash deploy/docker/init-nebula.sh  (schema + indexes)
+#   Then load this file via nebula-console or init-nebula.sh
+#
+# Purpose: subsidiary_lead (org_ids=[2]) needs data to query.
+# ============================================================
+USE honeybadge;
+
+# Supplier (MASTER — visible to all users)
+INSERT VERTEX Supplier(supplier_number, supplier_name, supplier_type, status, country, city, currency, org_id, is_active, created_at, updated_at)
+  VALUES "supplier-org2-001":("SUP-ORG2-001", "华南供应商A", "DIRECT", "ACTIVE", "CN", "广州", "CNY", 2, true, now(), now());
+
+# PurchaseOrder for org_id=2
+INSERT VERTEX PurchaseOrder(po_number, po_type, status, buyer, order_date, total_amount, currency, org_id, is_active, created_at, updated_at)
+  VALUES "po-org2-001":("PO-ORG2-001", "STANDARD", "APPROVED", "李四", now(), 580000.00, "CNY", 2, true, now(), now());
+
+INSERT VERTEX PurchaseOrder(po_number, po_type, status, buyer, order_date, total_amount, currency, org_id, is_active, created_at, updated_at)
+  VALUES "po-org2-002":("PO-ORG2-002", "BLANKET", "OPEN", "王五", now(), 320000.00, "CNY", 2, true, now(), now());
+
+# Receipt for org_id=2
+INSERT VERTEX Receipt(receipt_number, receipt_type, receipt_date, status, receiver, org_id, is_active, created_at, updated_at)
+  VALUES "receipt-org2-001":("RCV-ORG2-001", "STANDARD", now(), "RECEIVED", "赵六", 2, true, now(), now());
+
+# Invoice for org_id=2
+INSERT VERTEX Invoice(invoice_number, invoice_type, invoice_date, status, total_amount, currency, org_id, is_active, created_at, updated_at)
+  VALUES "inv-org2-001":("INV-ORG2-001", "STANDARD", now(), "POSTED", 580000.00, "CNY", 2, true, now(), now());
+
+# SalesOrder for org_id=2 (tests OTC access for subsidiary_lead)
+INSERT VERTEX SalesOrder(order_number, order_type, status, customer_id, order_date, total_amount, currency, org_id, is_active, created_at, updated_at)
+  VALUES "so-org2-001":("SO-ORG2-001", "STANDARD", "BOOKED", "customer-org2-001", now(), 750000.00, "CNY", 2, true, now(), now());
+
+# Edges
+INSERT EDGE placed_with() VALUES "po-org2-001" -> "supplier-org2-001":();
+INSERT EDGE has_receipt() VALUES "po-org2-001" -> "receipt-org2-001":();
+INSERT EDGE has_invoice() VALUES "receipt-org2-001" -> "inv-org2-001":();
