@@ -47,9 +47,19 @@
 
           <!-- 元信息 -->
           <div class="meta-info">
+            <el-tooltip content="点击查看审计详情">
+              <router-link
+                v-if="message.metadata?.trace_id"
+                :to="{ path: '/audit', query: { trace_id: message.metadata.trace_id } }"
+                class="trace-id-link"
+              >
+                审计ID: {{ message.metadata.trace_id }}
+              </router-link>
+              <span v-else class="trace-id">审计ID: N/A</span>
+            </el-tooltip>
             <el-tooltip content="点击复制 Trace ID">
               <span class="trace-id" @click="copyTraceId">
-                审计ID: {{ message.metadata?.trace_id || 'N/A' }}
+                📋
               </span>
             </el-tooltip>
             <span class="execution-time">
@@ -109,9 +119,9 @@ function formatTime(timestamp: string): string {
 }
 
 function formatExecutionTime(ms?: number): string {
-  if (!ms) return 'N/A';
+  if (ms == null) return 'N/A';
   if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
+  return `${(ms / 1000).toFixed(3)}s`;
 }
 
 async function copyTraceId() {
@@ -219,11 +229,14 @@ async function copyTraceId() {
     padding-top: 12px;
     border-top: 1px solid #f0f0f0;
 
-    .trace-id {
+    .trace-id,
+    .trace-id-link {
       cursor: pointer;
+      color: #409eff;
+      text-decoration: none;
 
       &:hover {
-        color: #409eff;
+        color: #66b1ff;
       }
     }
 

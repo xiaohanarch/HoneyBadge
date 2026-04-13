@@ -134,9 +134,11 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     # --- Mount routers ---
     from honeybadge.server.health import router as health_router
     from honeybadge.server.sessions import router as sessions_router
+    from honeybadge.server.audit import router as audit_router
 
     app.include_router(health_router)
     app.include_router(sessions_router)
+    app.include_router(audit_router)
 
     return app
 
