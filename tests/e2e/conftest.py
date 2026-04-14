@@ -26,14 +26,29 @@ def _wait_for_textarea_enabled(page_obj, timeout=60000):
     )
 
 
+def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000):
+    """Wait for a NEW assistant message to appear with meaningful content (>10 chars)."""
+    page_obj.wait_for_function(
+        f"""() => {{
+            const msgs = document.querySelectorAll('.chat-message.message-assistant');
+            if (msgs.length <= {existing_count}) return false;
+            const last = msgs[msgs.length - 1];
+            const body = last.querySelector('.message-body') || last;
+            return body && body.textContent.trim().length > 10;
+        }}""",
+        timeout=timeout,
+    )
+    page_obj.wait_for_timeout(1000)
+
+
 def send_query_on_page(page_obj, query: str, timeout: int = 60000):
     """Send a chat query on any page object (standalone helper, not fixture-bound)."""
     _wait_for_textarea_enabled(page_obj, timeout=timeout)
     textarea = page_obj.locator(CHAT_TEXTAREA).first
+    existing_count = page_obj.locator(MSG_ASSISTANT).count()
     textarea.fill(query)
     textarea.press("Enter")
-    page_obj.wait_for_selector(MSG_ASSISTANT, timeout=timeout)
-    page_obj.wait_for_timeout(3000)
+    _wait_for_new_response(page_obj, existing_count, timeout=timeout)
 
 
 # Configuration
@@ -173,10 +188,10 @@ def send_chat_query(page: Page):
     def _send(query: str, timeout: int = 60000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
+        existing_count = page.locator(MSG_ASSISTANT).count()
         textarea.fill(query)
         textarea.press("Enter")
-        page.wait_for_selector(MSG_ASSISTANT, timeout=timeout)
-        page.wait_for_timeout(3000)
+        _wait_for_new_response(page, existing_count, timeout=timeout)
     return _send
 
 
@@ -199,7 +214,7 @@ def create_user_page(browser: Browser):
         p.fill(LOGIN_PASSWORD, password)
         p.click(LOGIN_BUTTON)
         p.wait_for_url(f"{BASE_URL}/chat", timeout=30000)
-        p.wait_for_timeout(2000)
+        _wait_for_textarea_enabled(p, timeout=30000)
 
         new_session_btn = p.locator(NEW_CHAT_BUTTON)
         if new_session_btn.count() > 0 and new_session_btn.first.is_visible():
@@ -223,10 +238,10 @@ def send_query_and_get_response(page: Page):
     def _send(query: str, timeout: int = 120000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
+        existing_count = page.locator(MSG_ASSISTANT).count()
         textarea.fill(query)
         textarea.press("Enter")
-        page.wait_for_selector(MSG_ASSISTANT, timeout=timeout)
-        page.wait_for_timeout(3000)
+        _wait_for_new_response(page, existing_count, timeout=timeout)
 
         last_msg = page.locator(MSG_ASSISTANT).last
         text = last_msg.inner_text()

@@ -22,7 +22,7 @@ Data实际情况:
 import pytest
 from playwright.sync_api import expect
 from tests.e2e.conftest import send_query_on_page
-from tests.e2e.selectors import TRACE_ID_LINK, MSG_ASSISTANT
+from tests.e2e.selectors import MSG_ASSISTANT
 
 
 BASE_URL = "http://localhost:3000"
@@ -92,14 +92,14 @@ class TestUserIsolation:
         admin_page = create_user_page("admin", "admin123")
         send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
         admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         # Analyst query (org_id=1000)
         analyst_page = create_user_page("analyst", "analyst123")
         send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
         analyst_page.wait_for_timeout(2000)
-        analyst_text = analyst_page.locator('.chat-message').first.inner_text() if analyst_page.locator('.chat-message').count() > 0 else ""
+        analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count(analyst_text)
 
         # CORRECT ASSERTIONS
@@ -122,7 +122,7 @@ class TestUserIsolation:
         # Query采购订单 - should return ONLY org 1021's data
         send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # subsidiary_lead with org_id=1021 should see ~337 records
@@ -180,8 +180,8 @@ class TestUserIsolation:
         analyst_page.wait_for_timeout(1000)
 
         # Both should have received responses (isolation verified by separate queries working)
-        admin_has_response = admin_page.locator('.chat-message').count() > 0
-        analyst_has_response = analyst_page.locator('.chat-message').count() > 0
+        admin_has_response = admin_page.locator(MSG_ASSISTANT).count() > 0
+        analyst_has_response = analyst_page.locator(MSG_ASSISTANT).count() > 0
 
         assert admin_has_response, "Admin should get response"
         assert analyst_has_response, "Analyst should get response"
@@ -196,21 +196,21 @@ class TestUserIsolation:
         admin_page = create_user_page("admin", "admin123")
         send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
         admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         # Analyst query (org_id=1000)
         analyst_page = create_user_page("analyst", "analyst123")
         send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
         analyst_page.wait_for_timeout(2000)
-        analyst_text = analyst_page.locator('.chat-message').first.inner_text() if analyst_page.locator('.chat-message').count() > 0 else ""
+        analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count(analyst_text)
 
         # Subsidiary query (org_id=1021)
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # CORRECT ASSERTIONS - Verify org_id filtering is working
@@ -231,13 +231,14 @@ class TestUserIsolation:
         assert 200 < analyst_count < 500, f"Analyst should see ~320 records. Got: {analyst_count}"
         assert 200 < subsidiary_count < 500, f"Subsidiary should see ~337 records. Got: {subsidiary_count}"
 
-    def test_tc308_matrix_room_isolation(self, admin_logged_in, analyst_logged_in):
+    def test_tc308_matrix_room_isolation(self, create_user_page):
         """TC-308: Matrix rooms are isolated per user.
 
         Each user should have their own Matrix room (via DM room creation).
+        Uses separate browser contexts to ensure genuine isolation check.
         """
-        admin_page = admin_logged_in
-        analyst_page = analyst_logged_in
+        admin_page = create_user_page("admin", "admin123")
+        analyst_page = create_user_page("analyst", "analyst123")
 
         # Get Matrix room identifiers from localStorage or page context
         admin_room_id = admin_page.evaluate("() => localStorage.getItem('matrix_room_id')")
@@ -260,13 +261,13 @@ class TestUserIsolation:
         analyst_page = create_user_page("analyst", "analyst123")
         send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=120000)
         analyst_page.wait_for_timeout(2000)
-        analyst_text = analyst_page.locator('.chat-message').first.inner_text() if analyst_page.locator('.chat-message').count() > 0 else ""
+        analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
 
         # Subsidiary (org=1021) queries for PO00000002
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         send_query_on_page(subsidiary_page, "查询采购订单PO00000002", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
 
         # Verify both got responses (queries processed)
         assert len(analyst_text) > 0, "Analyst query should return response"
@@ -293,14 +294,14 @@ class TestUserIsolation:
         admin_page = create_user_page("admin", "admin123")
         send_query_on_page(admin_page, "查询高风险的采购订单", timeout=120000)
         admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         # subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         send_query_on_page(subsidiary_page, "查询高风险的采购订单", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # 断言: 体现权限差距
@@ -319,13 +320,13 @@ class TestUserIsolation:
         admin_page = create_user_page("admin", "admin123")
         send_query_on_page(admin_page, "查询金额超过100万的采购订单", timeout=120000)
         admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         send_query_on_page(subsidiary_page, "查询金额超过100万的采购订单", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
@@ -342,13 +343,13 @@ class TestUserIsolation:
         admin_page = create_user_page("admin", "admin123")
         send_query_on_page(admin_page, "查询异常的采购订单", timeout=120000)
         admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         send_query_on_page(subsidiary_page, "查询异常的采购订单", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
@@ -365,13 +366,13 @@ class TestUserIsolation:
         admin_page = create_user_page("admin", "admin123")
         send_query_on_page(admin_page, "查询有问题的供应商", timeout=120000)
         admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         send_query_on_page(subsidiary_page, "查询有问题的供应商", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
@@ -388,13 +389,13 @@ class TestUserIsolation:
         admin_page = create_user_page("admin", "admin123")
         send_query_on_page(admin_page, "查询付款异常的发票", timeout=120000)
         admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         send_query_on_page(subsidiary_page, "查询付款异常的发票", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
@@ -415,13 +416,13 @@ class TestUserIsolation:
         admin_page = create_user_page("admin", "admin123")
         send_query_on_page(admin_page, "分析采购交易中的可疑模式", timeout=120000)
         admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         send_query_on_page(subsidiary_page, "分析采购交易中的可疑模式", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # 两者都应该有数据返回(都能进行分析)
@@ -435,8 +436,12 @@ class TestUserIsolation:
 
     @staticmethod
     def _extract_count(text: str) -> int:
-        """Extract numeric count from response text."""
+        """Extract numeric count from response text.
+        Handles numbers with thousand separators (e.g. 13,000 or 13000).
+        """
         import re
+        # Normalize: remove thousand separators so "13,000" becomes "13000"
+        normalized = re.sub(r'(\d),(\d)', r'\1\2', text)
         patterns = [
             r'(\d+)\s*条',
             r'共\s*(\d+)',
@@ -446,7 +451,7 @@ class TestUserIsolation:
             r'结果[:\s]*(\d+)',
         ]
         for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = re.search(pattern, normalized, re.IGNORECASE)
             if match:
                 return int(match.group(1))
         return 0

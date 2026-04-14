@@ -15,8 +15,7 @@ Test Coverage:
 import pytest
 from playwright.sync_api import expect
 from tests.e2e.selectors import (
-    NEW_CHAT_BUTTON, SESSION_ITEM, SESSION_TITLE, SESSION_ACTIONS,
-    CHAT_TEXTAREA, MSG_ASSISTANT, MESSAGES_CONTAINER,
+    NEW_CHAT_BUTTON, SESSION_ITEM, MSG_ASSISTANT,
 )
 
 
@@ -32,7 +31,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Click new session button
-        new_session_btn = page.locator('button:has-text("新对话"), button:has-text("New Chat")')
+        new_session_btn = page.locator(NEW_CHAT_BUTTON)
         if new_session_btn.count() > 0:
             new_session_btn.first.click()
             page.wait_for_timeout(500)
@@ -91,7 +90,7 @@ class TestSessionManagement:
         page.wait_for_timeout(1000)
 
         # Find the session in sidebar
-        initial_count = page.locator('.session-item, [class*="session-list"] [class*="item"]').count()
+        initial_count = page.locator(SESSION_ITEM).count()
 
         # Find delete button (may require hover or context menu)
         delete_btn = page.locator('[class*="delete"], button:has-text("删除")')
@@ -107,7 +106,7 @@ class TestSessionManagement:
             page.wait_for_timeout(500)
 
         # Verify session count decreased
-        new_count = page.locator('.session-item, [class*="session-list"] [class*="item"]').count()
+        new_count = page.locator(SESSION_ITEM).count()
         assert new_count < initial_count, f"Expected session count to decrease. Before: {initial_count}, After: {new_count}"
 
     def test_tc204_list_sessions(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
@@ -117,7 +116,7 @@ class TestSessionManagement:
 
         # Create multiple sessions
         for i in range(3):
-            new_session_btn = page.locator('button:has-text("新对话"), button:has-text("New Chat")')
+            new_session_btn = page.locator(NEW_CHAT_BUTTON)
             if new_session_btn.count() > 0:
                 new_session_btn.first.click()
                 page.wait_for_timeout(500)
@@ -125,8 +124,8 @@ class TestSessionManagement:
             page.wait_for_timeout(500)
 
         # Verify session list in sidebar
-        session_list = page.locator('.session-list, [class*="session-list"], [class*="sidebar"] [class*="item"]')
-        expect(session_list.first).to_be_visible()
+        session_items = page.locator(SESSION_ITEM)
+        assert session_items.count() >= 3, f"Expected >=3 sessions, got {session_items.count()}"
 
     def test_tc205_session_persistence(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-205: Session data persists after page reload."""
@@ -143,8 +142,8 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Verify session and messages still exist
-        messages = page.locator('.chat-message')
-        expect(messages.first).to_be_visible()
+        messages = page.locator(MSG_ASSISTANT)
+        expect(messages.last).to_be_visible()
 
     def test_tc206_session_search(self, admin_logged_in, wait_for_chat_ready):
         """TC-206: User can search through sessions."""
@@ -168,7 +167,7 @@ class TestSessionManagement:
 
         # Create enough sessions to trigger pagination
         for i in range(15):
-            new_session_btn = page.locator('button:has-text("新对话"), button:has-text("New Chat")')
+            new_session_btn = page.locator(NEW_CHAT_BUTTON)
             if new_session_btn.count() > 0:
                 new_session_btn.first.click()
                 page.wait_for_timeout(300)

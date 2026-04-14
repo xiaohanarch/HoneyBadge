@@ -48,6 +48,7 @@ class TestAuthentication:
             # Verify we're on the chat page with functional UI
             expect(page.locator(CHAT_HEADER)).to_be_visible()
             expect(page.locator(CHAT_TEXTAREA)).to_be_visible()
+            expect(page.locator(USER_AVATAR)).to_be_visible()
         finally:
             page.close()
             context.close()
@@ -75,15 +76,13 @@ class TestAuthentication:
 
         # Click logout
         page.locator(LOGOUT_ITEM).click()
-        page.wait_for_timeout(2000)
 
         # Should be redirected to login
-        assert "/login" in page.url, f"Expected redirect to /login after logout, got {page.url}"
+        page.wait_for_url(f"{BASE_URL}/login", timeout=10000)
 
         # Attempting to navigate to /chat should redirect back to login (route guard)
         page.goto(f"{BASE_URL}/chat")
-        page.wait_for_timeout(2000)
-        assert "/login" in page.url, f"Expected /chat to redirect to /login, got {page.url}"
+        page.wait_for_url(f"{BASE_URL}/login", timeout=10000)
 
     def test_tc006_google_sso_button(self, page):
         """TC-006: Google SSO button visible if configured."""
