@@ -697,16 +697,23 @@ async def generate_ngql(
 3. **禁止 WRITE 操作**：INSERT, UPDATE, UPSERT, DELETE, DROP, CREATE, ALTER
 4. **每个查询必须有 LIMIT**（默认 LIMIT 100，除非用户指定数量或使用聚合函数）
 5. **遍历深度不超过 5 跳**
-6. **属性访问必须带 Tag 前缀**：`n.TagName.property_name`
-7. **使用双等号 `==` 做比较**，单等号 `=` 是赋值
-8. **字符串值使用双引号**
+6. **使用双等号 `==` 做比较**，单等号 `=` 是赋值
+7. **字符串值使用双引号**
 
 # NebulaGraph nGQL 语法约束
 
-- 属性访问: `n.Supplier.supplier_name`（不是 `n.supplier_name`）
+- **顶点属性访问**：`v.TagName.property_name`（带 Tag 前缀）
+  - 示例：`s.Supplier.supplier_name`、`po.PurchaseOrder.total_amount`
+  - 常见 Tag：Supplier、PurchaseOrder、Invoice、Payment、Receipt、Item 等
+- **边属性访问**：直接用别名，不带边类型前缀
+  - 示例：`e.match_status`（不是 `e.HAS_INVOICE.match_status`）
+  - 示例：`e.priority`（不是 `e.SUPPLIES_ITEM.priority`）
 - 比较运算符: `==`（不是 `=`）
 - 分页: `LIMIT 10 OFFSET 5`（不是 `SKIP 5 LIMIT 10`）
 - 不支持 MERGE（用 UPSERT 替代，但这里只做读查询）
+- **OPTIONAL MATCH 禁止加 WHERE 子句**：`OPTIONAL MATCH ... WHERE` 语法不支持
+  - 正确：分两步查 `MATCH ... WHERE ... RETURN` + `OPTIONAL MATCH ... RETURN`
+  - 错误：`OPTIONAL MATCH (a)->(b) WHERE a.x == 1 RETURN ...`（WHERE 放在 OPTIONAL MATCH 后会报 SyntaxError）
 - 最短路径: `FIND SHORTEST PATH FROM "vid1" TO "vid2" OVER * BIDIRECT UPTO 5 STEPS`
 - 标签函数: `tags(n)`（不是 `labels(n)`）
 
@@ -718,6 +725,92 @@ async def generate_ngql(
 - 日期: now(), date(), time(), datetime(), datetime_diff()
 - 类型: toInteger(), toFloat(), toString(), toBoolean()
 - 列表: size(), range(), head(), tail(), reduce()
+
+# 业务概念 → nGQL 查询映射（重要！）
+
+回答以下业务问题时，直接使用对应的查询模式，不要自己臆造查询：
+
+## 供应商风险相关
+
+**高风险供应商 / 高风险供应商有哪些 / 哪些供应商风险高**
+→ 满足以下任一条件：
+  - credit_rating IN ["C", "D"]（信用评级为 C 或 D）
+  - status == "BLOCKED"（被冻结的供应商）
+  - qualification_expiry <= now() + 30天 AND qualification status == "VALID"（资质即将过期）
+- 示例: `WHERE s.Supplier.credit_rating IN ["C", "D"] OR s.Supplier.status == "BLOCKED"`
+
+**被冻结的供应商 / BLOCKED 供应商**
+→ status == "BLOCKED"
+
+**单一供应商风险 / 单一来源物料**
+→ 某 Item 只有 1 个 ACTIVE 供应商（count(s) == 1）
+
+**供应商集中度风险 / 采购集中度过高**
+→ 某供应商 PO 金额占全局 PO 金额 > 30%
+
+## 付款风险相关
+
+**高风险付款 / 有风险的付款记录**
+→ 满足以下任一条件即为高风险：
+  - 付款供应商为 BLOCKED 状态：`(pay:Payment)-[:PAID_TO]->(s:Supplier) WHERE s.Supplier.status == "BLOCKED"`
+  - 提前付款（早于到期日 30 天以上）：`pay.Payment.payment_date < inv.Invoice.due_date - 30天`
+  - 超额付款：Payment.amount > Invoice.total_amount
+  - 金额异常付款（付款金额与发票金额偏差 > 20%）
+
+**虚假付款 / 可疑付款 / 欺诈付款**
+→ 重点关注：
+  - 付款供应商为 BLOCKED：`s.Supplier.status == "BLOCKED"`
+  - 提前异常付款（无合理原因的提前付款）
+  - 金额异常大的付款
+
+**虚假交易 / 虚假采购 / 高风险虚假交易 / 欺诈采购**
+→ 这是最严重的风险类型，定义为以下任意一种：
+  1. 收货日期早于 PO 日期（虚假发货/虚构交易）：
+     `MATCH (po:PurchaseOrder)-[:HAS_RECEIPT]->(r:Receipt) WHERE r.Receipt.receipt_date < po.PurchaseOrder.order_date RETURN count(po)`
+  2. 发票日期早于收货日期（先票后货/虚假发票）：
+     `MATCH (po:PurchaseOrder)-[:HAS_RECEIPT]->(r:Receipt)-[:FOR_INVOICE]->(inv:Invoice) WHERE inv.Invoice.invoice_date < r.Receipt.receipt_date`
+  3. 付款给 BLOCKED 供应商：
+     `MATCH (pay:Payment)-[:PAYS_INVOICE]->(inv:Invoice)-[:INVOICED_BY]->(s:Supplier) WHERE s.Supplier.status == "BLOCKED"`
+  4. 超额付款（付款金额 > 发票金额）：
+     `MATCH (pay:Payment)-[:PAYS_INVOICE]->(inv:Invoice) WHERE pay.Payment.amount > inv.Invoice.total_amount`
+  5. 供应商不一致（PO 供应商 ≠ 发票供应商）：
+     `MATCH (po:PurchaseOrder)-[:PLACED_WITH]->(s_po:Supplier), (po)-[:HAS_INVOICE]->(inv:Invoice)-[:INVOICED_BY]->(s_inv:Supplier) WHERE s_po.Supplier.supplier_number != s_inv.Supplier.supplier_number`
+→ 查询"高风险虚假采购"的正确方法是：使用上述任一条件，不要只查供应商状态！
+
+**提前付款 / 早付款**
+→ `payment_date < due_date - 30天`，且无合理解释
+
+**超期未付发票 / 逾期账款**
+→ `Invoice.status == "APPROVED" AND Invoice.due_date < now()`，按超期天数分级
+
+**重复发票 / 疑似重复发票**
+→ 同供应商、同金额、发票日期相差 ≤ 3 天但发票号不同
+
+## 三单匹配相关
+
+**三单不匹配 / 三单匹配异常 / 发票与 PO 金额不符**
+→ `HAS_INVOICE.match_status IN ["UNMATCHED", "PARTIAL"]`
+→ 且金额偏差 = |Invoice.total_amount - PO.total_amount| / PO.total_amount
+
+**发票金额偏差大 / 发票与订单金额差异大**
+→ 偏差百分比 > 10%（WARNING）或 > 20%（ALERT）
+
+## 供应商资质相关
+
+**资质过期 / 过期资质 / 供应商资质过期**
+→ `SupplierQualification.status == "VALID" AND expiry_date < now()`
+→ 或 `expiry_date <= now() + 30天`（即将过期预警）
+
+**无资质供应商 / 缺少资质的供应商**
+→ 供应商没有有效的 SupplierQualification 记录
+
+## 日期/时序异常
+
+**日期异常 / 发票日期早于收货日期**
+→ `Invoice.invoice_date < Receipt.receipt_date`
+
+**收货日期早于 PO 日期**
+→ `Receipt.receipt_date < PO.order_date`
 
 # Schema 信息
 
@@ -799,16 +892,40 @@ async def summarize_results(
 
 1. **不要修改任何数值**（金额、数量、日期等必须与原始数据完全一致）
 2. **不要补充数据库中没有的信息**
-3. **不要推测或猜测任何结论**
+3. **不要推测**任何原因或解释，但可以根据数据本身的规律指出"异常模式"
 4. 如果数据为空，直接说明"未查询到符合条件的数据"
 5. 使用中文回答
 6. 保持简洁明了，突出关键信息
-7. 对于表格数据，使用清晰的列表或表格格式
+
+# 分析维度
+
+根据原始问题判断当前属于哪类查询，对结果进行针对性分析：
+
+## 如果问题是"有多少..."类（统计类）
+- 直接给出数量
+- 如果有分类，给出各分类的数量分布
+- 指出最突出的类别
+
+## 如果问题是"找出/检测..."类（风险检测类）
+- 逐条指出每条记录为什么是高风险
+- 标注风险等级（CRITICAL/HIGH/MEDIUM/WARNING）
+- 重点关注以下风险标记：
+  - BLOCKED 供应商相关 → CRITICAL（合规违规）
+  - 金额偏差 > 20% → HIGH
+  - 提前付款 30 天以上 → HIGH（可疑）
+  - 金额偏差 10-20% → WARNING
+  - 供应商资质即将过期（30 天内）→ MEDIUM
+  - 超期未付发票 → 按超期天数分级
+
+## 如果问题是"列出/展示..."类（列表类）
+- 简洁列出前 10 条关键信息
+- 说明总数量
+- 如有排序，说明排序依据
 
 # 输出格式
 
-以自然语言方式总结查询结果，突出关键发现。
-如果发现异常数据（如三单不匹配、金额异常），明确标注。
+先说结论（查到多少条、风险等级分布），再说具体分析。
+不要逐行朗读原始数据，要提炼关键信息。
 """
 
     # Format results for the prompt

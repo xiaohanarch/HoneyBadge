@@ -32,6 +32,12 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         logger.info("server_starting", port=config.port)
+        # Initialize all to None so error handling can distinguish
+        # "initialized but failed later" from "never reached"
+        app.state.nebula = None
+        app.state.pg = None
+        app.state.redis = None
+        app.state.llm = None
         try:
             from honeybadge.db.nebula import NebulaGraphClient
             from honeybadge.db.postgres import PostgreSQLClient
@@ -66,16 +72,13 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                 "endpoint": config.llm_endpoint,
                 "api_key": config.llm_api_key,
                 "model": config.llm_model,
-                "timeout": 60,
+                "timeout": 120,
             }
             app.state.llm = OpenAICompatibleAdapter(llm_config, None)
 
             logger.info("server_ready", services="nebula,pg,redis,llm")
         except Exception as e:
             logger.error("startup_failed", error=str(e))
-            for attr in ("nebula", "pg", "redis", "llm"):
-                if not hasattr(app.state, attr):
-                    setattr(app.state, attr, None)
 
         yield
 
@@ -142,6 +145,15 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         access_token = create_access_token(token_data, config.jwt_secret, config.jwt_access_expire_minutes)
         new_refresh = create_refresh_token({"sub": user["id"]}, config.jwt_secret, config.jwt_refresh_expire_days)
         return {"token": access_token, "refresh_token": new_refresh, "user": user_to_response(user)}
+
+    # --- Mount routers ---
+    from honeybadge.server.health import router as health_router
+    from honeybadge.server.sessions import router as sessions_router
+    from honeybadge.server.audit import router as audit_router
+
+    app.include_router(health_router)
+    app.include_router(sessions_router)
+    app.include_router(audit_router)
 
     # --- WebSocket endpoint ---
     from fastapi import WebSocket, WebSocketDisconnect
