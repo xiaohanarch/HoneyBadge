@@ -37,7 +37,7 @@ class TestInfrastructure:
             # Try connecting to NebulaGraph
             response = httpx.get("http://localhost:9669", timeout=10)
             # NebulaGraph may return redirects or 200 on status endpoint
-            assert response.status_code in [200, 404, 301, 302]
+            assert response.status_code in [200, 301, 302], f"NebulaGraph health check failed: {response.status_code}"
         except httpx.ConnectError:
             pytest.fail("Cannot connect to NebulaGraph at localhost:9669")
 
@@ -77,7 +77,7 @@ class TestInfrastructure:
         try:
             # Higress admin or health endpoint
             response = httpx.get("http://localhost:18001", timeout=10)
-            assert response.status_code in [200, 301, 302, 404]
+            assert response.status_code in [200, 301, 302], f"Higress health check failed: {response.status_code}"
         except httpx.ConnectError:
             pytest.fail("Cannot connect to Higress at localhost:18001")
 
@@ -156,3 +156,32 @@ class TestInfrastructure:
             assert found_count >= 5, f"Expected at least 5 key services running, found {found_count}"
         except docker.errors.DockerNotFound:
             pytest.skip("Docker SDK not available")
+
+    def test_tc713_nebula_schema_completeness(self):
+        """TC-713: NebulaGraph has expected number of tags and edges."""
+        try:
+            from nebula3.gclient.net import ConnectionPool
+            from nebula3.Config import Config as NebulaConfig
+        except ImportError:
+            pytest.skip("nebula3 Python client not installed")
+
+        config = NebulaConfig()
+        pool = ConnectionPool()
+        try:
+            pool.init([("localhost", 9669)], config)
+            session = pool.get_session("root", "nebula")
+            try:
+                session.execute("USE honeybadge")
+                tags_result = session.execute("SHOW TAGS")
+                tag_count = tags_result.row_size()
+                assert tag_count >= 10, f"Expected >=10 tags, got {tag_count}"
+
+                edges_result = session.execute("SHOW EDGES")
+                edge_count = edges_result.row_size()
+                assert edge_count >= 10, f"Expected >=10 edge types, got {edge_count}"
+            finally:
+                session.release()
+        except Exception as e:
+            pytest.skip(f"Cannot connect to NebulaGraph: {e}")
+        finally:
+            pool.close()

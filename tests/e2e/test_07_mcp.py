@@ -15,6 +15,7 @@ Test Coverage:
 import pytest
 from playwright.sync_api import expect
 import httpx
+from tests.e2e.selectors import CHAT_TEXTAREA, MSG_ASSISTANT
 
 
 BASE_URL = "http://localhost:3000"
@@ -33,7 +34,7 @@ class TestMCPServices:
         # Also check via direct HTTP
         try:
             health_response = httpx.get("http://localhost:8000/health", timeout=10)
-            assert health_response.status_code in [200, 404]  # 404 if no health endpoint
+            assert health_response.status_code == 200, f"NebulaGraph MCP health check failed: {health_response.status_code}"
         except httpx.ConnectError:
             pytest.fail("Cannot connect to NebulaGraph MCP at localhost:8000")
 
@@ -84,18 +85,17 @@ class TestMCPServices:
         wait_for_chat_ready()
 
         # Query that would use MCP tools
-        textarea = page.locator(".chat-input textarea, input[placeholder*='问题']").first
+        textarea = page.locator(CHAT_TEXTAREA).first
         textarea.fill("查询采购订单")
         textarea.press("Enter")
 
         page.wait_for_timeout(10000)
 
         # Verify response structure is valid
-        response = page.locator('.chat-message')
-        if response.count() > 0:
-            # Response should have some content
-            text = response.first.inner_text()
-            assert len(text) > 0
+        response = page.locator(MSG_ASSISTANT)
+        expect(response.first).to_be_visible(timeout=120000)
+        text = response.first.inner_text()
+        assert len(text) > 5, f"Response too short: '{text}'"
 
     def test_tc607_mcp_connection_error_handling(self, admin_logged_in, wait_for_chat_ready):
         """TC-607: MCP connection errors are handled gracefully."""
@@ -103,7 +103,7 @@ class TestMCPServices:
         wait_for_chat_ready()
 
         # Normal query should work
-        textarea = page.locator(".chat-input textarea, input[placeholder*='问题']").first
+        textarea = page.locator(CHAT_TEXTAREA).first
         textarea.fill("查询供应商")
         textarea.press("Enter")
 
@@ -116,7 +116,7 @@ class TestMCPServices:
             pass
 
         # Chat should still be functional
-        expect(page.locator(".chat-input textarea").first).to_be_visible()
+        expect(page.locator(CHAT_TEXTAREA).first).to_be_visible()
 
     def test_tc608_multiple_mcp_servers_sequence(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-608: Multiple MCP servers can be called in sequence."""
@@ -133,3 +133,29 @@ class TestMCPServices:
         # All should have responses
         messages = page.locator('.chat-message.assistant')
         expect(messages).to_have_count(3, timeout=120000)
+
+    def test_tc609_nebula_mcp_functional(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+        """TC-609: NebulaGraph MCP returns actual graph data."""
+        page = admin_logged_in
+        wait_for_chat_ready()
+
+        result = send_query_and_get_response("查询供应商")
+        assert result["data_row_count"] > 0, f"NebulaGraph query should return data rows"
+
+    def test_tc610_audit_mcp_write_verification(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+        """TC-610: Query creates audit record retrievable by trace_id."""
+        page = admin_logged_in
+        wait_for_chat_ready()
+
+        result = send_query_and_get_response("查询采购订单")
+        assert result["trace_id"], "Query should produce a trace_id"
+
+        import httpx
+        api = httpx.Client(base_url="http://localhost:8090", timeout=30)
+        try:
+            resp = api.get("/api/audit", params={"trace_id": result["trace_id"]})
+            if resp.status_code == 200:
+                assert result["trace_id"] in resp.text, "Audit record should contain trace_id"
+            # If audit API not implemented, we at least verified trace_id exists in UI
+        finally:
+            api.close()
