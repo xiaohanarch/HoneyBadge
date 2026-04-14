@@ -747,7 +747,7 @@ async def generate_ngql(
     request = LLMRequest(
         messages=messages,
         temperature=0.1,  # Low temperature for deterministic nGQL
-        max_tokens=4096,
+        max_tokens=8192,  # Increased to allow complete nGQL generation with long schemas
         trace_id=trace_id,
         user_id=user_context.get("user_id") if user_context else None,
     )
