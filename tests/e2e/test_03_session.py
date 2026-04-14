@@ -14,6 +14,10 @@ Test Coverage:
 """
 import pytest
 from playwright.sync_api import expect
+from tests.e2e.selectors import (
+    NEW_CHAT_BUTTON, SESSION_ITEM, SESSION_TITLE, SESSION_ACTIONS,
+    CHAT_TEXTAREA, MSG_ASSISTANT, MESSAGES_CONTAINER,
+)
 
 
 BASE_URL = "http://localhost:3000"
@@ -35,10 +39,11 @@ class TestSessionManagement:
 
         # Find session name input and rename
         session_name_input = page.locator('input[placeholder*="会话名称"], input[class*="session-name"]')
-        if session_name_input.count() > 0:
-            session_name_input.first.fill("Test Session TC-201")
-            session_name_input.first.press("Enter")
-            page.wait_for_timeout(500)
+        if session_name_input.count() == 0:
+            pytest.skip("Session name input not available in UI")
+        session_name_input.first.fill("Test Session TC-201")
+        session_name_input.first.press("Enter")
+        page.wait_for_timeout(500)
 
         # Verify session appears in sidebar
         session_item = page.locator('text="Test Session TC-201"')
@@ -60,19 +65,21 @@ class TestSessionManagement:
 
         # Look for edit/rename button
         rename_btn = page.locator('[class*="edit"], [class*="rename"], button:has-text("编辑")')
-        if rename_btn.count() > 0:
-            rename_btn.first.click()
-            page.wait_for_timeout(300)
+        if rename_btn.count() == 0:
+            pytest.skip("Rename button not available")
+        rename_btn.first.click()
+        page.wait_for_timeout(300)
 
-            # Clear and enter new name
-            name_input = page.locator('input[class*="session-name"], input[placeholder*="名称"]')
-            if name_input.count() > 0:
-                name_input.first.fill("Renamed Session TC-202")
-                name_input.first.press("Enter")
-                page.wait_for_timeout(500)
+        # Clear and enter new name
+        name_input = page.locator('input[class*="session-name"], input[placeholder*="名称"]')
+        if name_input.count() == 0:
+            pytest.skip("Session name input not found after clicking rename")
+        name_input.first.fill("Renamed Session TC-202")
+        name_input.first.press("Enter")
+        page.wait_for_timeout(500)
 
-                # Verify new name
-                expect(page.locator('text="Renamed Session TC-202"').first).to_be_visible()
+        # Verify new name
+        expect(page.locator('text="Renamed Session TC-202"').first).to_be_visible()
 
     def test_tc203_delete_session(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-203: User can delete a session."""
@@ -88,19 +95,20 @@ class TestSessionManagement:
 
         # Find delete button (may require hover or context menu)
         delete_btn = page.locator('[class*="delete"], button:has-text("删除")')
-        if delete_btn.count() > 0:
-            delete_btn.first.click()
+        if delete_btn.count() == 0:
+            pytest.skip("Delete button not available")
+        delete_btn.first.click()
+        page.wait_for_timeout(500)
+
+        # Confirm deletion if dialog appears
+        confirm_btn = page.locator('button:has-text("确认"), button:has-text("Confirm")')
+        if confirm_btn.count() > 0:
+            confirm_btn.first.click()
             page.wait_for_timeout(500)
 
-            # Confirm deletion if dialog appears
-            confirm_btn = page.locator('button:has-text("确认"), button:has-text("Confirm")')
-            if confirm_btn.count() > 0:
-                confirm_btn.first.click()
-                page.wait_for_timeout(500)
-
-            # Verify session count decreased
-            new_count = page.locator('.session-item, [class*="session-list"] [class*="item"]').count()
-            assert new_count < initial_count or new_count == 0
+        # Verify session count decreased
+        new_count = page.locator('.session-item, [class*="session-list"] [class*="item"]').count()
+        assert new_count < initial_count, f"Expected session count to decrease. Before: {initial_count}, After: {new_count}"
 
     def test_tc204_list_sessions(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-204: Sessions are listed in sidebar."""
@@ -145,12 +153,13 @@ class TestSessionManagement:
 
         # Look for search input
         search_input = page.locator('input[placeholder*="搜索"], input[class*="search"]')
-        if search_input.count() > 0:
-            search_input.first.fill("采购订单")
-            page.wait_for_timeout(500)
+        if search_input.count() == 0:
+            pytest.skip("Search input not available")
+        search_input.first.fill("采购订单")
+        page.wait_for_timeout(500)
 
-            # Verify filtered results
-            expect(search_input.first).to_be_visible()
+        # Verify filtered results
+        expect(search_input.first).to_be_visible()
 
     def test_tc207_session_pagination(self, admin_logged_in, wait_for_chat_ready):
         """TC-207: Sessions list supports pagination."""
@@ -166,8 +175,9 @@ class TestSessionManagement:
 
         # Look for pagination controls
         pagination = page.locator('.pagination, [class*="pagination"], button:has-text("下一页")')
-        if pagination.count() > 0:
-            expect(pagination.first).to_be_visible()
+        if pagination.count() == 0:
+            pytest.skip("Pagination not triggered or not available")
+        expect(pagination.first).to_be_visible()
 
     def test_tc208_export_session(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-208: User can export session conversation."""
@@ -180,11 +190,12 @@ class TestSessionManagement:
 
         # Look for export button
         export_btn = page.locator('button:has-text("导出"), button:has-text("Export")')
-        if export_btn.count() > 0:
-            export_btn.first.click()
-            page.wait_for_timeout(500)
+        if export_btn.count() == 0:
+            pytest.skip("Export button not available")
+        export_btn.first.click()
+        page.wait_for_timeout(500)
 
-            # Verify download or export dialog
-            export_dialog = page.locator('[class*="export"], [class*="download"]')
-            if export_dialog.count() > 0:
-                expect(export_dialog.first).to_be_visible()
+        # Verify download or export dialog
+        export_dialog = page.locator('[class*="export"], [class*="download"]')
+        if export_dialog.count() > 0:
+            expect(export_dialog.first).to_be_visible()

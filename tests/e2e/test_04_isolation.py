@@ -21,7 +21,8 @@ Data实际情况:
 """
 import pytest
 from playwright.sync_api import expect
-from conftest import send_query_on_page
+from tests.e2e.conftest import send_query_on_page
+from tests.e2e.selectors import TRACE_ID_LINK, MSG_ASSISTANT
 
 
 BASE_URL = "http://localhost:3000"
@@ -158,12 +159,9 @@ class TestUserIsolation:
         analyst_storage = page.evaluate("() => localStorage.getItem('auth_store')")
 
         # Verify isolation
-        if admin_storage and analyst_storage:
-            admin_data = page.evaluate(f"() => {admin_storage}")
-            analyst_data = page.evaluate(f"() => {analyst_storage}")
-
-            # User IDs should be different
-            assert admin_data != analyst_data, "Session storage should be isolated per user"
+        assert admin_storage, "Admin should have localStorage data"
+        assert analyst_storage, "Analyst should have localStorage data"
+        assert admin_storage != analyst_storage, "Users should have different localStorage tokens"
 
     def test_tc306_cache_isolation_between_users(self, admin_logged_in, analyst_logged_in, send_chat_query):
         """TC-306: Cache entries are isolated between users.
@@ -245,19 +243,9 @@ class TestUserIsolation:
         admin_room_id = admin_page.evaluate("() => localStorage.getItem('matrix_room_id')")
         analyst_room_id = analyst_page.evaluate("() => localStorage.getItem('matrix_room_id')")
 
-        # If matrix room IDs are stored, verify they're different
-        if admin_room_id and analyst_room_id:
-            assert admin_room_id != analyst_room_id, \
-                f"Matrix rooms should be isolated. Admin: {admin_room_id}, Analyst: {analyst_room_id}"
-
-        # Alternatively, check that each user's session is independent
-        admin_matrix_user = admin_page.evaluate("() => localStorage.getItem('matrix_user_id')")
-        analyst_matrix_user = analyst_page.evaluate("() => localStorage.getItem('matrix_user_id')")
-
-        # Matrix user IDs should be different per user
-        if admin_matrix_user and analyst_matrix_user:
-            assert admin_matrix_user != analyst_matrix_user, \
-                f"Matrix users should be different. Admin: {admin_matrix_user}, Analyst: {analyst_matrix_user}"
+        assert admin_room_id, "Admin should have a Matrix room ID"
+        assert analyst_room_id, "Analyst should have a Matrix room ID"
+        assert admin_room_id != analyst_room_id, "Users must have different Matrix rooms"
 
     def test_tc309_verify_org_specific_po_numbers(self, create_user_page):
         """TC-309: Verify org-specific PO numbers are correctly filtered.
