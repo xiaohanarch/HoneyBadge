@@ -4,6 +4,7 @@ Receives QueryRequest messages, processes them through the LLM+NebulaGraph pipel
 and returns QueryResponse messages with trace_id and execution_time_ms.
 """
 
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -16,8 +17,22 @@ from honeybadge.db.postgres import PostgreSQLClient
 from honeybadge.llm.adapter import OpenAICompatibleAdapter
 from honeybadge.llm.adapter import generate_ngql as llm_generate_ngql
 from honeybadge.llm.adapter import summarize_results as llm_summarize_results
+from honeybadge.llm.adapter import LLMGenerationError, LLMSummarizationError
+from honeybadge.core.exceptions import NebulaGraphError
 
 logger = structlog.get_logger()
+
+
+def _strip_markdown_fence(text: str) -> str:
+    """Strip markdown code fence markers (```ngql, ```, etc.) from LLM output."""
+    text = text.strip()
+    # Remove ```ngql, ```yml, ```sql, ``` etc. at start of line
+    text = re.sub(r"^```[\w]*\n?", "", text)
+    # Remove leading "ngql" on its own line (no backticks)
+    text = re.sub(r"^ngql\n?", "", text, flags=re.IGNORECASE)
+    # Remove trailing ```
+    text = re.sub(r"\n?```$", "", text)
+    return text.strip()
 
 # Path to prompts directory (resolved relative to src/honeybadge/)
 _PROMPTS_DIR = Path(__file__).parent.parent.parent.parent / "prompts"
@@ -134,17 +149,16 @@ async def process_query(
         schema_str = await get_schema_str(nebula, space)
         ontology_str = load_ontology_str()
 
-        # Step 2: Generate nGQL
+        # Step 2: Generate nGQL (raises LLMGenerationError on failure)
         ngql_response = await llm_generate_ngql(
             adapter=llm_adapter,
             question=question,
             schema_info=schema_str,
             ontology_info=ontology_str,
         )
-        if not ngql_response.success:
-            raise Exception(f"nGQL generation failed: {ngql_response.error_message}")
 
-        ngql = ngql_response.content.strip()
+        # Strip markdown code fences (e.g. ```ngql ... ```)
+        ngql = _strip_markdown_fence(ngql_response.content)
         logger.info("ws_ngql_generated", trace_id=trace_id, ngql=ngql[:100])
 
         # Step 3: Execute
@@ -154,14 +168,14 @@ async def process_query(
         if not query_result.success:
             raise Exception(f"Query execution failed: {query_result.error_message}")
 
-        # Step 4: Summarize
+        # Step 4: Summarize (raises LLMSummarizationError on failure)
         summary_response = await llm_summarize_results(
             adapter=llm_adapter,
             question=question,
             raw_results=query_result.rows,
             columns=query_result.columns,
         )
-        summary = summary_response.content if summary_response.success else "摘要生成失败"
+        summary = summary_response.content
 
         # Step 5: Write audit log
         from honeybadge.db.postgres import AuditLogEntry
