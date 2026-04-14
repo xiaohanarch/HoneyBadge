@@ -113,3 +113,8 @@ export const systemApi = {
 
   version: () => http.get('/version'),
 };
+
+// 审计 API
+export const auditApi = {
+  getAuditTrail: (traceId: string) => http.get(`/api/audit/${traceId}`),
+};

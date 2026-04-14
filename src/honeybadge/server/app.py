@@ -1,5 +1,7 @@
 """FastAPI application factory for HoneyBadge backend server."""
 
+import json
+import time
 from contextlib import asynccontextmanager
 
 import structlog
@@ -30,10 +32,17 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         logger.info("server_starting", port=config.port)
+        # Initialize all to None so error handling can distinguish
+        # "initialized but failed later" from "never reached"
+        app.state.nebula = None
+        app.state.pg = None
+        app.state.redis = None
+        app.state.llm = None
         try:
             from honeybadge.db.nebula import NebulaGraphClient
             from honeybadge.db.postgres import PostgreSQLClient
             from honeybadge.db.redis import RedisClient
+            from honeybadge.llm.adapter import OpenAICompatibleAdapter
 
             nebula = NebulaGraphClient(
                 host=config.nebula_host, port=config.nebula_port,
@@ -58,12 +67,18 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             await redis.connect()
             app.state.redis = redis
 
-            logger.info("server_ready", services="nebula,pg,redis")
+            # LLM adapter for nGQL generation and summarization
+            llm_config = {
+                "endpoint": config.llm_endpoint,
+                "api_key": config.llm_api_key,
+                "model": config.llm_model,
+                "timeout": 120,
+            }
+            app.state.llm = OpenAICompatibleAdapter(llm_config, None)
+
+            logger.info("server_ready", services="nebula,pg,redis,llm")
         except Exception as e:
             logger.error("startup_failed", error=str(e))
-            for attr in ("nebula", "pg", "redis"):
-                if not hasattr(app.state, attr):
-                    setattr(app.state, attr, None)
 
         yield
 
@@ -134,9 +149,92 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     # --- Mount routers ---
     from honeybadge.server.health import router as health_router
     from honeybadge.server.sessions import router as sessions_router
+    from honeybadge.server.audit import router as audit_router
 
     app.include_router(health_router)
     app.include_router(sessions_router)
+    app.include_router(audit_router)
+
+    # --- WebSocket endpoint ---
+    from fastapi import WebSocket, WebSocketDisconnect
+    from honeybadge.server.websocket import process_query, build_query_response
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        """WebSocket endpoint for query processing with full metadata."""
+        from honeybadge.server.auth import decode_token
+
+        # Extract token from query params
+        token = websocket.query_params.get("token", "")
+        user_id = "anonymous"
+        if token:
+            payload = decode_token(token, config.jwt_secret)
+            if payload:
+                user_id = payload.get("username", payload.get("sub", "anonymous"))
+
+        await websocket.accept()
+
+        try:
+            while True:
+                # Receive message
+                data = await websocket.receive_text()
+                try:
+                    msg = json.loads(data)
+                except json.JSONDecodeError:
+                    await websocket.send_text(json.dumps({"type": "error", "payload": {"message": "Invalid JSON"}}))
+                    continue
+
+                msg_type = msg.get("type")
+                payload = msg.get("payload", {})
+
+                if msg_type == "query":
+                    question = payload.get("question", "")
+                    session_id = payload.get("session_id", "")
+
+                    # Get clients from app state
+                    nebula = websocket.app.state.nebula
+                    pg = websocket.app.state.pg
+                    llm = getattr(websocket.app.state, "llm", None)
+
+                    if not nebula or not pg:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "payload": {"message": "Server not fully initialized"},
+                        }))
+                        continue
+
+                    if not llm:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "payload": {"message": "LLM not configured"},
+                        }))
+                        continue
+
+                    # Process query
+                    result = await process_query(
+                        question=question,
+                        session_id=session_id,
+                        nebula=nebula,
+                        pg=pg,
+                        llm_adapter=llm,
+                        user_id=user_id,
+                    )
+
+                    # Send response
+                    response = build_query_response(result)
+                    await websocket.send_text(json.dumps(response))
+
+                elif msg_type == "heartbeat":
+                    await websocket.send_text(json.dumps({"type": "heartbeat", "timestamp": int(time.time() * 1000)}))
+
+        except WebSocketDisconnect:
+            logger.info("ws_client_disconnected")
+        except Exception as e:
+            logger.error("ws_error", error=str(e))
+            try:
+                await websocket.send_text(json.dumps({"type": "error", "payload": {"message": str(e)}}))
+            except Exception:
+                pass
 
     return app
 
