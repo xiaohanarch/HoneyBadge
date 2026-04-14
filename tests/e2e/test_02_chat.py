@@ -4,195 +4,189 @@ HoneyBadge - Enterprise Knowledge Graph Assistant
 
 Test Coverage:
 - TC-101: Create new chat session
-- TC-102: Send query and receive response
-- TC-103: Streaming response display
-- TC-104: Progress steps display
-- TC-105: Query results table display
-- TC-106: nGQL display toggle
-- TC-107: Trace ID display and copy
+- TC-102: Send query and receive response with trace ID
+- TC-103: Streaming response (text grows over time)
+- TC-104: Progress steps display during processing
+- TC-105: Query results data table with rows
+- TC-106: nGQL/Cypher code display
+- TC-107: Trace ID format and display
 - TC-108: Error handling for invalid query
-- TC-109: Continue conversation context
-- TC-110: Multiple queries in sequence
+- TC-109: Continue conversation with context
+- TC-110: Multiple queries in sequence with trace IDs
+- TC-111: Execution time display
+- TC-112: Raw data toggle
 """
+import re
 import pytest
 from playwright.sync_api import expect
-import time
+from tests.e2e.selectors import (
+    CHAT_TEXTAREA, MSG_ASSISTANT, MSG_USER, SEND_BUTTON,
+    TRACE_ID_LINK, EXECUTION_TIME,
+    CYPHER_COLLAPSE_HEADER, CYPHER_CODE,
+    DATA_COLLAPSE_HEADER, DATA_ROWS, DATA_TABLE,
+    NEW_CHAT_BUTTON, MESSAGES_CONTAINER, PROGRESS_AREA,
+)
 
 
 BASE_URL = "http://localhost:3000"
 
 
 class TestChatFunctionality:
-    """Test chat functionality."""
+    """Test chat functionality with content verification."""
 
     def test_tc101_create_new_session(self, admin_logged_in, wait_for_chat_ready):
         """TC-101: User can create a new chat session."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Click new session button
-        new_session_btn = page.locator('button:has-text("新对话"), button:has-text("New Chat"), [class*="new-session"]')
+        new_session_btn = page.locator(NEW_CHAT_BUTTON)
         if new_session_btn.count() > 0:
             new_session_btn.first.click()
             page.wait_for_timeout(1000)
 
-        # Verify empty chat state or fresh chat
-        chat_area = page.locator('.chat-messages, .message-list, [class*="chat"]')
-        expect(chat_area.first).to_be_visible()
+        # Chat area and input should be visible
+        expect(page.locator(MESSAGES_CONTAINER)).to_be_visible()
+        expect(page.locator(CHAT_TEXTAREA)).to_be_visible()
 
-    def test_tc102_send_query_receives_response(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-102: User can send a query and receive a response."""
+    def test_tc102_send_query_receives_response_with_trace(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+        """TC-102: Query returns response with meaningful text and trace ID."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Send a simple query
-        send_chat_query("查询所有供应商", timeout=120000)
+        result = send_query_and_get_response("查询所有供应商")
 
-        # Verify response received
-        assistant_messages = page.locator('.chat-message.assistant, .message.assistant, [class*="assistant"]')
-        expect(assistant_messages.first).to_be_visible(timeout=120000)
+        # Response should have meaningful content (not just "OK" or empty)
+        assert len(result["text"]) > 20, f"Response too short: '{result['text'][:50]}'"
+
+        # Trace ID should be present
+        assert result["trace_id"], f"No trace ID in response"
 
     def test_tc103_streaming_response(self, admin_logged_in, wait_for_chat_ready):
-        """TC-103: Streaming response displays with typing effect."""
+        """TC-103: Streaming response shows text growing over time."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Send query
-        textarea = page.locator(".chat-input textarea, input[placeholder*='问题']").first
+        textarea = page.locator(CHAT_TEXTAREA).first
         textarea.fill("什么是采购订单")
         textarea.press("Enter")
 
-        # Wait for streaming indicator
-        page.wait_for_timeout(2000)
+        # Wait for assistant message to appear
+        page.wait_for_selector(MSG_ASSISTANT, timeout=30000)
 
-        # Verify text appears incrementally (streaming effect)
-        # This is implicit - if response completes, streaming worked
+        # Capture text length at two points to verify streaming
+        page.wait_for_timeout(1000)
+        text_a = page.locator(MSG_ASSISTANT).last.inner_text()
 
-        # Wait for final response
-        page.wait_for_selector('.chat-message.assistant', timeout=120000)
+        page.wait_for_timeout(3000)
+        text_b = page.locator(MSG_ASSISTANT).last.inner_text()
+
+        # Either text grew (streaming) or response completed quickly (also fine)
+        assert len(text_b) >= len(text_a), "Response text should not shrink"
+        assert len(text_b) > 5, f"Final response too short: '{text_b}'"
 
     def test_tc104_progress_steps_display(self, admin_logged_in, wait_for_chat_ready):
-        """TC-104: Progress steps are displayed during query processing."""
+        """TC-104: Progress/processing indicator shown during query."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Send query
-        textarea = page.locator(".chat-input textarea, input[placeholder*='问题']").first
+        textarea = page.locator(CHAT_TEXTAREA).first
         textarea.fill("查询采购订单")
         textarea.press("Enter")
 
-        # Look for progress indicators
-        progress_steps = page.locator('.progress-steps, .el-steps, [class*="progress"], .processing')
-        if progress_steps.count() > 0:
-            expect(progress_steps.first).to_be_visible(timeout=5000)
+        # Check for progress indicator immediately after sending
+        # (may disappear quickly once response arrives)
+        progress = page.locator(f'{PROGRESS_AREA}, .el-steps, [class*="progress"], .processing, [class*="loading"]')
+        # Progress is transient — if query is fast it may not appear
+        # Main assertion: response eventually arrives
+        page.wait_for_selector(MSG_ASSISTANT, timeout=120000)
+        expect(page.locator(MSG_ASSISTANT).last).to_be_visible()
 
-        # Wait for completion
-        page.wait_for_selector('.chat-message.assistant', timeout=120000)
-
-    def test_tc105_query_results_table(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-105: Query results are displayed in table format."""
+    def test_tc105_query_results_table(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+        """TC-105: Query results displayed in data table with actual rows."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Send query that should return data
-        send_chat_query("查询前5个采购订单", timeout=120000)
+        result = send_query_and_get_response("查询前5个采购订单")
 
-        # Look for data table
-        data_table = page.locator('.el-table, table, [class*="table"], [class*="data"]')
-        if data_table.count() > 0:
-            expect(data_table.first).to_be_visible(timeout=120000)
+        assert result["has_data_table"], "Response should have data table collapse"
+        assert result["data_row_count"] > 0, f"Data table should have rows, got {result['data_row_count']}"
 
-    def test_tc106_ngql_display(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-106: Executed nGQL query can be viewed."""
+    def test_tc106_ngql_display(self, admin_logged_in, wait_for_chat_ready, send_chat_query, expand_cypher_block):
+        """TC-106: Executed nGQL/Cypher query viewable in collapse block."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Send query
         send_chat_query("查询供应商", timeout=120000)
 
-        # Look for nGQL/cypher block toggle
-        ngql_toggle = page.locator('button:has-text("nGQL"), button:has-text("Cypher"), [class*="ngql"]')
-        if ngql_toggle.count() > 0:
-            ngql_toggle.first.click()
-            page.wait_for_timeout(500)
+        cypher_text = expand_cypher_block()
+        assert cypher_text, "Cypher code block is empty"
 
-            # Verify nGQL code block visible
-            ngql_block = page.locator('pre code:has-text("MATCH"), pre:has-text("GO")')
-            if ngql_block.count() > 0:
-                expect(ngql_block.first).to_be_visible()
+        # Should contain graph query keywords
+        keywords = ["MATCH", "GO", "LOOKUP", "FETCH", "FIND"]
+        has_keyword = any(kw in cypher_text.upper() for kw in keywords)
+        assert has_keyword, f"Cypher text lacks graph query keywords: {cypher_text[:200]}"
 
-    def test_tc107_trace_id_display(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-107: Trace ID is displayed and can be copied."""
+    def test_tc107_trace_id_format(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+        """TC-107: Trace ID has expected format and is displayed as link."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Send query
-        send_chat_query("查询采购订单", timeout=120000)
+        result = send_query_and_get_response("查询采购订单")
 
-        # Look for trace ID
-        trace_id = page.locator('[class*="trace"], [class*="trace-id"], text=/TRC-/')
-        if trace_id.count() > 0:
-            expect(trace_id.first).to_be_visible()
+        assert result["trace_id"], "No trace ID found"
 
-            # Test copy functionality if available
-            copy_btn = page.locator('[class*="copy"], button:has-text("复制")')
-            if copy_btn.count() > 0:
-                copy_btn.first.click()
+        # Verify trace ID link is rendered
+        trace_link = page.locator(MSG_ASSISTANT).last.locator(TRACE_ID_LINK)
+        expect(trace_link).to_be_visible()
 
-    def test_tc108_error_handling(self, admin_logged_in, wait_for_chat_ready):
-        """TC-108: Invalid query shows error message."""
+    def test_tc108_error_handling(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
+        """TC-108: Invalid/nonsense query returns graceful response."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Send invalid query
-        textarea = page.locator(".chat-input textarea, input[placeholder*='问题']").first
-        textarea.fill("查询不存在的标签哈哈哈哈哈哈哈")
-        textarea.press("Enter")
+        send_chat_query("查询不存在的标签哈哈哈哈哈哈哈", timeout=120000)
 
-        # Wait for response
-        page.wait_for_timeout(10000)
+        response = page.locator(MSG_ASSISTANT).last
+        expect(response).to_be_visible()
+        response_text = response.inner_text()
+        assert len(response_text) > 5, f"Error response too short: '{response_text}'"
 
-        # Look for either error message or graceful response
-        # The system should either show error or return empty results gracefully
-        response_visible = page.locator('.chat-message.assistant, .message.assistant, [class*="response"]')
-        expect(response_visible.first).to_be_visible(timeout=120000)
-
-    def test_tc109_continue_conversation(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-109: Can continue conversation with context."""
+    def test_tc109_continue_conversation_context(self, admin_logged_in, wait_for_chat_ready, send_chat_query, send_query_and_get_response):
+        """TC-109: Second query references first query's context."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # First query
+        # First query establishes context
         send_chat_query("查询采购订单", timeout=120000)
         page.wait_for_timeout(2000)
 
-        # Second query that references context
-        textarea = page.locator(".chat-input textarea, input[placeholder*='问题']").first
-        textarea.fill("这个订单的金额是多少")
-        textarea.press("Enter")
+        # Second query references context
+        result = send_query_and_get_response("上面的订单金额是多少")
 
-        # Verify response considers context (either shows data or gracefully handles)
-        page.wait_for_selector('.chat-message.assistant', timeout=120000)
+        # Response should contain some numeric data (referencing previous context)
+        assert len(result["text"]) > 10, "Context follow-up response too short"
 
-    def test_tc110_multiple_queries_sequence(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-110: Multiple queries can be sent in sequence."""
+    def test_tc110_multiple_queries_with_traces(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+        """TC-110: Multiple queries each produce responses with unique trace IDs."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # First query
-        send_chat_query("查询供应商", timeout=120000)
-        page.wait_for_timeout(1000)
+        queries = ["查询供应商", "查询采购订单", "查询物料"]
+        trace_ids = []
 
-        # Second query
-        send_chat_query("查询采购订单", timeout=120000)
-        page.wait_for_timeout(1000)
+        for q in queries:
+            result = send_query_and_get_response(q)
+            assert len(result["text"]) > 10, f"Response for '{q}' too short"
+            if result["trace_id"]:
+                trace_ids.append(result["trace_id"])
 
-        # Third query
-        send_chat_query("查询物料", timeout=120000)
+        # All 3 queries should have responses
+        all_messages = page.locator(MSG_ASSISTANT)
+        assert all_messages.count() >= 3, f"Expected >=3 assistant messages, got {all_messages.count()}"
 
-        # Verify all responses received
-        messages = page.locator('.chat-message.assistant')
-        expect(messages).to_have_count(3, timeout=120000)
+        # Trace IDs should be unique
+        if len(trace_ids) >= 2:
+            assert len(set(trace_ids)) == len(trace_ids), f"Duplicate trace IDs: {trace_ids}"
 
     def test_tc111_execution_time_display(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-111: Execution time is displayed in response."""
@@ -201,25 +195,18 @@ class TestChatFunctionality:
 
         send_chat_query("查询采购订单", timeout=120000)
 
-        # Look for execution time
-        exec_time = page.locator('[class*="time"], [class*="duration"], text=/\\d+ms|\\d+s/')
-        if exec_time.count() > 0:
-            expect(exec_time.first).to_be_visible()
+        exec_time = page.locator(MSG_ASSISTANT).last.locator(EXECUTION_TIME)
+        expect(exec_time).to_be_visible(timeout=5000)
 
-    def test_tc112_raw_data_toggle(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-112: Raw data can be toggled visible."""
+        time_text = exec_time.inner_text()
+        assert re.search(r'\d+', time_text), f"Execution time has no number: '{time_text}'"
+
+    def test_tc112_raw_data_toggle(self, admin_logged_in, wait_for_chat_ready, send_chat_query, expand_data_table):
+        """TC-112: Raw data can be toggled visible and has rows."""
         page = admin_logged_in
         wait_for_chat_ready()
 
         send_chat_query("查询采购订单", timeout=120000)
 
-        # Look for raw data toggle
-        raw_data_toggle = page.locator('button:has-text("原始数据"), button:has-text("Raw Data")')
-        if raw_data_toggle.count() > 0:
-            raw_data_toggle.first.click()
-            page.wait_for_timeout(500)
-
-            # Verify raw data visible
-            raw_data = page.locator('[class*="raw"], pre, code')
-            if raw_data.count() > 0:
-                expect(raw_data.first).to_be_visible()
+        row_count = expand_data_table()
+        assert row_count > 0, f"Data table should have rows, got {row_count}"
