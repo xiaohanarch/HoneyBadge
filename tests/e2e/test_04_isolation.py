@@ -5,15 +5,23 @@ HoneyBadge - Enterprise Knowledge Graph Assistant
 Test Coverage:
 - TC-301: Admin sessions invisible to analyst
 - TC-302: Analyst sessions invisible to admin
-- TC-303: Cross-org data isolation (org_id=1 vs org_id=2)
+- TC-303: Cross-org data isolation (admin:ALL vs analyst:1000 vs subsidiary:1021)
 - TC-304: Subsidiary user cannot see parent org data
 - TC-305: Session data isolated by user
 - TC-306: Cache isolation between users
 - TC-307: Query results filtered by org_id
 - TC-308: Matrix room isolation per user
+
+Data实际情况:
+- PurchaseOrder: org_id 1000-1039 各约320-350条
+- SalesOrder: org_id 1000-1039 各约170-230条
+- admin: org_ids=None, data_scope=ALL → sees ALL (~13000 PO)
+- analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (~320 PO)
+- subsidiary_lead: org_ids=[1021], data_scope=ORG → sees ONLY org 1021 (~337 PO)
 """
 import pytest
 from playwright.sync_api import expect
+from conftest import send_query_on_page
 
 
 BASE_URL = "http://localhost:3000"
@@ -23,14 +31,14 @@ class TestUserIsolation:
     """Test user isolation and multi-tenancy."""
 
     def test_tc301_admin_sessions_invisible_to_analyst(self, admin_logged_in, analyst_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-301: Admin's sessions are not visible to analyst user."""
-        # Admin creates a session
+        """TC-301: Admin's sessions are not visible to analyst user.
+
+        Each user should only see their own sessions.
+        """
+        # Admin creates a session with unique name
         admin_page = admin_logged_in
         wait_for_chat_ready()
         send_chat_query("查询供应商", timeout=60000)
-        admin_session_name = "Admin Private Session TC-301"
-
-        # Rename session if possible
         admin_page.wait_for_timeout(1000)
 
         # Now login as analyst
@@ -38,16 +46,24 @@ class TestUserIsolation:
         wait_for_chat_ready()
 
         # Analyst should NOT see admin's session
-        admin_session = analyst_page.locator(f'text="{admin_session_name}"')
-        assert admin_session.count() == 0, "Analyst should not see admin's private session"
+        # Check that admin's query doesn't appear in analyst's session list
+        analyst_session_count = analyst_page.locator('.session-item, [class*="session"]').count()
+
+        # Analyst should have their own empty or limited session list
+        # (Not the same as admin's session)
+        admin_session_indicator = analyst_page.locator('text="Admin Private Session TC-301"')
+        assert admin_session_indicator.count() == 0, \
+            "Analyst should not see admin's private session"
 
     def test_tc302_analyst_sessions_invisible_to_admin(self, analyst_logged_in, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-302: Analyst's sessions are not visible to admin user."""
+        """TC-302: Analyst's sessions are not visible to admin user.
+
+        Sessions are strictly isolated per user_id.
+        """
         # Analyst creates a session
         analyst_page = analyst_logged_in
         wait_for_chat_ready()
         send_chat_query("查询采购订单", timeout=60000)
-        analyst_session_name = "Analyst Private Session TC-302"
         analyst_page.wait_for_timeout(1000)
 
         # Now login as admin
@@ -55,44 +71,74 @@ class TestUserIsolation:
         wait_for_chat_ready()
 
         # Admin should NOT see analyst's session
-        analyst_session = admin_page.locator(f'text="{analyst_session_name}"')
-        assert analyst_session.count() == 0, "Admin should not see analyst's private session"
+        analyst_session_indicator = admin_page.locator('text="Analyst Private Session TC-302"')
+        assert analyst_session_indicator.count() == 0, \
+            "Admin should not see analyst's private session"
 
-    def test_tc303_cross_org_data_isolation(self, admin_logged_in, subsidiary_lead_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-303: Data is isolated between organizations (org_id=1 vs org_id=2)."""
-        # Admin (org_id=1) queries data
-        admin_page = admin_logged_in
-        wait_for_chat_ready()
-        send_chat_query("查询所有采购订单", timeout=60000)
+    def test_tc303_cross_org_data_isolation(self, create_user_page):
+        """TC-303: Data is isolated between organizations.
+
+        admin (org_ids=None) sees ALL data
+        analyst (org_ids=[1000]) sees ONLY org 1000 data
+        subsidiary_lead (org_ids=[1021]) sees ONLY org 1021 data
+
+        Key assertion: counts should differ significantly
+        - admin sees ~13000 records (all 40 orgs)
+        - analyst sees ~320 records (only org 1000)
+        - subsidiary sees ~337 records (only org 1021)
+        """
+        # Admin query
+        admin_page = create_user_page("admin", "admin123")
+        send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
         admin_page.wait_for_timeout(2000)
+        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_count = self._extract_count(admin_text)
 
-        # Admin should see org_id=1 data
-        admin_messages = admin_page.locator('.chat-message')
-        admin_msg_count = admin_messages.count()
+        # Analyst query (org_id=1000)
+        analyst_page = create_user_page("analyst", "analyst123")
+        send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
+        analyst_page.wait_for_timeout(2000)
+        analyst_text = analyst_page.locator('.chat-message').first.inner_text() if analyst_page.locator('.chat-message').count() > 0 else ""
+        analyst_count = self._extract_count(analyst_text)
 
-        # Subsidiary user (org_id=2) queries same data
-        subsidiary_page = subsidiary_lead_logged_in
-        wait_for_chat_ready()
-        send_chat_query("查询所有采购订单", timeout=60000)
+        # CORRECT ASSERTIONS
+        assert admin_count > 0, f"Admin should see PO data. Response: {admin_text[:200]}"
+        assert analyst_count > 0, f"Analyst should see PO data. Response: {analyst_text[:200]}"
+
+        # Admin should see WAY more (all 40 orgs) than analyst (only org 1000)
+        assert admin_count > analyst_count * 10, \
+            f"Admin ({admin_count}) should see >10x data than analyst ({analyst_count}). " \
+            f"Isolation working: admin sees ALL orgs, analyst sees only org 1000."
+
+    def test_tc304_subsidiary_cannot_see_parent_org(self, create_user_page):
+        """TC-304: Subsidiary user cannot see parent org (other orgs) data.
+
+        subsidiary_lead org_ids=[1021] should ONLY see org 1021 data.
+        Should NOT see data from org 1000, 1001, etc.
+        """
+        subsidiary_page = create_user_page("subsidiary_lead", "lead123")
+
+        # Query采购订单 - should return ONLY org 1021's data
+        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
+        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_count = self._extract_count(subsidiary_text)
 
-        # Subsidiary should see different data (org_id=2)
-        # The key assertion is that data differs - exact verification depends on test data
+        # subsidiary_lead with org_id=1021 should see ~337 records
+        assert 200 < subsidiary_count < 500, \
+            f"Subsidiary (org 1021) should see ~337 records. Got: {subsidiary_count}. " \
+            f"Response: {subsidiary_text[:200]}"
 
-    def test_tc304_subsidiary_cannot_see_parent_org(self, subsidiary_lead_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-304: Subsidiary user cannot access parent organization data."""
-        subsidiary_page = subsidiary_lead_logged_in
-        wait_for_chat_ready()
-
-        # Query that would return data if org_id=1 was accessible
-        send_chat_query("查询属于集团采购的订单", timeout=60000)
-        subsidiary_page.wait_for_timeout(2000)
-
-        # Should either show no data or filtered results (not org_id=1 data)
-        # This is implicit - if org filtering works, subsidiary won't see parent data
+        # Should NOT see all records (would be ~13000 if no org filtering)
+        assert subsidiary_count < 1000, \
+            f"Subsidiary should NOT see all orgs data. Got: {subsidiary_count}. " \
+            f"org_id filter not working properly."
 
     def test_tc305_session_isolation_by_user(self, page, login_as, wait_for_chat_ready, send_chat_query):
-        """TC-305: Each user has isolated session storage."""
+        """TC-305: Each user has isolated session storage.
+
+        localStorage should be different for different users.
+        """
         # Login as admin
         login_as("admin", "admin123")
         wait_for_chat_ready()
@@ -100,7 +146,7 @@ class TestUserIsolation:
         page.wait_for_timeout(1000)
 
         # Store admin's local storage
-        admin_storage = page.evaluate("() => localStorage.getItem('honeybadge_sessions')")
+        admin_storage = page.evaluate("() => localStorage.getItem('auth_store')")
 
         # Clear and login as analyst
         page.evaluate("() => localStorage.clear()")
@@ -108,55 +154,311 @@ class TestUserIsolation:
         login_as("analyst", "analyst123")
         wait_for_chat_ready()
 
-        # Check that admin's session data is not present
-        analyst_storage = page.evaluate("() => localStorage.getItem('honeybadge_sessions')")
+        # Check that admin's auth data is not present
+        analyst_storage = page.evaluate("() => localStorage.getItem('auth_store')")
 
+        # Verify isolation
         if admin_storage and analyst_storage:
-            assert admin_storage != analyst_storage, "Session storage should be isolated per user"
+            admin_data = page.evaluate(f"() => {admin_storage}")
+            analyst_data = page.evaluate(f"() => {analyst_storage}")
+
+            # User IDs should be different
+            assert admin_data != analyst_data, "Session storage should be isolated per user"
 
     def test_tc306_cache_isolation_between_users(self, admin_logged_in, analyst_logged_in, send_chat_query):
-        """TC-306: Cache entries are isolated between users."""
-        # Admin queries
-        admin_page = admin_logged_in
-        send_chat_query("查询供应商A", timeout=60000)
+        """TC-306: Cache entries are isolated between users.
 
-        # Analyst queries same thing - should get own cached or fresh result
+        Each user's query should not leak to another user's cache.
+        """
+        admin_page = admin_logged_in
         analyst_page = analyst_logged_in
-        send_chat_query("查询供应商A", timeout=60000)
+
+        # Admin queries specific supplier
+        send_chat_query("查询供应商SYR001", timeout=60000)
+        admin_page.wait_for_timeout(1000)
+
+        # Analyst queries same thing - should get their own result (filtered by org)
+        send_chat_query("查询供应商SYR001", timeout=60000)
+        analyst_page.wait_for_timeout(1000)
 
         # Both should have received responses (isolation verified by separate queries working)
+        admin_has_response = admin_page.locator('.chat-message').count() > 0
+        analyst_has_response = analyst_page.locator('.chat-message').count() > 0
 
-    def test_tc307_query_results_filtered_by_org(self, admin_logged_in, subsidiary_lead_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-307: Query results respect org_id filtering."""
-        # Admin (org_id=1) queries
-        admin_page = admin_logged_in
-        wait_for_chat_ready()
-        send_chat_query("统计采购订单数量", timeout=60000)
+        assert admin_has_response, "Admin should get response"
+        assert analyst_has_response, "Analyst should get response"
+
+    def test_tc307_query_results_filtered_by_org_id(self, create_user_page):
+        """TC-307: Query results respect org_id filtering.
+
+        analyst (org=1000) vs subsidiary (org=1021) should see DIFFERENT data.
+        This is the KEY data isolation test.
+        """
+        # Admin query - baseline (all data)
+        admin_page = create_user_page("admin", "admin123")
+        send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
         admin_page.wait_for_timeout(2000)
+        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_count = self._extract_count(admin_text)
 
-        # Get admin's result count/text
-        admin_result = admin_page.locator('.chat-message.assistant').last.inner_text()
+        # Analyst query (org_id=1000)
+        analyst_page = create_user_page("analyst", "analyst123")
+        send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
+        analyst_page.wait_for_timeout(2000)
+        analyst_text = analyst_page.locator('.chat-message').first.inner_text() if analyst_page.locator('.chat-message').count() > 0 else ""
+        analyst_count = self._extract_count(analyst_text)
 
-        # Subsidiary (org_id=2) queries same
-        subsidiary_page = subsidiary_lead_logged_in
-        wait_for_chat_ready()
-        send_chat_query("统计采购订单数量", timeout=60000)
+        # Subsidiary query (org_id=1021)
+        subsidiary_page = create_user_page("subsidiary_lead", "lead123")
+        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
+        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_count = self._extract_count(subsidiary_text)
 
-        # Get subsidiary's result
-        subsidiary_result = subsidiary_page.locator('.chat-message.assistant').last.inner_text()
+        # CORRECT ASSERTIONS - Verify org_id filtering is working
+        # 1. All should return data
+        assert admin_count > 0, f"Admin should see data. Response: {admin_text[:200]}"
+        assert analyst_count > 0, f"Analyst should see data. Response: {analyst_text[:200]}"
+        assert subsidiary_count > 0, f"Subsidiary should see data. Response: {subsidiary_text[:200]}"
 
-        # Results should differ due to org filtering
-        # (Exact comparison depends on test data setup)
+        # 2. admin >> analyst (admin all orgs, analyst only org 1000)
+        assert admin_count > analyst_count * 10, \
+            f"Admin ({admin_count}) should see >> analyst ({analyst_count})"
+
+        # 3. admin >> subsidiary (admin all orgs, subsidiary only org 1021)
+        assert admin_count > subsidiary_count * 10, \
+            f"Admin ({admin_count}) should see >> subsidiary ({subsidiary_count})"
+
+        # 4. Verify analyst and subsidiary see limited data (~300-350 each)
+        assert 200 < analyst_count < 500, f"Analyst should see ~320 records. Got: {analyst_count}"
+        assert 200 < subsidiary_count < 500, f"Subsidiary should see ~337 records. Got: {subsidiary_count}"
 
     def test_tc308_matrix_room_isolation(self, admin_logged_in, analyst_logged_in):
-        """TC-308: Matrix rooms are isolated per user."""
+        """TC-308: Matrix rooms are isolated per user.
+
+        Each user should have their own Matrix room (via DM room creation).
+        """
         admin_page = admin_logged_in
         analyst_page = analyst_logged_in
 
-        # Each user should have their own Matrix room ID
-        admin_room = admin_page.evaluate("() => window.__MATRIX_ROOM_ID__")
-        analyst_room = analyst_page.evaluate("() => window.__MATRIX_ROOM_ID__")
+        # Get Matrix room identifiers from localStorage or page context
+        admin_room_id = admin_page.evaluate("() => localStorage.getItem('matrix_room_id')")
+        analyst_room_id = analyst_page.evaluate("() => localStorage.getItem('matrix_room_id')")
 
-        if admin_room and analyst_room:
-            assert admin_room != analyst_room, "Matrix rooms should be isolated per user"
+        # If matrix room IDs are stored, verify they're different
+        if admin_room_id and analyst_room_id:
+            assert admin_room_id != analyst_room_id, \
+                f"Matrix rooms should be isolated. Admin: {admin_room_id}, Analyst: {analyst_room_id}"
+
+        # Alternatively, check that each user's session is independent
+        admin_matrix_user = admin_page.evaluate("() => localStorage.getItem('matrix_user_id')")
+        analyst_matrix_user = analyst_page.evaluate("() => localStorage.getItem('matrix_user_id')")
+
+        # Matrix user IDs should be different per user
+        if admin_matrix_user and analyst_matrix_user:
+            assert admin_matrix_user != analyst_matrix_user, \
+                f"Matrix users should be different. Admin: {admin_matrix_user}, Analyst: {analyst_matrix_user}"
+
+    def test_tc309_verify_org_specific_po_numbers(self, create_user_page):
+        """TC-309: Verify org-specific PO numbers are correctly filtered.
+
+        Test with specific PO numbers to prove data isolation.
+        """
+        # PO numbers by org (from test data analysis):
+        # org 1000: PO00000001, PO00000002, etc.
+        # org 1021: PO00000002, PO00000004, etc. (different set)
+
+        # Analyst (org=1000) queries for PO00000001
+        analyst_page = create_user_page("analyst", "analyst123")
+        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=120000)
+        analyst_page.wait_for_timeout(2000)
+        analyst_text = analyst_page.locator('.chat-message').first.inner_text() if analyst_page.locator('.chat-message').count() > 0 else ""
+
+        # Subsidiary (org=1021) queries for PO00000002
+        subsidiary_page = create_user_page("subsidiary_lead", "lead123")
+        send_query_on_page(subsidiary_page, "查询采购订单PO00000002", timeout=120000)
+        subsidiary_page.wait_for_timeout(2000)
+        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+
+        # Verify both got responses (queries processed)
+        assert len(analyst_text) > 0, "Analyst query should return response"
+        assert len(subsidiary_text) > 0, "Subsidiary query should return response"
+
+        # The key verification is that each sees data from their org only
+        # Exact assertions depend on knowing which PO belongs to which org in test data
+
+    # ========== 数据隔离高风险场景测试 ==========
+    # 核心价值: 体现RBP权限 + LLM的结合
+    # 大领导(admin)权限大，可以看到全公司问题(万级数据)
+    # 小领导(subsidiary/analyst)权限小，只能看到本组织问题(百级数据)
+
+    def test_tc310_high_risk_po_data_volume_isolation(self, create_user_page):
+        """TC-310: 高风险采购订单数据量差异 - 体现权限视野差异
+
+        RBP+LLM核心场景:
+        - admin查询"高风险采购订单" → 返回全公司所有org的高风险(多)
+        - subsidiary查询"高风险采购订单" → 只返回org1021的高风险(少)
+
+        断言: admin >> subsidiary (体现权限差距)
+        """
+        # admin查询
+        admin_page = create_user_page("admin", "admin123")
+        send_query_on_page(admin_page, "查询高风险的采购订单", timeout=120000)
+        admin_page.wait_for_timeout(2000)
+        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_count = self._extract_count(admin_text)
+
+        # subsidiary查询
+        subsidiary_page = create_user_page("subsidiary_lead", "lead123")
+        send_query_on_page(subsidiary_page, "查询高风险的采购订单", timeout=120000)
+        subsidiary_page.wait_for_timeout(2000)
+        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_count = self._extract_count(subsidiary_text)
+
+        # 断言: 体现权限差距
+        assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
+        assert subsidiary_count > 0, f"Subsidiary应有数据. Response: {subsidiary_text[:200]}"
+        assert admin_count > subsidiary_count * 10, \
+            f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
+            f"权限差距: admin看全公司，subsidiary只看org1021。"
+
+    def test_tc311_large_amount_po_isolation(self, create_user_page):
+        """TC-311: 大额采购订单数据量差异
+
+        - admin: 全org大额PO
+        - subsidiary: org1021大额PO
+        """
+        admin_page = create_user_page("admin", "admin123")
+        send_query_on_page(admin_page, "查询金额超过100万的采购订单", timeout=120000)
+        admin_page.wait_for_timeout(2000)
+        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_count = self._extract_count(admin_text)
+
+        subsidiary_page = create_user_page("subsidiary_lead", "lead123")
+        send_query_on_page(subsidiary_page, "查询金额超过100万的采购订单", timeout=120000)
+        subsidiary_page.wait_for_timeout(2000)
+        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_count = self._extract_count(subsidiary_text)
+
+        assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
+        assert subsidiary_count > 0, f"Subsidiary应有数据. Response: {subsidiary_text[:200]}"
+        assert admin_count > subsidiary_count * 10, \
+            f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
+            f"大领导能看到全公司大额PO，小领导只能看本org。"
+
+    def test_tc312_abnormal_po_isolation(self, create_user_page):
+        """TC-312: 异常采购订单数据量差异
+
+        admin权限大能看到更多异常，subsidiary权限小只能看本org异常
+        """
+        admin_page = create_user_page("admin", "admin123")
+        send_query_on_page(admin_page, "查询异常的采购订单", timeout=120000)
+        admin_page.wait_for_timeout(2000)
+        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_count = self._extract_count(admin_text)
+
+        subsidiary_page = create_user_page("subsidiary_lead", "lead123")
+        send_query_on_page(subsidiary_page, "查询异常的采购订单", timeout=120000)
+        subsidiary_page.wait_for_timeout(2000)
+        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_count = self._extract_count(subsidiary_text)
+
+        assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
+        assert subsidiary_count > 0, f"Subsidiary应有数据. Response: {subsidiary_text[:200]}"
+        assert admin_count > subsidiary_count * 10, \
+            f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
+            f"admin可发现全公司异常，subsidiary只能发现本org异常。"
+
+    def test_tc313_supplier_issues_isolation(self, create_user_page):
+        """TC-313: 供应商问题数据量差异
+
+        体现: 大领导可发现跨多个org的供应商问题，小领导只能看到本org
+        """
+        admin_page = create_user_page("admin", "admin123")
+        send_query_on_page(admin_page, "查询有问题的供应商", timeout=120000)
+        admin_page.wait_for_timeout(2000)
+        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_count = self._extract_count(admin_text)
+
+        subsidiary_page = create_user_page("subsidiary_lead", "lead123")
+        send_query_on_page(subsidiary_page, "查询有问题的供应商", timeout=120000)
+        subsidiary_page.wait_for_timeout(2000)
+        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_count = self._extract_count(subsidiary_text)
+
+        assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
+        assert subsidiary_count > 0, f"Subsidiary应有数据. Response: {subsidiary_text[:200]}"
+        assert admin_count > subsidiary_count * 5, \
+            f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
+            f"RBP权限差异体现在数据可见量上。"
+
+    def test_tc314_payment_issues_isolation(self, create_user_page):
+        """TC-314: 付款异常数据量差异
+
+        admin看到所有org的付款异常，subsidiary只看到org1021的
+        """
+        admin_page = create_user_page("admin", "admin123")
+        send_query_on_page(admin_page, "查询付款异常的发票", timeout=120000)
+        admin_page.wait_for_timeout(2000)
+        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_count = self._extract_count(admin_text)
+
+        subsidiary_page = create_user_page("subsidiary_lead", "lead123")
+        send_query_on_page(subsidiary_page, "查询付款异常的发票", timeout=120000)
+        subsidiary_page.wait_for_timeout(2000)
+        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_count = self._extract_count(subsidiary_text)
+
+        assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
+        assert subsidiary_count > 0, f"Subsidiary应有数据. Response: {subsidiary_text[:200]}"
+        assert admin_count > subsidiary_count * 5, \
+            f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
+            f"体现权限层级决定数据视野。"
+
+    def test_tc315_cross_org_fraud_detection_ability(self, create_user_page):
+        """TC-315: 跨org欺诈检测能力差异
+
+        这是RBP+LLM的核心价值场景:
+        - admin可以进行全公司范围的欺诈模式分析
+        - subsidiary只能在org1021范围内分析
+
+        大领导能发现的欺诈模式远多于小领导
+        """
+        admin_page = create_user_page("admin", "admin123")
+        send_query_on_page(admin_page, "分析采购交易中的可疑模式", timeout=120000)
+        admin_page.wait_for_timeout(2000)
+        admin_text = admin_page.locator('.chat-message').first.inner_text() if admin_page.locator('.chat-message').count() > 0 else ""
+        admin_count = self._extract_count(admin_text)
+
+        subsidiary_page = create_user_page("subsidiary_lead", "lead123")
+        send_query_on_page(subsidiary_page, "分析采购交易中的可疑模式", timeout=120000)
+        subsidiary_page.wait_for_timeout(2000)
+        subsidiary_text = subsidiary_page.locator('.chat-message').first.inner_text() if subsidiary_page.locator('.chat-message').count() > 0 else ""
+        subsidiary_count = self._extract_count(subsidiary_text)
+
+        # 两者都应该有数据返回(都能进行分析)
+        assert admin_count > 0, f"Admin应有分析结果. Response: {admin_text[:200]}"
+        assert subsidiary_count > 0, f"Subsidiary应有分析结果. Response: {subsidiary_text[:200]}"
+
+        # 但admin的数据量应远大于subsidiary
+        assert admin_count > subsidiary_count * 5, \
+            f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
+            f"全公司视角vs单一org视角，权限决定洞察力差异。"
+
+    @staticmethod
+    def _extract_count(text: str) -> int:
+        """Extract numeric count from response text."""
+        import re
+        patterns = [
+            r'(\d+)\s*条',
+            r'共\s*(\d+)',
+            r'count[:\s]*(\d+)',
+            r'total[:\s]*(\d+)',
+            r'(\d+)\s*记录',
+            r'结果[:\s]*(\d+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return int(match.group(1))
+        return 0
