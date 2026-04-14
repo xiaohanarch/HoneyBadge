@@ -3,11 +3,11 @@
 Provides demo users, password verification, and JWT token creation/decoding.
 
 Demo credentials (for development/testing only):
-  - admin             / admin123   (系统管理员,  roles=["admin"],   org_id=1)
-  - analyst           / analyst123 (数据分析师,  roles=["analyst"], org_id=1)
-  - auditor           / auditor123 (审计员,      roles=["auditor"], org_id=1)
-  - procurement_lead  / lead123    (采购部门领导, roles=["analyst"], org_id=1)
-  - subsidiary_lead   / lead123    (子公司领导,  roles=["analyst"], org_id=2)
+  - admin             / admin123   (系统管理员,  roles=["admin"],   org_id=1000)
+  - analyst           / analyst123 (数据分析师,  roles=["analyst"], org_id=1000)
+  - auditor           / auditor123 (审计员,      roles=["auditor"], org_id=1000)
+  - procurement_lead  / lead123    (采购部门领导, roles=["analyst"], org_id=1000)
+  - subsidiary_lead   / lead123    (子公司领导,  roles=["analyst"], org_id=1021)
 
 In production, replace DEMO_USERS with a real user-store lookup and use
 strong secrets loaded from environment variables via ServerConfig.
@@ -39,7 +39,7 @@ DEMO_USERS: dict[str, dict[str, Any]] = {
         "password_hash": pwd_context.hash("admin123"),
         "display_name": "系统管理员",
         "roles": ["admin"],
-        "org_id": 1,
+        "org_id": 1000,
     },
     "analyst": {
         "id": "analyst",
@@ -47,7 +47,7 @@ DEMO_USERS: dict[str, dict[str, Any]] = {
         "password_hash": pwd_context.hash("analyst123"),
         "display_name": "数据分析师",
         "roles": ["analyst"],
-        "org_id": 1,
+        "org_id": 1000,
     },
     "auditor": {
         "id": "auditor",
@@ -55,7 +55,7 @@ DEMO_USERS: dict[str, dict[str, Any]] = {
         "password_hash": pwd_context.hash("auditor123"),
         "display_name": "审计员",
         "roles": ["auditor"],
-        "org_id": 1,
+        "org_id": 1000,
     },
     "procurement_lead": {
         "id": "procurement_lead",
@@ -63,7 +63,7 @@ DEMO_USERS: dict[str, dict[str, Any]] = {
         "password_hash": pwd_context.hash("lead123"),
         "display_name": "采购部门领导",
         "roles": ["analyst"],
-        "org_id": 1,
+        "org_id": 1000,
     },
     "subsidiary_lead": {
         "id": "subsidiary_lead",
@@ -71,7 +71,7 @@ DEMO_USERS: dict[str, dict[str, Any]] = {
         "password_hash": pwd_context.hash("lead123"),
         "display_name": "子公司领导",
         "roles": ["analyst"],
-        "org_id": 2,
+        "org_id": 1021,
     },
 }
 
