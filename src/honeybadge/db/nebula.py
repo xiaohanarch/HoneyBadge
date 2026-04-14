@@ -108,7 +108,7 @@ class NebulaGraphClient:
         import asyncio
 
         if not self._pool:
-            raise NebulaGraphError("Not connected to NebulaGraph")
+            await self.connect()
 
         loop = asyncio.get_running_loop()
         start_time = time.time()

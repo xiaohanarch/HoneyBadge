@@ -256,6 +256,9 @@ class DataRegistry:
     receipts: list[str] = field(default_factory=list)
     invoices: list[str] = field(default_factory=list)
     payments: list[str] = field(default_factory=list)
+    payment_batches: list[str] = field(default_factory=list)
+    # (pay_vid, payment_date, org_id, amount, currency) for batch grouping
+    payment_details: list[tuple] = field(default_factory=list)
 
     # OTC
     sales_orders: list[str] = field(default_factory=list)
@@ -414,7 +417,7 @@ class TestDataGenerator:
         print(f"ETL Batch ID: {self.etl_batch_id}")
         print()
 
-        print("[1/15] Generating master data (Organizations, Employees, Warehouses)...")
+        print("[1/16] Generating master data (Organizations, Employees, Warehouses)...")
         self._generate_organizations()
         self._generate_employees()
         self._generate_warehouses()
@@ -422,51 +425,54 @@ class TestDataGenerator:
         self._generate_currencies()
         self._generate_uoms()
 
-        print("[2/15] Generating Items and BOMs...")
+        print("[2/16] Generating Items and BOMs...")
         self._generate_items()
         self._generate_boms()
 
-        print("[3/15] Generating Suppliers...")
+        print("[3/16] Generating Suppliers...")
         self._generate_suppliers()
 
-        print("[4/15] Generating Customers...")
+        print("[4/16] Generating Customers...")
         self._generate_customers()
 
-        print("[5/15] Generating Contracts...")
+        print("[5/16] Generating Contracts...")
         self._generate_contracts()
 
-        print("[5/15] Generating Purchase Requisitions...")
+        print("[6/16] Generating Purchase Requisitions...")
         self._generate_purchase_requisitions()
 
-        print("[6/15] Generating Purchase Orders...")
+        print("[7/16] Generating Purchase Orders...")
         self._generate_purchase_orders()
 
-        print("[7/15] Generating Receipts...")
+        print("[8/16] Generating Receipts...")
         self._generate_receipts()
 
-        print("[8/15] Generating Invoices (with 5% three-way match failures)...")
+        print("[9/16] Generating Invoices (with 5% three-way match failures)...")
         self._generate_invoices()
 
-        print("[9/15] Generating Payments...")
+        print("[9/16] Generating Payments...")
         self._generate_payments()
 
-        print("[10/15] Generating Sales Orders...")
+        print("[10/16] Generating Payment Batches...")
+        self._generate_payment_batches()
+
+        print("[11/16] Generating Sales Orders...")
         self._generate_sales_orders()
 
-        print("[11/15] Generating Shipments...")
+        print("[12/16] Generating Shipments...")
         self._generate_shipments()
 
-        print("[12/15] Generating AR Invoices...")
+        print("[13/16] Generating AR Invoices...")
         self._generate_ar_invoices()
 
-        print("[13/15] Generating AR Receipts...")
+        print("[14/16] Generating AR Receipts...")
         self._generate_ar_receipts()
 
-        print("[14/15] Generating GL Journal Entries and XLA Events...")
+        print("[15/16] Generating GL Journal Entries and XLA Events...")
         self._generate_gl_journal_entries()
         self._generate_xla_events()
 
-        print("[15/15] Generating Approval Records...")
+        print("[16/16] Generating Approval Records...")
         self._generate_approval_records()
 
         # Final flush
@@ -490,6 +496,7 @@ class TestDataGenerator:
         print(f"Receipts:         {len(self.registry.receipts)}")
         print(f"Invoices:         {len(self.registry.invoices)}")
         print(f"Payments:         {len(self.registry.payments)}")
+        print(f"Payment Batches:  {len(self.registry.payment_batches)}")
         print(f"Sales Orders:     {len(self.registry.sales_orders)}")
         print(f"Shipments:        {len(self.registry.shipments)}")
         print(f"AR Invoices:      {len(self.registry.ar_invoices)}")
@@ -590,7 +597,7 @@ class TestDataGenerator:
             self.writer.write_edge(
                 "BELONGS_TO_ORG",
                 emp_vid,
-                org_code,
+                vid(VID_PREFIX_ORG, org_code),
                 {"org_id": props["org_id"], "dept_id": props["dept_id"]}
             )
 
@@ -1556,6 +1563,9 @@ class TestDataGenerator:
             pay_vid = vid(VID_PREFIX_PAYMENT, payment_number)
             self.writer.write_vertex("Payment", pay_vid, props)
             self.registry.payments.append(pay_vid)
+            self.registry.payment_details.append(
+                (pay_vid, payment_date, org_id, props["amount"], props["currency"])
+            )
 
             # Write edges
             self.writer.write_edge(
@@ -1571,6 +1581,56 @@ class TestDataGenerator:
                     pay_vid,
                     inv_vid,
                     {"paid_amount": round(props["amount"] / len(linked_invoices), 2), "org_id": org_id, "dept_id": dept_id}
+                )
+
+    def _generate_payment_batches(self):
+        """Generate payment batches by grouping payments by (week, org_id, currency)."""
+        from collections import defaultdict
+
+        # Group payments by (iso_week, org_id, currency)
+        groups = defaultdict(list)
+        for pay_vid, pay_date, org_id, amount, currency in self.registry.payment_details:
+            week_key = pay_date.strftime("%Y-W%W")
+            groups[(week_key, org_id, currency)].append((pay_vid, amount))
+
+        batch_num = 0
+        for (week_key, org_id, currency), pay_list in sorted(groups.items()):
+            batch_num += 1
+            batch_number = f"PB{str(batch_num).zfill(6)}"
+            total_amount = sum(amt for _, amt in pay_list)
+            dept_id = 1000 + random.randint(0, 119)
+
+            # Parse week_key back to a date for batch_date
+            year, week = week_key.split("-W")
+            batch_date = datetime.strptime(f"{year} {week} 1", "%Y %W %w")
+
+            props = {
+                "batch_number": batch_number,
+                "batch_date": batch_date,
+                "total_amount": round(total_amount, 2),
+                "payment_count": len(pay_list),
+                "status": "COMPLETED",
+                "org_id": org_id,
+                "dept_id": dept_id,
+                "data_scope": "FULL",
+                "created_at": batch_date,
+                "updated_at": datetime.now(),
+                "etl_batch_id": self.etl_batch_id,
+                "source_system": self.source_system,
+                "is_active": True,
+            }
+
+            batch_vid = vid(VID_PREFIX_PAYMENT_BATCH, batch_number)
+            self.writer.write_vertex("PaymentBatch", batch_vid, props)
+            self.registry.payment_batches.append(batch_vid)
+
+            # Write CONTAINS_PAYMENT edges
+            for pay_vid, _ in pay_list:
+                self.writer.write_edge(
+                    "CONTAINS_PAYMENT",
+                    batch_vid,
+                    pay_vid,
+                    {"org_id": org_id, "dept_id": dept_id}
                 )
 
     def _generate_sales_orders(self):
@@ -2259,7 +2319,7 @@ Examples:
     parser.add_argument(
         "--output-dir", "-o",
         type=Path,
-        default=Path("D:/dev/HoneyBadge/.worktrees/phase1-implementation/deploy/test-data"),
+        default=Path(__file__).resolve().parent.parent / "deploy" / "test-data",
         help="Output directory for CSV files (default: deploy/test-data)"
     )
     parser.add_argument(

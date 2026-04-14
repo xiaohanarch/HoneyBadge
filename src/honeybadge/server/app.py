@@ -38,19 +38,25 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         app.state.pg = None
         app.state.redis = None
         app.state.llm = None
-        try:
-            from honeybadge.db.nebula import NebulaGraphClient
-            from honeybadge.db.postgres import PostgreSQLClient
-            from honeybadge.db.redis import RedisClient
-            from honeybadge.llm.adapter import OpenAICompatibleAdapter
+        from honeybadge.db.nebula import NebulaGraphClient
+        from honeybadge.db.postgres import PostgreSQLClient
+        from honeybadge.db.redis import RedisClient
+        from honeybadge.llm.adapter import OpenAICompatibleAdapter
 
+        ready = []
+
+        try:
             nebula = NebulaGraphClient(
                 host=config.nebula_host, port=config.nebula_port,
                 user=config.nebula_user, password=config.nebula_password,
             )
             await nebula.connect()
             app.state.nebula = nebula
+            ready.append("nebula")
+        except Exception as e:
+            logger.error("nebula_init_failed", error=str(e))
 
+        try:
             pg = PostgreSQLClient(
                 host=config.pg_host, port=config.pg_port,
                 user=config.pg_user, password=config.pg_password,
@@ -59,26 +65,34 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             await pg.connect()
             await pg.init_schema()
             app.state.pg = pg
+            ready.append("pg")
+        except Exception as e:
+            logger.error("pg_init_failed", error=str(e))
 
+        try:
             redis = RedisClient(
                 host=config.redis_host, port=config.redis_port,
                 password=config.redis_password,
             )
             await redis.connect()
             app.state.redis = redis
+            ready.append("redis")
+        except Exception as e:
+            logger.error("redis_init_failed", error=str(e))
 
-            # LLM adapter for nGQL generation and summarization
+        try:
             llm_config = {
                 "endpoint": config.llm_endpoint,
                 "api_key": config.llm_api_key,
                 "model": config.llm_model,
-                "timeout": 120,
+                "timeout": 300,
             }
             app.state.llm = OpenAICompatibleAdapter(llm_config, None)
-
-            logger.info("server_ready", services="nebula,pg,redis,llm")
+            ready.append("llm")
         except Exception as e:
-            logger.error("startup_failed", error=str(e))
+            logger.error("llm_init_failed", error=str(e))
+
+        logger.info("server_ready", services=",".join(ready))
 
         yield
 
