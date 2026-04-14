@@ -19,12 +19,15 @@ Data实际情况:
 - subsidiary_lead: org_ids=[1021], allowed_processes=[PTP, OTC]
 - admin: org_ids=None, data_scope=ALL
 """
+import re
 import pytest
 from playwright.sync_api import expect
-from conftest import send_query_on_page
-
-
-BASE_URL = "http://localhost:3000"
+from tests.e2e.conftest import send_query_on_page, BASE_URL, API_BASE_URL
+from tests.e2e.selectors import (
+    CHAT_TEXTAREA, MSG_ASSISTANT, TRACE_ID_LINK,
+    CYPHER_COLLAPSE_HEADER, CYPHER_CODE,
+    DATA_COLLAPSE_HEADER, DATA_ROWS, DATA_HEADERS,
+)
 
 
 class TestPermissions:
@@ -193,32 +196,16 @@ class TestPermissions:
             assert has_error_msg or len(response_text.strip()) == 0, \
                 f"Should show permission denied for OTC access. Got: {response_text[:200]}"
 
-    def test_tc407_api_returns_403_for_unauthorized(self, api_client):
-        """TC-407: API returns 403 status for unauthorized access.
-
-        This test verifies API-level permission enforcement.
-        Note: Depends on actual /api/admin endpoints existing.
-        """
+    def test_tc407_api_unauthorized_returns_401(self, api_client):
+        """TC-407: Unauthenticated API access returns 401/403."""
         import httpx
-
-        # Login as analyst
-        response = api_client.post(
-            "/api/auth/login",
-            json={"username": "analyst", "password": "analyst123"}
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            token = data.get("access_token") or data.get("roles_jwt")
-
-            if token:
-                # Try admin-only endpoint - should return 403
-                admin_response = api_client.get(
-                    "/api/admin/users",
-                    headers={"Authorization": f"Bearer {token}"}
-                )
-                # If endpoint exists, it should return 403 for non-admin
-                # If endpoint doesn't exist (404), that's also acceptable for this test
+        client = httpx.Client(base_url=API_BASE_URL, timeout=10)
+        try:
+            resp = client.get("/api/audit")
+            assert resp.status_code in (401, 403), \
+                f"Unauthenticated /api/audit should return 401/403, got {resp.status_code}"
+        finally:
+            client.close()
 
     def test_tc408_org_id_filter_verification(self, create_user_page):
         """TC-408: Verify org_id filter is correctly applied to queries.
@@ -495,6 +482,37 @@ class TestPermissions:
         assert admin_count > analyst_count * 5, \
             f"Admin({admin_count})应>>analyst({analyst_count})。" \
             f"analyst虽有PTP权限但org受限，admin无org限制。"
+
+    def test_tc415_cypher_where_clause_present(self, analyst_logged_in, wait_for_chat_ready, send_chat_query, expand_cypher_block):
+        """TC-415: NEW - All user queries have WHERE clause in generated Cypher."""
+        page = analyst_logged_in
+        wait_for_chat_ready()
+
+        send_chat_query("查询采购订单", timeout=120000)
+
+        cypher_text = expand_cypher_block()
+        assert cypher_text, "Cypher block is empty"
+        assert "WHERE" in cypher_text.upper() or "where" in cypher_text, \
+            f"Cypher lacks WHERE clause (permission filter):\n{cypher_text}"
+
+    def test_tc416_column_level_permission(self, analyst_logged_in, wait_for_chat_ready, send_query_and_get_response):
+        """TC-416: NEW - Analyst cannot see cost_price column in query results."""
+        page = analyst_logged_in
+        wait_for_chat_ready()
+
+        result = send_query_and_get_response("查询物料信息")
+
+        if result["data_row_count"] > 0:
+            last_msg = page.locator(MSG_ASSISTANT).last
+            headers = last_msg.locator(DATA_HEADERS)
+            header_texts = []
+            for i in range(headers.count()):
+                header_texts.append(headers.nth(i).inner_text().lower())
+
+            sensitive_cols = ["cost_price", "成本价", "cost"]
+            for col in sensitive_cols:
+                assert col not in " ".join(header_texts), \
+                    f"Sensitive column '{col}' visible to analyst: {header_texts}"
 
     @staticmethod
     def _extract_count_from_response(text: str) -> int:
