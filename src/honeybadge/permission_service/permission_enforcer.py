@@ -7,12 +7,6 @@ Parses (var:Tag) patterns from MATCH clauses and:
 from __future__ import annotations
 
 import re
-import sys
-import os
-
-# Allow running standalone (adds src/ to path)
-_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-sys.path.insert(0, os.path.join(_project_root, "src"))
 
 from honeybadge.permission_service.config import PROCESS_TAGS
 from honeybadge.permission_service.models import PermissionContext
@@ -51,10 +45,6 @@ def _inject_org_filter(ngql: str, var: str, tag: str, org_ids: list[int]) -> str
     condition = f"{var}.{tag}.org_id IN [{ids_str}]"
 
     # If WHERE already exists, append AND
-    # Note: leading space before AND/WHERE guards against token-run-together if
-    # the preceding character is not whitespace.
-    # Limitation: pipe-chained queries (|) are not supported — insert targets
-    # the first RETURN/YIELD, which may be inside a subquery, not at the root.
     where_re = re.compile(r'\bWHERE\b', re.IGNORECASE)
     if where_re.search(ngql):
         # Insert before RETURN/YIELD by finding the first of those keywords
@@ -63,8 +53,6 @@ def _inject_org_filter(ngql: str, var: str, tag: str, org_ids: list[int]) -> str
         if match:
             insert_pos = match.start()
             return ngql[:insert_pos] + f" AND {condition} " + ngql[insert_pos:]
-        # Fallback: append at end (only reachable for syntactically incomplete
-        # queries that lack RETURN/YIELD; these should be rejected by L1 first)
         return ngql + f" AND {condition}"
     else:
         # Insert WHERE before RETURN/YIELD
@@ -73,7 +61,6 @@ def _inject_org_filter(ngql: str, var: str, tag: str, org_ids: list[int]) -> str
         if match:
             insert_pos = match.start()
             return ngql[:insert_pos] + f" WHERE {condition} " + ngql[insert_pos:]
-        # Fallback: append at end (same caveat as above)
         return ngql + f" WHERE {condition}"
 
 
@@ -100,12 +87,25 @@ class PermissionEnforcer:
         warnings: list[str] = []
         tag_vars = _TAG_VAR_RE.findall(ngql)  # list of (var, tag) tuples
 
-        # --- 1. Process tag check (hard reject) ---
+        # --- 1a. Process tag check via (var:Tag) patterns (hard reject) ---
         for var, tag in tag_vars:
             category = _get_tag_category(tag)
             if category is None or category == "MASTER":
                 continue  # unknown or master tags are always allowed
             if category not in ctx.allowed_processes:
+                raise PermissionViolationError(
+                    f"无权访问 {category} 数据: tag '{tag}' 不在允许的流程范围内"
+                )
+
+        # --- 1b. Fallback: scan for forbidden tag names anywhere in nGQL ---
+        # Catches LOOKUP ON TagName, FETCH PROP ON TagName, etc.
+        forbidden_tags: set[str] = set()
+        for cat, tags in PROCESS_TAGS.items():
+            if cat != "MASTER" and cat not in ctx.allowed_processes:
+                forbidden_tags.update(tags)
+        for tag in forbidden_tags:
+            if re.search(rf'\b{tag}\b', ngql):
+                category = _get_tag_category(tag)
                 raise PermissionViolationError(
                     f"无权访问 {category} 数据: tag '{tag}' 不在允许的流程范围内"
                 )

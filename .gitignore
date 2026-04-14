@@ -2,6 +2,9 @@
 .worktrees/
 worktrees/
 
+# Ralph scripts (dev tool, not committed)
+scripts/ralph/
+
 # Docker data volumes
 deploy/docker/data/
 deploy/docker/logs/

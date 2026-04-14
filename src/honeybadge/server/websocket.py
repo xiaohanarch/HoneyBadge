@@ -19,6 +19,10 @@ from honeybadge.llm.adapter import generate_ngql as llm_generate_ngql
 from honeybadge.llm.adapter import summarize_results as llm_summarize_results
 from honeybadge.llm.adapter import LLMGenerationError, LLMSummarizationError
 from honeybadge.core.exceptions import NebulaGraphError
+from honeybadge.permission_service.config import PERMISSION_CONFIG
+from honeybadge.permission_service.permission_enforcer import PermissionEnforcer, PermissionViolationError
+
+_permission_enforcer = PermissionEnforcer()
 
 logger = structlog.get_logger()
 
@@ -85,14 +89,26 @@ _ONTOLOGY_FILES = {
 
 
 def _strip_markdown_fence(text: str) -> str:
-    """Strip markdown code fence markers (```ngql, ```, etc.) from LLM output."""
+    """Extract nGQL from LLM output, stripping thinking tags, fences, and prose."""
     text = text.strip()
-    # Remove ```ngql, ```yml, ```sql, ``` etc. at start of line
-    text = re.sub(r"^```[\w]*\n?", "", text)
-    # Remove leading "ngql" on its own line (no backticks)
-    text = re.sub(r"^ngql\n?", "", text, flags=re.IGNORECASE)
-    # Remove trailing ```
-    text = re.sub(r"\n?```$", "", text)
+    # Remove <think>...</think> blocks (MiniMax-M2.7 reasoning output)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = text.strip()
+
+    # Try to extract from code fence first (most reliable)
+    fence_match = re.search(r"```\w*\s*\n?(.*?)```", text, flags=re.DOTALL)
+    if fence_match:
+        return fence_match.group(1).strip()
+
+    # No code fence — extract starting from first nGQL keyword
+    ngql_match = re.search(
+        r"^((?:MATCH|LOOKUP|GO|FETCH|FIND|USE|SHOW|DESCRIBE)\b.*)$",
+        text, flags=re.MULTILINE | re.DOTALL | re.IGNORECASE,
+    )
+    if ngql_match:
+        return ngql_match.group(1).strip().rstrip(";")
+
+    # Fallback: return as-is (original behavior)
     return text.strip()
 
 # Path to prompts directory (resolved relative to src/honeybadge/)
@@ -438,6 +454,13 @@ async def process_query(
         ngql = _strip_markdown_fence(ngql_response.content)
         logger.info("ws_ngql_generated", trace_id=trace_id, ngql=ngql[:100])
 
+        # Step 2b: L3 Permission enforcement (process ACL + org_id injection)
+        if user_id in PERMISSION_CONFIG:
+            perm_ctx = PERMISSION_CONFIG[user_id]
+            ngql, perm_warnings = _permission_enforcer.enforce(ngql, perm_ctx)
+            for w in perm_warnings:
+                logger.info("ws_permission_filter", trace_id=trace_id, warning=w)
+
         # Step 3: Execute with retry on syntax/semantic errors
         max_retries = 2
         last_error = None
@@ -493,7 +516,7 @@ async def process_query(
             raw_results=query_result.rows,
             columns=query_result.columns,
         )
-        summary = summary_response.content
+        summary = re.sub(r"<think>.*?</think>", "", summary_response.content, flags=re.DOTALL).strip()
 
         # Step 5: Write audit log
         from honeybadge.db.postgres import AuditLogEntry

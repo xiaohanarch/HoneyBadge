@@ -330,6 +330,27 @@ async def validate_and_execute_impl(
         }
 
     # --- L3: Permission enforcement (PermissionEnforcer) ----------------
+    # Auto-fetch permissions when caller provides user_id but not the full permissions dict.
+    if user_context and user_context.get("user_id") and not user_context.get("permissions"):
+        user_id = user_context["user_id"]
+        perms_base = os.environ.get("PERMISSION_SERVICE_URL", "http://honeybadge-permissions:8092")
+        try:
+            async with httpx.AsyncClient() as _client:
+                _resp = await _client.get(f"{perms_base}/permissions/{user_id}", timeout=5.0)
+            if _resp.status_code == 200:
+                user_context = {"user_id": user_id, "permissions": _resp.json()}
+                logger.info("l3_permissions_fetched", user_id=user_id, trace_id=trace_id)
+            else:
+                logger.warning(
+                    "l3_permissions_fetch_failed",
+                    user_id=user_id, status=_resp.status_code, trace_id=trace_id,
+                )
+        except Exception as _e:
+            logger.warning(
+                "l3_permissions_fetch_error",
+                user_id=user_id, error=str(_e), trace_id=trace_id,
+            )
+
     if user_context and user_context.get("permissions"):
         try:
             perm_dict = user_context["permissions"]
