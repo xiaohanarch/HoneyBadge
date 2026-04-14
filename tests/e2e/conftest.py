@@ -3,15 +3,23 @@ Playwright E2E Test Configuration and Fixtures
 HoneyBadge - Enterprise Knowledge Graph Assistant
 """
 import os
+import re
 import pytest
 from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
+from tests.e2e.selectors import (
+    LOGIN_USERNAME, LOGIN_PASSWORD, LOGIN_BUTTON,
+    CHAT_TEXTAREA, MSG_ASSISTANT, MSG_USER, MESSAGES_CONTAINER,
+    TRACE_ID_LINK, CYPHER_COLLAPSE_HEADER, CYPHER_CODE,
+    DATA_COLLAPSE_HEADER, DATA_ROWS, DATA_TABLE,
+    NEW_CHAT_BUTTON, SESSION_ITEM, INPUT_CONTAINER,
+)
 
 
 def _wait_for_textarea_enabled(page_obj, timeout=60000):
     """Wait for chat textarea to be visible and enabled."""
     page_obj.wait_for_function(
         """() => {
-            const ta = document.querySelector('.el-textarea textarea, .chat-input textarea');
+            const ta = document.querySelector('.input-container .el-textarea__inner');
             return ta && !ta.disabled;
         }""",
         timeout=timeout,
@@ -21,10 +29,10 @@ def _wait_for_textarea_enabled(page_obj, timeout=60000):
 def send_query_on_page(page_obj, query: str, timeout: int = 60000):
     """Send a chat query on any page object (standalone helper, not fixture-bound)."""
     _wait_for_textarea_enabled(page_obj, timeout=timeout)
-    textarea = page_obj.locator(".el-textarea textarea, .chat-input textarea").first
+    textarea = page_obj.locator(CHAT_TEXTAREA).first
     textarea.fill(query)
     textarea.press("Enter")
-    page_obj.wait_for_selector(".chat-message, .message", timeout=timeout)
+    page_obj.wait_for_selector(MSG_ASSISTANT, timeout=timeout)
     page_obj.wait_for_timeout(3000)
 
 
@@ -112,12 +120,12 @@ def login_as(page: Page):
     """Factory fixture to login as any user."""
     def _login(username: str, password: str):
         page.goto(f"{BASE_URL}/login")
-        page.wait_for_selector('.el-input', timeout=15000)
-        page.fill('input[placeholder="用户名"]', username)
-        page.fill('input[placeholder="密码"]', password)
-        page.click('button:has-text("登 录")')
+        page.wait_for_selector(LOGIN_BUTTON, timeout=15000)
+        page.fill(LOGIN_USERNAME, username)
+        page.fill(LOGIN_PASSWORD, password)
+        page.click(LOGIN_BUTTON)
         page.wait_for_url(f"{BASE_URL}/chat", timeout=30000)
-        page.wait_for_timeout(2000)  # Wait for Matrix connection
+        page.wait_for_timeout(2000)
         return page
     return _login
 
@@ -154,23 +162,21 @@ def subsidiary_lead_logged_in(page: Page, login_as):
 def wait_for_chat_ready(page: Page):
     """Wait for chat interface to be fully loaded."""
     def _wait():
-        page.wait_for_selector(".el-textarea textarea, .chat-input textarea", timeout=15000)
-        page.wait_for_timeout(2000)  # Wait for Matrix to connect
+        page.wait_for_selector(CHAT_TEXTAREA, timeout=15000)
+        page.wait_for_timeout(2000)
     return _wait
 
 
 @pytest.fixture
 def send_chat_query(page: Page):
-    """Factory fixture to send a chat query."""
+    """Factory fixture to send a chat query and wait for response."""
     def _send(query: str, timeout: int = 60000):
-        # Wait for textarea to be enabled (may be disabled during LLM response)
         _wait_for_textarea_enabled(page, timeout=timeout)
-        textarea = page.locator(".el-textarea textarea, .chat-input textarea").first
+        textarea = page.locator(CHAT_TEXTAREA).first
         textarea.fill(query)
         textarea.press("Enter")
-        # Wait for response to appear
-        page.wait_for_selector(".chat-message, .message", timeout=timeout)
-        page.wait_for_timeout(3000)  # Wait for response to render
+        page.wait_for_selector(MSG_ASSISTANT, timeout=timeout)
+        page.wait_for_timeout(3000)
     return _send
 
 
@@ -188,15 +194,14 @@ def create_user_page(browser: Browser):
         p = context.new_page()
         p.set_default_timeout(30000)
         p.goto(f"{BASE_URL}/login")
-        p.wait_for_selector('.el-input', timeout=15000)
-        p.fill('input[placeholder="用户名"]', username)
-        p.fill('input[placeholder="密码"]', password)
-        p.click('button:has-text("登 录")')
+        p.wait_for_selector(LOGIN_BUTTON, timeout=15000)
+        p.fill(LOGIN_USERNAME, username)
+        p.fill(LOGIN_PASSWORD, password)
+        p.click(LOGIN_BUTTON)
         p.wait_for_url(f"{BASE_URL}/chat", timeout=30000)
         p.wait_for_timeout(2000)
 
-        # Create a new session if none exists
-        new_session_btn = p.locator('button:has-text("新对话"), button:has-text("New Chat")')
+        new_session_btn = p.locator(NEW_CHAT_BUTTON)
         if new_session_btn.count() > 0 and new_session_btn.first.is_visible():
             new_session_btn.first.click()
             p.wait_for_timeout(1000)
@@ -210,3 +215,84 @@ def create_user_page(browser: Browser):
         p.close()
     for c in contexts:
         c.close()
+
+
+@pytest.fixture
+def send_query_and_get_response(page: Page):
+    """Send query, wait for full response, return structured data."""
+    def _send(query: str, timeout: int = 120000):
+        _wait_for_textarea_enabled(page, timeout=timeout)
+        textarea = page.locator(CHAT_TEXTAREA).first
+        textarea.fill(query)
+        textarea.press("Enter")
+        page.wait_for_selector(MSG_ASSISTANT, timeout=timeout)
+        page.wait_for_timeout(3000)
+
+        last_msg = page.locator(MSG_ASSISTANT).last
+        text = last_msg.inner_text()
+
+        trace_id = None
+        trace_link = last_msg.locator(TRACE_ID_LINK)
+        if trace_link.count() > 0:
+            trace_text = trace_link.first.inner_text()
+            match = re.search(r'TRC-[\w-]+', trace_text)
+            if match:
+                trace_id = match.group(0)
+
+        has_cypher = last_msg.locator(CYPHER_COLLAPSE_HEADER).count() > 0
+        has_data_table = last_msg.locator(DATA_COLLAPSE_HEADER).count() > 0
+
+        data_row_count = 0
+        if has_data_table:
+            last_msg.locator(DATA_COLLAPSE_HEADER).click()
+            page.wait_for_timeout(500)
+            data_row_count = last_msg.locator(DATA_ROWS).count()
+
+        return {
+            "text": text,
+            "trace_id": trace_id,
+            "has_cypher": has_cypher,
+            "has_data_table": has_data_table,
+            "data_row_count": data_row_count,
+        }
+    return _send
+
+
+@pytest.fixture
+def expand_cypher_block(page: Page):
+    """Click cypher collapse header on last assistant message, return code text."""
+    def _expand():
+        last_msg = page.locator(MSG_ASSISTANT).last
+        header = last_msg.locator(CYPHER_COLLAPSE_HEADER)
+        if header.count() == 0:
+            pytest.skip("No Cypher collapse block in response")
+        header.click()
+        page.wait_for_timeout(500)
+        code = last_msg.locator(CYPHER_CODE)
+        if code.count() == 0:
+            return ""
+        return code.first.inner_text()
+    return _expand
+
+
+@pytest.fixture
+def expand_data_table(page: Page):
+    """Click data collapse header on last assistant message, return row count."""
+    def _expand():
+        last_msg = page.locator(MSG_ASSISTANT).last
+        header = last_msg.locator(DATA_COLLAPSE_HEADER)
+        if header.count() == 0:
+            pytest.skip("No data collapse block in response")
+        header.click()
+        page.wait_for_timeout(500)
+        return last_msg.locator(DATA_ROWS).count()
+    return _expand
+
+
+@pytest.fixture
+def audit_api_client():
+    """HTTP client for audit API queries."""
+    import httpx
+    client = httpx.Client(base_url=API_BASE_URL, timeout=30)
+    yield client
+    client.close()
