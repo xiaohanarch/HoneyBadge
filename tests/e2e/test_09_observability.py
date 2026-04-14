@@ -99,7 +99,7 @@ class TestObservability:
         try:
             # Check Loki for recent logs
             response = httpx.get("http://localhost:3100/loki/api/v1/query", timeout=10)
-            assert response.status_code in [200, 400]  # 400 if no query params
+            assert response.status_code == 200, f"Loki query should return 200, got {response.status_code}"
         except httpx.ConnectError:
             pytest.fail("Cannot connect to Loki at localhost:3100")
 
@@ -118,7 +118,9 @@ class TestObservability:
         # Check honeybadge-server metrics
         try:
             response = httpx.get("http://localhost:8090/api/metrics", timeout=10)
-            assert response.status_code in [200, 404]  # 404 if no metrics endpoint
+            if response.status_code == 404:
+                pytest.skip("Metrics endpoint not exposed on honeybadge-server")
+            assert response.status_code == 200
         except httpx.ConnectError:
             pytest.fail("Cannot connect to honeybadge-server at localhost:8090")
 
@@ -131,6 +133,5 @@ class TestObservability:
         username_input = page.locator('input[name="user"], input[name="username"]')
         password_input = page.locator('input[name="password"]')
 
-        if username_input.count() > 0 and password_input.count() > 0:
-            expect(username_input.first).to_be_visible()
-            expect(password_input.first).to_be_visible()
+        expect(username_input.first).to_be_visible(timeout=5000)
+        expect(password_input.first).to_be_visible(timeout=5000)

@@ -21,7 +21,11 @@ RBP + LLM Context Value:
 """
 import pytest
 from playwright.sync_api import expect
-from conftest import send_query_on_page
+from tests.e2e.conftest import send_query_on_page
+from tests.e2e.selectors import (
+    CHAT_TEXTAREA, MSG_ASSISTANT, NEW_CHAT_BUTTON,
+    TRACE_ID_LINK,
+)
 
 
 BASE_URL = "http://localhost:3000"
@@ -89,10 +93,11 @@ class TestContextAndMemory:
 
         # 登出
         logout_btn = admin_page.locator('button:has-text("退出"), button:has-text("Logout")')
-        if logout_btn.count() > 0:
-            logout_btn.first.click()
-            admin_page.wait_for_url(f"{BASE_URL}/login", timeout=30000)
-            admin_page.wait_for_timeout(1000)
+        if logout_btn.count() == 0:
+            pytest.skip("Logout button not found in UI")
+        logout_btn.first.click()
+        admin_page.wait_for_url(f"{BASE_URL}/login", timeout=30000)
+        admin_page.wait_for_timeout(1000)
 
         # 重新登录
         admin_page2 = create_user_page("admin", "admin123")
@@ -158,11 +163,11 @@ class TestContextAndMemory:
         analyst_text = " ".join(msg.inner_text() for msg in analyst_messages)
 
         # 断言: analyst 绝对不应该看到 admin 的私密信息
-        if admin_has_sensitive_info:
-            assert "ORG1000" not in analyst_text, \
-                "Analyst should NEVER see admin's confidential context"
-            assert "关键" not in analyst_text, \
-                "Analyst should NEVER see admin's memory/context"
+        assert admin_has_sensitive_info, "Admin session should have sensitive content to verify isolation"
+        assert "ORG1000" not in analyst_text, \
+            "Analyst should NEVER see admin's confidential context"
+        assert "关键" not in analyst_text, \
+            "Analyst should NEVER see admin's memory/context"
 
     def test_tc1005_user_context_isolation(self, create_user_page):
         """TC-1005: Different users have completely independent contexts.
@@ -202,16 +207,17 @@ class TestContextAndMemory:
         session1_messages = admin_page1.locator('.chat-message').count()
 
         # 在同一浏览器中创建第二个会话
-        new_session_btn = admin_page1.locator('button:has-text("新对话"), button:has-text("New Chat")')
-        if new_session_btn.count() > 0:
-            new_session_btn.first.click()
-            admin_page1.wait_for_timeout(1000)
-            send_query_on_page(admin_page1, "会话2: 查询销售订单", timeout=120000)
-            admin_page1.wait_for_timeout(2000)
-            session2_messages = admin_page1.locator('.chat-message').count()
+        new_session_btn = admin_page1.locator(NEW_CHAT_BUTTON)
+        if new_session_btn.count() == 0:
+            pytest.skip("New session button not available")
+        new_session_btn.first.click()
+        admin_page1.wait_for_timeout(1000)
+        send_query_on_page(admin_page1, "会话2: 查询销售订单", timeout=120000)
+        admin_page1.wait_for_timeout(2000)
+        session2_messages = admin_page1.locator('.chat-message').count()
 
-            # 断言: 新会话应该有不同的上下文
-            assert session2_messages >= 2, "New session should have independent context"
+        # 断言: 新会话应该有不同的上下文
+        assert session2_messages >= 2, "New session should have independent context"
 
         # 用新 page 登录，验证第一个会话仍然存在
         admin_page2 = create_user_page("admin", "admin123")
@@ -240,10 +246,11 @@ class TestContextAndMemory:
         page.wait_for_timeout(2000)
 
         # 创建新会话
-        new_session_btn = page.locator('button:has-text("新对话"), button:has-text("New Chat")')
-        if new_session_btn.count() > 0:
-            new_session_btn.first.click()
-            page.wait_for_timeout(1000)
+        new_session_btn = page.locator(NEW_CHAT_BUTTON)
+        if new_session_btn.count() == 0:
+            pytest.skip("New session button not available")
+        new_session_btn.first.click()
+        page.wait_for_timeout(1000)
 
         # Session 2 - 验证偏好被记住
         send_chat_query("我关注的流程最近有什么异常", timeout=120000)
@@ -361,5 +368,5 @@ class TestContextAndMemory:
 # Helper function
 def wait_for_chat_ready(page):
     """Wait for chat interface to be ready."""
-    page.wait_for_selector('.el-textarea textarea, .chat-input textarea', timeout=15000)
-    page.wait_for_timeout(3000)  # Wait for Matrix connection
+    page.wait_for_selector(CHAT_TEXTAREA, timeout=15000)
+    page.wait_for_timeout(3000)
