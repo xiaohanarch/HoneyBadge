@@ -5,13 +5,35 @@ description: Use when the user asks about fraud detection, three-way matching an
 
 # Anomaly Detection Skill
 
+## How to Call MCP Tools (CRITICAL)
+
+You call MCP tools via the `exec` tool using the `mcporter` CLI.
+
+**nebula-mcp** (honeybadge-nebula):
+```
+mcporter call honeybadge-nebula.generate_query --args '{"question":"..."}'
+mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"...","user_context":{"user_id":"..."}}'
+mcporter call honeybadge-nebula.explain_ngql --args '{"ngql":"..."}'
+mcporter call honeybadge-nebula.summarize_query_results --args '{"question":"...","columns":[...],"rows":[...]}'
+```
+
+**audit-mcp** (honeybadge-audit):
+```
+mcporter call honeybadge-audit.write_audit_log --args '{"trace_id":"...","question":"...","ngql":"...","raw_result":{...},"summary":"..."}'
+```
+
+**cache-mcp** (honeybadge-cache):
+```
+mcporter call honeybadge-cache.cache_result --args '{"key":"...","value":{...},"ttl":300}'
+```
+
 ## Detection Patterns
 
 ### Three-Way Matching (PO vs Receipt vs Invoice)
 1. Query PO amounts per line
 2. Query Receipt quantities per PO
 3. Query Invoice amounts per PO
-4. Compare: flag where Invoice amount > PO amount * 1.10 (10% tolerance)
+4. Compare: flag where Invoice amount > PO amount × 1.10 (10% tolerance)
 
 ### Duplicate Invoice Detection
 1. Query invoices grouped by (supplier, amount, invoice_date)
@@ -19,7 +41,7 @@ description: Use when the user asks about fraud detection, three-way matching an
 
 ### Unusual Payment Patterns
 1. Query payments in last 90 days
-2. Flag payments significantly above supplier's average (>2x)
+2. Flag payments > 2× supplier's historical average
 3. Flag payments to new suppliers (registration < 90 days) above threshold
 
 ### Supplier Concentration Risk
@@ -28,17 +50,17 @@ description: Use when the user asks about fraud detection, three-way matching an
 
 ## Execution Flow
 
-1. Identify which detection pattern matches the user's question
-2. Execute the relevant queries (2-5 rounds)
-3. Apply the flagging logic based on query results
-4. Present findings with severity levels:
-   - **INFO**: Within normal range but worth noting
-   - **WARNING**: Exceeds soft threshold, needs review
-   - **ALERT**: Exceeds hard threshold, requires immediate attention
-5. Write audit log with all evidence
+1. Identify which detection pattern matches the question
+2. Execute relevant sub-queries (2-5 rounds)
+3. Apply flagging logic based on data returned
+4. Present findings with severity:
+   - **INFO**: Within normal range
+   - **WARNING**: Exceeds soft threshold
+   - **ALERT**: Exceeds hard threshold
+5. Write audit log with full evidence chain
 
 ## CRITICAL
 
-- All thresholds are approximate guidelines. The actual flagging is based on data returned by queries.
-- Never state "fraud detected" — only flag anomalies that need human review.
-- Always show the specific data that triggered the flag.
+- Thresholds are approximate guidelines — flagging is based on actual query data
+- Never state "fraud detected" — only flag anomalies for human review
+- Always show the specific data that triggered each flag

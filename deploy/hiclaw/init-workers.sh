@@ -1,6 +1,9 @@
 #!/bin/bash
-# HoneyBadge Worker Initialization Script
-# Run this ONCE after first `docker compose up -d` to register HiClaw Workers.
+# HoneyBadge Worker Initialization Script — MANUAL FALLBACK
+#
+# NOTE: This script is now OPTIONAL. The Manager container auto-runs
+# manager-init-internal.sh on every startup via entrypoint-wrapper.sh.
+# Use this script only for debugging or if auto-init fails.
 #
 # What it does:
 #   1. Copies worker SOUL.md files into HiClaw Manager's MinIO-accessible filesystem
@@ -11,13 +14,13 @@
 #   3. (Approach B) Per-user Matrix accounts are provisioned at login via honeybadge-auth
 #   4. Registers HoneyBadge MCP servers in Higress AI Gateway
 #
-# After this script succeeds, workers will start on next restart (they keep
-# retrying with restart: unless-stopped until their MinIO config exists).
-#
-# Usage:
+# Usage (only if auto-init fails):
 #   cd deploy/docker && docker compose up -d
 #   # Wait ~60s for hiclaw-manager to become healthy
 #   bash ../../deploy/hiclaw/init-workers.sh
+#
+# Check auto-init log first:
+#   docker exec honeybadge-hiclaw-manager cat /var/log/hiclaw/honeybadge-init.log
 #
 # Re-run after: docker compose down -v (data volumes wiped)
 
@@ -25,6 +28,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Source .env for LLM_API_KEY and other config (if not already in environment)
+ENV_FILE="$PROJECT_ROOT/deploy/docker/.env"
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
+
 MANAGER_CONTAINER="${MANAGER_CONTAINER:-honeybadge-hiclaw-manager}"
 REG_TOKEN="${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}"
 MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
@@ -66,6 +78,82 @@ echo ""
 log "MinIO is ready."
 
 # ---------------------------------------------------------------------------
+# 1b. Inject Manager's custom SOUL.md and AGENTS.md into the Manager container
+#     HiClaw generates default SOUL.md/AGENTS.md with a <!-- hiclaw-builtin-end -->
+#     marker. Our custom routing logic goes AFTER that marker.
+# ---------------------------------------------------------------------------
+log "Injecting Manager's custom SOUL.md and AGENTS.md..."
+
+MANAGER_SOUL="$PROJECT_ROOT/hiclaw/manager/agent/SOUL.md"
+MANAGER_AGENTS="$PROJECT_ROOT/hiclaw/manager/agent/AGENTS.md"
+
+if [ -f "$MANAGER_SOUL" ]; then
+    docker cp "$MANAGER_SOUL" "$MANAGER_CONTAINER:/tmp/hb-manager-soul.md"
+    docker exec "$MANAGER_CONTAINER" sh -c '
+        BUILTIN="/root/manager-workspace/SOUL.md"
+        CUSTOM="/tmp/hb-manager-soul.md"
+        if [ -f "$BUILTIN" ] && grep -q "hiclaw-builtin-end" "$BUILTIN"; then
+            # Keep built-in section, append custom HoneyBadge content after it
+            sed -n "1,/hiclaw-builtin-end/p" "$BUILTIN" > /tmp/merged-soul.md
+            echo "" >> /tmp/merged-soul.md
+            cat "$CUSTOM" >> /tmp/merged-soul.md
+            cp /tmp/merged-soul.md "$BUILTIN"
+            echo "Manager SOUL.md: appended custom content after builtin section"
+        else
+            # No builtin marker — just use our custom SOUL.md
+            cp "$CUSTOM" "$BUILTIN"
+            echo "Manager SOUL.md: replaced with custom content"
+        fi
+    ' && log "  → Manager SOUL.md injected" || warn "  Failed to inject Manager SOUL.md"
+else
+    warn "  Manager SOUL.md not found at $MANAGER_SOUL"
+fi
+
+if [ -f "$MANAGER_AGENTS" ]; then
+    docker cp "$MANAGER_AGENTS" "$MANAGER_CONTAINER:/tmp/hb-manager-agents.md"
+    docker exec "$MANAGER_CONTAINER" sh -c '
+        BUILTIN="/root/manager-workspace/AGENTS.md"
+        CUSTOM="/tmp/hb-manager-agents.md"
+        if [ -f "$BUILTIN" ] && grep -q "hiclaw-builtin-end" "$BUILTIN"; then
+            sed -n "1,/hiclaw-builtin-end/p" "$BUILTIN" > /tmp/merged-agents.md
+            echo "" >> /tmp/merged-agents.md
+            cat "$CUSTOM" >> /tmp/merged-agents.md
+            cp /tmp/merged-agents.md "$BUILTIN"
+            echo "Manager AGENTS.md: appended custom content after builtin section"
+        else
+            cp "$CUSTOM" "$BUILTIN"
+            echo "Manager AGENTS.md: replaced with custom content"
+        fi
+    ' && log "  → Manager AGENTS.md injected" || warn "  Failed to inject Manager AGENTS.md"
+else
+    warn "  Manager AGENTS.md not found at $MANAGER_AGENTS"
+fi
+
+# Sync Manager agent files to MinIO for persistence
+docker exec "$MANAGER_CONTAINER" bash -c \
+    "mc cp /root/manager-workspace/SOUL.md hiclaw/hiclaw-storage/agents/manager/SOUL.md 2>/dev/null && echo synced || true" \
+    && log "  → Manager SOUL.md synced to MinIO" || true
+docker exec "$MANAGER_CONTAINER" bash -c \
+    "mc cp /root/manager-workspace/AGENTS.md hiclaw/hiclaw-storage/agents/manager/AGENTS.md 2>/dev/null && echo synced || true" \
+    && log "  → Manager AGENTS.md synced to MinIO" || true
+
+# Inject Manager's custom skills (e.g., erp-query-dispatch)
+MANAGER_SKILLS="$PROJECT_ROOT/hiclaw/manager/agent/skills"
+if [ -d "$MANAGER_SKILLS" ]; then
+    log "Injecting Manager custom skills..."
+    for skill_dir in "$MANAGER_SKILLS"/*/; do
+        skill_name=$(basename "$skill_dir")
+        docker exec "$MANAGER_CONTAINER" bash -c "mkdir -p /root/manager-workspace/skills/${skill_name}"
+        docker cp "${skill_dir}SKILL.md" "$MANAGER_CONTAINER:/root/manager-workspace/skills/${skill_name}/SKILL.md" 2>/dev/null && \
+            log "  → ${skill_name}/SKILL.md injected" || warn "  Failed to inject ${skill_name}"
+    done
+    # Sync all custom skills to MinIO
+    docker exec "$MANAGER_CONTAINER" bash -c \
+        "mc mirror /root/manager-workspace/skills/ hiclaw/hiclaw-storage/agents/manager/skills/ --overwrite 2>/dev/null && echo synced || true" \
+        && log "  → Manager skills synced to MinIO" || true
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Upload worker SOUL.md files into MinIO via mc (inside Manager container)
 #    MinIO bucket path: hiclaw-storage/agents/{WORKER_NAME}/SOUL.md
 #    The mc alias 'hiclaw' is pre-configured by start-mc-mirror.sh
@@ -94,15 +182,17 @@ done
 # 3. Register workers using create-worker.sh (runs inside Manager container)
 #    This creates Matrix users, Higress consumers, and generates openclaw.json
 # ---------------------------------------------------------------------------
+CREATE_WORKER="/opt/hiclaw/agent/skills/worker-management/scripts/create-worker.sh"
+
 log "Registering graph-worker..."
 docker exec "$MANAGER_CONTAINER" bash -c \
-    "create-worker.sh --name graph-worker --skills file-sync,mcporter 2>&1" \
+    "$CREATE_WORKER --name graph-worker --skills file-sync,mcporter 2>&1" \
     && log "  → graph-worker registered" \
     || warn "  create-worker.sh for graph-worker failed (may already exist)"
 
 log "Registering analytics-worker..."
 docker exec "$MANAGER_CONTAINER" bash -c \
-    "create-worker.sh --name analytics-worker --skills file-sync,mcporter 2>&1" \
+    "$CREATE_WORKER --name analytics-worker --skills file-sync,mcporter 2>&1" \
     && log "  → analytics-worker registered" \
     || warn "  create-worker.sh for analytics-worker failed (may already exist)"
 

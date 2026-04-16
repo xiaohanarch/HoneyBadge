@@ -54,33 +54,56 @@ class NebulaGraphClient:
         self._pool: Optional[ConnectionPool] = None
 
     async def connect(self) -> None:
-        """Establish connection pool to NebulaGraph."""
+        """Establish connection pool to NebulaGraph with retry logic."""
         import asyncio
 
         loop = asyncio.get_running_loop()
-        try:
-            def _connect():
-                config = NebulaConfig()
-                config.max_connection_pool_size = self.max_pool_size
-                config.timeout = self.timeout
-                pool = ConnectionPool()
-                ok = pool.init([(self.host, self.port)], config)
-                if not ok:
-                    raise NebulaGraphError(
-                        f"Failed to init connection pool to {self.host}:{self.port}"
-                    )
-                return pool
+        max_retries = 5
+        base_delay = 2  # seconds
 
-            self._pool = await loop.run_in_executor(None, _connect)
-            logger.info(
-                "nebula_connected",
-                host=self.host,
-                port=self.port,
-            )
-        except NebulaGraphError:
-            raise
-        except Exception as e:
-            raise NebulaGraphError(f"Failed to connect to NebulaGraph: {e}")
+        def _connect():
+            config = NebulaConfig()
+            config.max_connection_pool_size = self.max_pool_size
+            config.timeout = self.timeout
+            pool = ConnectionPool()
+            ok = pool.init([(self.host, self.port)], config)
+            if not ok:
+                raise NebulaGraphError(
+                    f"Failed to init connection pool to {self.host}:{self.port}"
+                )
+            return pool
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                self._pool = await loop.run_in_executor(None, _connect)
+                logger.info(
+                    "nebula_connected",
+                    host=self.host,
+                    port=self.port,
+                    attempt=attempt + 1,
+                )
+                return
+            except NebulaGraphError:
+                raise
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "nebula_connect_retry",
+                        host=self.host,
+                        port=self.port,
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        delay=delay,
+                        error=str(e),
+                    )
+                    time.sleep(delay)
+                else:
+                    raise NebulaGraphError(
+                        f"Failed to connect to NebulaGraph after {max_retries} attempts: {e}"
+                    )
 
     async def disconnect(self) -> None:
         """Close connection pool."""

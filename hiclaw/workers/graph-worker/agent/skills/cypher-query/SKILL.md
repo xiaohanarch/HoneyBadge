@@ -7,90 +7,69 @@ description: Use when handling any natural language question about ERP data (sup
 
 Handle natural language questions by querying the HoneyBadge NebulaGraph knowledge graph.
 
-## Available MCP Tools
+## How to Call MCP Tools (CRITICAL)
 
-- `get_schema`: Get NebulaGraph schema (Tags, Edges, properties)
-- `generate_ngql`: Generate nGQL from natural language question
-- `validate_and_execute`: L1-L3 validate then execute nGQL, returns raw results
-- `explain_ngql`: Dry-run nGQL to check execution plan
-- `summarize_query_results`: Summarize raw results in Chinese
-- `write_audit_log`: Write L5 audit trail
-- `check_cache`: Check for cached results
-- `cache_result`: Cache query results
+You call MCP tools via the `exec` tool using the `mcporter` CLI. **All MCP tools are on separate servers:**
+
+**nebula-mcp** (honeybadge-nebula):
+```
+mcporter call honeybadge-nebula.generate_query --args '{"question":"..."}'
+mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"...","user_context":{"user_id":"..."}}'
+mcporter call honeybadge-nebula.get_schema --args '{"space":"honeybadge"}'
+mcporter call honeybadge-nebula.explain_ngql --args '{"ngql":"..."}'
+mcporter call honeybadge-nebula.summarize_query_results --args '{"question":"...","columns":[...],"rows":[...]}'
+```
+
+**audit-mcp** (honeybadge-audit):
+```
+mcporter call honeybadge-audit.write_audit_log --args '{"trace_id":"...","question":"...","ngql":"...","raw_result":{...},"summary":"..."}'
+```
+
+**cache-mcp** (honeybadge-cache):
+```
+mcporter call honeybadge-cache.check_cache --args '{"key":"..."}'
+mcporter call honeybadge-cache.cache_result --args '{"key":"...","value":{...},"ttl":300}'
+```
 
 ## Execution Flow
 
-When you receive a user question, follow these steps:
+### Step 1: Generate nGQL
+Call `mcporter call honeybadge-nebula.generate_query --args '{"question":"<user_question>"}'`
 
-### Step 0: Extract Auth Context
-Extract `user_context` from the `x-hb-auth` field in the incoming message (see Auth Context Extraction in SOUL.md). Store it for use in Step 4.
+### Step 2: Validate and Execute
+Call `mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"<generated_ngql>"}'`
+- If user_id is available: add `"user_context":{"user_id":"<username>"}`
 
-### Step 1: Load Schema
-Call `get_schema()` to understand available Tags and Edges. Cache the result mentally for subsequent queries in the same conversation.
+On failure (L1/L2 error), retry up to 3 times with error details.
 
-### Step 2: Check Cache (optional)
-If the question seems similar to a recent one, call `check_cache` with a hash of the question.
+### Step 3: Investigate Further (max 5 rounds total)
+Based on results, run additional queries following Step 1-2.
 
-### Step 3: Generate nGQL
-Call `generate_ngql(question=<user_question>, schema_info=<schema_text>)`.
+### Step 4: Summarize
+Format results as a table. **Numbers must be EXACTLY as returned.**
 
-### Step 4: Validate and Execute
-Call `validate_and_execute(ngql=<generated_query>, user_context=<extracted_context>)`.
+### Step 5: Cache and Audit
+```
+mcporter call honeybadge-cache.cache_result --args '{"key":"<question_hash>","value":{...},"ttl":300}'
+mcporter call honeybadge-audit.write_audit_log --args '{"trace_id":"...","question":"...","ngql":"...","raw_result":{...},"summary":"..."}'
+```
 
-- If `success: false` with `error: L1_SYNTAX` or `L2_SCHEMA`:
-  - Try regenerating with the error details as context (max 3 retries)
-  - On 3rd failure, report the error to the user
-- If `success: true`:
-  - Examine the results
+### Step 6: Respond
+Return summary with trace_id, row count, execution time.
 
-### Step 5: Investigate Further (Controlled Autonomy)
-Based on the results, you may decide to run additional queries:
-- "I found 3 unmatched invoices — let me check their corresponding POs"
-- "The supplier has high concentration — let me check alternative suppliers"
+## Example
 
-Each additional query follows the same Step 3-4 cycle. Maximum 5 total query rounds.
+User: "查供应商V001234的所有采购订单"
 
-### Step 6: Summarize
-Call `summarize_query_results(question, columns, rows, ngql)` OR write your own summary.
-
-**CRITICAL**: When summarizing:
-- Numbers must be EXACTLY as returned by the database
-- Dates must be EXACTLY as returned
-- Amounts must be EXACTLY as returned
-- Do NOT round, truncate, or modify any values
-- If data is empty, say "未查询到符合条件的数据"
-
-### Step 7: Cache and Audit
-- Call `cache_result` to cache the result (TTL 300s)
-- Call `write_audit_log` with the full chain:
-  - trace_id (from validate_and_execute result)
-  - question (original user question)
-  - ngql (generated query)
-  - raw_result (query rows)
-  - summary (your formatted summary)
-
-### Step 8: Respond
-Return the summary to the user. Always include:
-- The formatted answer
-- trace_id for reference
-- Number of records found
-- Execution time
-
-## Example Interaction
-
-User: "帮我查一下供应商V001234的所有采购订单"
-
-You would:
-1. `get_schema()` → learn about Supplier, PurchaseOrder, PLACED_WITH edge
-2. `generate_ngql(question="查供应商V001234的所有采购订单")` → get nGQL
-3. `validate_and_execute(ngql=...)` → get results
-4. Format results as table
-5. `write_audit_log(...)` → record full chain
-6. Return formatted answer with trace_id
+```
+mcporter call honeybadge-nebula.generate_query --args '{"question":"查供应商V001234的所有采购订单"}'
+→ ngql: "MATCH (s:Supplier)-[:PLACED_WITH]->(po:PurchaseOrder) WHERE s.Supplier.supplier_id == \"V001234\" RETURN po.purchase_order_number AS po_no, po.status AS status, po.total_amount AS amount"
+mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"MATCH (s:Supplier)-[:PLACED_WITH]->(po:PurchaseOrder) WHERE s.Supplier.supplier_id == \"V001234\" RETURN po.purchase_order_number AS po_no, po.status AS status, po.total_amount AS amount"}'
+→ {success: true, rows: [...], trace_id: "TRC-..."}
+```
 
 ## Constraints
 
-- Max 5 query rounds per user question
-- If validation fails 3 times, stop and explain the error
+- Max 5 query rounds per question
+- Never fabricate data
 - Never execute write operations (INSERT/UPDATE/DELETE)
-- Always log via write_audit_log
