@@ -71,11 +71,28 @@ class TestAuthentication:
         page = admin_logged_in
 
         # Click user avatar to open dropdown
-        page.locator(USER_AVATAR).click()
+        page.locator(USER_AVATAR).click(force=True)
         page.wait_for_timeout(500)
 
-        # Click logout
-        page.locator(LOGOUT_ITEM).click()
+        # Element Plus renders dropdown items as <li> elements with class el-dropdown-menu__item
+        # Find and click the visible logout item
+        page.evaluate("""() => {
+            const menus = document.querySelectorAll('.el-dropdown-menu');
+            for (const menu of menus) {
+                if (menu.offsetParent !== null) {
+                    const children = menu.children;
+                    for (const child of children) {
+                        if (child.offsetParent !== null && child.textContent.includes('退出')) {
+                            child.click();
+                            return;
+                        }
+                    }
+                }
+            }
+        }""")
+
+        # Should be redirected to login
+        page.wait_for_url(f"{BASE_URL}/login", timeout=10000)
 
         # Should be redirected to login
         page.wait_for_url(f"{BASE_URL}/login", timeout=10000)

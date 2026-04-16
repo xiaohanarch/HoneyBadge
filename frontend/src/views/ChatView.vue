@@ -129,13 +129,13 @@ import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, MoreFilled, Promotion, UserFilled } from '@element-plus/icons-vue';
 import { useAuth } from '@/composables/useAuth';
-import { useChat } from '@/composables/useChat';
+import { useMatrixChat } from '@/composables/useMatrixChat';
 import { useChatStore } from '@/stores/chat';
 import ChatMessage from '@/components/chat/ChatMessage.vue';
 
 const router = useRouter();
 const { logout, currentUser, fetchCurrentUser } = useAuth();
-const { connected, loadSessions, createSession, loadMessages, sendQuery, deleteSession, connect } = useChat();
+const { connected, loading, loadSessions, createSession, loadMessages, sendQuery, deleteSession, connect } = useMatrixChat();
 const chatStore = useChatStore();
 
 const question = ref('');
@@ -144,7 +144,6 @@ const messageAreaRef = ref<HTMLElement>();
 const sessions = computed(() => chatStore.sessions);
 const currentSessionId = computed(() => chatStore.currentSessionId);
 const currentMessages = computed(() => chatStore.currentMessages);
-const loading = computed(() => chatStore.loading);
 const progress = computed(() => chatStore.progress);
 
 const stepTitles: Record<number, string> = {
@@ -243,11 +242,13 @@ onMounted(async () => {
   // 加载会话列表
   await loadSessions();
 
-  // 如果有会话，选中第一个
+  // 如果有会话，选中第一个（避免重复加载已存在于 store 的消息）
   if (sessions.value.length > 0) {
     const lastSession = sessions.value[0];
     chatStore.setCurrentSession(lastSession.id);
-    await loadMessages(lastSession.id);
+    if (chatStore.messages.filter((m) => m.session_id === lastSession.id).length === 0) {
+      await loadMessages(lastSession.id);
+    }
   }
 
   // 建立 WebSocket 连接
