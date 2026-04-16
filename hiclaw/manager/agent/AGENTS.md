@@ -4,7 +4,7 @@
 - Shared files: /root/hiclaw-fs/shared/
 - Worker files: /root/hiclaw-fs/agents/<worker-name>/
 
-Use `${HICLAW_STORAGE_PREFIX}` for MinIO paths. Use full Matrix IDs like `@worker:matrix-local.hiclaw.io:18080`.
+Use `${HICLAW_STORAGE_PREFIX}` for MinIO paths. Use full Matrix IDs like `@graph-worker:matrix-local.hiclaw.io`.
 
 # Available Workers
 
