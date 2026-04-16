@@ -78,6 +78,14 @@ export default defineConfig({
         target: process.env.VITE_WS_TARGET || 'ws://localhost:8090',
         ws: true,
       },
+      '/login': {
+        target: 'http://honeybadge-auth:8091',
+        changeOrigin: true,
+      },
+      '/auth': {
+        target: 'http://honeybadge-auth:8091',
+        changeOrigin: true,
+      },
     },
   },
 });

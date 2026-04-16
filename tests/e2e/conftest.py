@@ -76,6 +76,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "infra: infrastructure tests")
     config.addinivalue_line("markers", "observability: observability tests")
     config.addinivalue_line("markers", "slow: slow running tests")
+    config.addinivalue_line("markers", "routing: worker routing tests")
 
 
 @pytest.fixture(scope="session")
