@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Project HoneyBadge** — Enterprise Knowledge Graph Intelligent Assistant built on ERP systems (Oracle EBS / custom ERP). Enables natural language Q&A over procurement/supply chain data, fraud detection, and three-way matching anomaly detection.
 
-The canonical architecture document is `starter.md` (v2.0). All implementation decisions should align with it.
+The canonical architecture document is `README.md` (v3.2). All implementation decisions should align with it.
 
 ## Current Status
 
@@ -16,14 +16,15 @@ The canonical architecture document is `starter.md` (v2.0). All implementation d
 ## Architecture Summary
 
 ```
-Frontend (WebSocket) → Higress Gateway (SSO/OAuth2) → HiClaw Manager → Worker Pool → Infrastructure Layer
+Frontend (matrix-js-sdk) → honeybadge-auth → Tuwunel Matrix → HiClaw Manager → Worker Pool → MCP Servers → Infrastructure
 ```
 
 **Core technology choices:**
 - Graph DB: NebulaGraph (distributed, openCypher 9)
 - Agent orchestration: HiClaw (Alibaba, Manager-Worker-Matrix Room pattern)
 - AI Gateway: Higress (Envoy-based)
-- LLM: GLM-5 (complex) / GLM-4.7-Flash (simple queries) on Huawei Ascend 910B
+- LLM (dev): qwen3.5-plus via DashScope (OpenAI-compatible)
+- LLM (production target): GLM-5 / GLM-4.7-Flash on Huawei Ascend 910B
 - Vector DB: Milvus (semantic cache, ontology retrieval)
 - Cache: Redis Cluster
 - Audit: PostgreSQL (immutable audit log)
@@ -33,7 +34,7 @@ Frontend (WebSocket) → Higress Gateway (SSO/OAuth2) → HiClaw Manager → Wor
 - Infra: Kubernetes
 
 **Critical design constraints:**
-- LLM only generates Cypher and formats output — never directly answers questions
+- LLM only generates nGQL and formats output — never directly answers questions
 - Raw query results are passed to users unmodified; LLM only wraps/formats
 - Every query carries a `trace_id` for full audit traceability
 - Permissions are injected at Cypher AST level, never via string concatenation
@@ -56,6 +57,6 @@ ERP-focused, two main processes:
 
 ## Language Notes
 
-- The architecture document (`starter.md`) is written in Chinese
+- The architecture document (`README.md`) is written in Chinese
 - The project serves Chinese enterprise users
 - Code comments and technical documentation may be in Chinese or English
