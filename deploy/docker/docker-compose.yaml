@@ -17,9 +17,8 @@
 #   1. cd deploy/docker
 #   2. docker compose up -d
 #   3. Wait ~60s for HiClaw Manager to start all internal services
-#   4. ONE-TIME worker registration (first startup only):
-#        bash ../../deploy/hiclaw/init-workers.sh
-#      (places worker configs in MinIO so workers can start)
+#   4. Workers and Manager auto-init on startup (no manual step needed)
+#      (init-workers.sh is kept as optional manual fallback/debugging tool)
 #   5. Workers auto-start once their MinIO config exists (restart: unless-stopped)
 #   6. Access: http://localhost:3000  |  Login: admin/admin123
 #
@@ -221,8 +220,8 @@ services:
   #   User IDs: @username:matrix-local.hiclaw.io
   #   This must match MATRIX_USER_ID configured in honeybadge-server.
   #
-  # INITIAL SETUP (run once, see deploy/hiclaw/init-workers.sh):
-  #   bash deploy/hiclaw/init-workers.sh
+  # AUTO-INIT: entrypoint-wrapper.sh runs manager-init-internal.sh on every start.
+  #   Manual fallback: bash deploy/hiclaw/init-workers.sh
   # =============================================================================
 
   hiclaw-manager:
@@ -230,6 +229,7 @@ services:
     container_name: honeybadge-hiclaw-manager
     hostname: hiclaw-manager
     restart: unless-stopped
+    entrypoint: ["/bin/bash", "/opt/honeybadge/init/entrypoint-wrapper.sh"]
     ports:
       - "6167:6167"     # Tuwunel Matrix — browser connects here directly (Approach B)
       - "18888:18888"    # Element Web — Matrix chat UI for agent monitoring
@@ -261,9 +261,14 @@ services:
       # AI Gateway domain for Manager's openclaw.json template (envsubst uses this var).
       # Without this, manager-openclaw.json.tmpl generates baseUrl: http://:8080/v1 (broken).
       - HICLAW_AI_GATEWAY_DOMAIN=aigw-local.hiclaw.io
+      # Default model for Manager Agent
+      - HICLAW_DEFAULT_MODEL=MiniMax-M2.7
       - TZ=Asia/Shanghai
     volumes:
       - hiclaw_manager_data:/data    # Persists MinIO data + Tuwunel DB
+      - ../hiclaw/entrypoint-wrapper.sh:/opt/honeybadge/init/entrypoint-wrapper.sh:ro
+      - ../hiclaw/manager-init-internal.sh:/opt/honeybadge/init/manager-init-internal.sh:ro
+      - ../../hiclaw:/opt/honeybadge/config:ro   # HoneyBadge agent configs (SOUL.md, AGENTS.md, skills)
     networks:
       honeybadge-net:
         aliases:
@@ -290,8 +295,8 @@ services:
   #   hiclaw-storage/agents/{WORKER_NAME}/AGENTS.md
   #   hiclaw-storage/agents/{WORKER_NAME}/openclaw.json
   #
-  # Workers will restart until init-workers.sh has populated MinIO.
-  # After init, they start automatically on next restart.
+  # Workers auto-init on startup via worker-init-wrapper.sh (MCP registration).
+  # Manager auto-init populates MinIO configs via entrypoint-wrapper.sh.
   # =============================================================================
 
   hiclaw-graph-worker:
@@ -299,12 +304,15 @@ services:
     container_name: honeybadge-graph-worker
     hostname: hiclaw-graph-worker
     restart: unless-stopped
+    entrypoint: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
     environment:
       - HICLAW_WORKER_NAME=graph-worker
       - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       - TZ=Asia/Shanghai
+    volumes:
+      - ../hiclaw/worker-init-wrapper.sh:/opt/honeybadge/init/worker-init-wrapper.sh:ro
     networks:
       - honeybadge-net
     depends_on:
@@ -319,12 +327,15 @@ services:
     container_name: honeybadge-analytics-worker
     hostname: hiclaw-analytics-worker
     restart: unless-stopped
+    entrypoint: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
     environment:
       - HICLAW_WORKER_NAME=analytics-worker
       - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       - TZ=Asia/Shanghai
+    volumes:
+      - ../hiclaw/worker-init-wrapper.sh:/opt/honeybadge/init/worker-init-wrapper.sh:ro
     networks:
       - honeybadge-net
     depends_on:
@@ -355,7 +366,7 @@ services:
       - NEBULA_USER=${NEBULA_USER:-root}
       - NEBULA_PASSWORD=${NEBULA_PASSWORD:-nebula}
       - NEBULA_SPACE=${NEBULA_SPACE:-honeybadge}
-      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://host.docker.internal:8000/v1}
+      - LLM_ENDPOINT=${MCP_LLM_ENDPOINT:-http://hiclaw-manager:8080}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
       - PERMISSION_SERVICE_URL=http://honeybadge-permissions:8092
