@@ -698,48 +698,75 @@ CREATE TAG IF NOT EXISTS Contract (
 
 ---
 
-**Tag 汇总**（共 31 个）：
+**Tag 汇总**（共 57 个，v2.0 新增 23 个标记 🆕）：
 
-| # | Tag 名称 | 域 |
-|---|---------|-----|
-| 1 | Supplier | 主数据 |
-| 2 | Customer | 主数据 |
-| 3 | Item | 主数据 |
-| 4 | Organization | 主数据 |
-| 5 | Employee | 主数据 |
-| 6 | Warehouse | 主数据 |
-| 7 | BOM | 主数据 |
-| 8 | BOMComponent | 主数据 |
-| 9 | Currency | 主数据 |
-| 10 | UOM | 主数据 |
-| 11 | PurchaseRequisition | 采购 |
-| 12 | PurchaseRequisitionLine | 采购 |
-| 13 | PurchaseOrder | 采购 |
-| 14 | PurchaseOrderLine | 采购 |
-| 15 | Receipt | 采购 |
-| 16 | ReceiptLine | 采购 |
-| 17 | SupplierQualification | 采购 |
-| 18 | Invoice | 应付 |
-| 19 | InvoiceLine | 应付 |
-| 20 | Payment | 应付 |
-| 21 | PaymentBatch | 应付 |
-| 22 | SalesOrder | 应收 |
-| 23 | SalesOrderLine | 应收 |
-| 24 | Shipment | 应收 |
-| 25 | ShipmentLine | 应收 |
-| 26 | ARInvoice | 应收 |
-| 27 | ARReceipt | 应收 |
-| 28 | GLAccount | 总账 |
-| 29 | GLJournalEntry | 总账 |
-| 30 | GLJournalLine | 总账 |
-| 31 | XLAEvent | 会计 |
-| 32 | AccountingDistribution | 会计 |
-| 33 | ApprovalRecord | 审批 |
-| 34 | Contract | 合同 |
+> 完整 Tag/Edge 清单及 Oracle EBS 源表映射详见 `10-ontology.md` v2.0
+
+| # | Tag 名称 | 域 | v2.0 |
+|---|---------|-----|------|
+| 1 | Supplier | 供应商 | |
+| 2 | SupplierSite | 供应商 | 🆕 |
+| 3 | SupplierQualification | 供应商 | |
+| 4 | Customer | 客户 | |
+| 5 | CustomerSite | 客户 | 🆕 |
+| 6 | Item | 主数据 | |
+| 7 | Organization | 主数据 | |
+| 8 | Employee | 主数据 | |
+| 9 | Warehouse | 主数据 | |
+| 10 | BOM | 主数据 | |
+| 11 | BOMComponent | 主数据 | |
+| 12 | Currency | 主数据 | |
+| 13 | UOM | 主数据 | |
+| 14 | PurchaseRequisition | 采购 | |
+| 15 | PurchaseRequisitionLine | 采购 | |
+| 16 | PurchaseOrder | 采购 | |
+| 17 | PurchaseOrderLine | 采购 | |
+| 18 | POShipment | 采购 | 🆕 |
+| 19 | Receipt | 采购 | |
+| 20 | ReceiptLine | 采购 | |
+| 21 | ReceivingTransaction | 采购 | 🆕 |
+| 22 | Invoice | 应付 | |
+| 23 | InvoiceLine | 应付 | |
+| 24 | InvoiceDistribution | 应付 | 🆕 |
+| 25 | InvoiceHold | 应付 | 🆕 |
+| 26 | Payment | 应付 | |
+| 27 | PaymentBatch | 应付 | |
+| 28 | PaymentSchedule | 应付 | 🆕 |
+| 29 | ExpenseReport | 应付 | 🆕 |
+| 30 | SalesOrder | 应收 | |
+| 31 | SalesOrderLine | 应收 | |
+| 32 | Shipment | 应收 | |
+| 33 | ShipmentLine | 应收 | |
+| 34 | ARInvoice | 应收 | |
+| 35 | ARInvoiceLine | 应收 | 🆕 |
+| 36 | ARReceipt | 应收 | |
+| 37 | Ledger | 总账 | 🆕 |
+| 38 | GLPeriod | 总账 | 🆕 |
+| 39 | GLCodeCombination | 总账 | 🆕 |
+| 40 | GLAccount | 总账 | |
+| 41 | GLJournalBatch | 总账 | 🆕 |
+| 42 | GLJournalEntry | 总账 | |
+| 43 | GLJournalLine | 总账 | |
+| 44 | GLBalance | 总账 | 🆕 |
+| 45 | CurrencyRate | 总账 | 🆕 |
+| 46 | XLAEvent | 会计 | |
+| 47 | XLAJournalEntry | 会计 | 🆕 |
+| 48 | XLAJournalLine | 会计 | 🆕 |
+| 49 | AccountingDistribution | 会计 | |
+| 50 | XLADistributionLink | 会计 | 🆕 |
+| 51 | InventoryTransaction | 库存 | 🆕 |
+| 52 | ItemCategory | 库存 | 🆕 |
+| 53 | BankAccount | 资金 | 🆕 |
+| 54 | BankStatement | 资金 | 🆕 |
+| 55 | BankStatementLine | 资金 | 🆕 |
+| 56 | ApprovalRecord | 审批 | |
+| 57 | Contract | 合同 | |
 
 ---
 
-## 4. Edge Type 定义（27+ 个）
+## 4. Edge Type 定义（83 个，v2.0 新增 45 个）
+
+> 完整 Edge Type 定义及新增的 DDL 见 `deploy/docker/nebula-edges.ngql` v2.0
 
 ### 4.1 采购域关系
 
@@ -978,48 +1005,35 @@ CREATE EDGE TYPE IF NOT EXISTS UNDER_CONTRACT (
 
 ---
 
-**Edge Type 汇总**（共 33 个）：
+**Edge Type 汇总**（共 83 个，v2.0 新增 45 个）：
 
-| # | Edge Type | 方向 | 说明 |
-|---|-----------|------|------|
-| 1 | PLACED_WITH | PO → Supplier | 下达采购 |
-| 2 | HAS_PO_LINE | PO → POLine | 订单行 |
-| 3 | ORDERS_ITEM | POLine → Item | 订购物料 |
-| 4 | CONVERTS_TO_PO | PR → PO | 申请转订单 |
-| 5 | HAS_PR_LINE | PR → PRLine | 申请行 |
-| 6 | HAS_RECEIPT | PO → Receipt | 收货 |
-| 7 | HAS_RECEIPT_LINE | Receipt → ReceiptLine | 收货行 |
-| 8 | HAS_INVOICE | PO → Invoice | 三单匹配 |
-| 9 | ORDERED_BY | PO → Employee | 采购员 |
-| 10 | HAS_QUALIFICATION | Supplier → SQ | 资质 |
-| 11 | SUPPLIES_ITEM | Supplier → Item | ASL |
-| 12 | HAS_INVOICE_LINE | Invoice → InvLine | 发票行 |
-| 13 | INVOICED_BY | Invoice → Supplier | 发票供应商 |
-| 14 | PAYS_INVOICE | Payment → Invoice | 付款 |
-| 15 | PAID_TO | Payment → Supplier | 付款对象 |
-| 16 | CONTAINS_PAYMENT | PayBatch → Payment | 批次 |
-| 17 | SOLD_TO | SO → Customer | 销售 |
-| 18 | HAS_SO_LINE | SO → SOLine | 订单行 |
-| 19 | SELLS_ITEM | SOLine → Item | 销售物料 |
-| 20 | HAS_SHIPMENT | SO → Shipment | 发货 |
-| 21 | HAS_SHIPMENT_LINE | Shipment → ShipLine | 发货行 |
-| 22 | HAS_AR_INVOICE | SO → ARInvoice | 应收发票 |
-| 23 | RECEIVED_FROM | ARReceipt → Customer | 收款来源 |
-| 24 | APPLIES_TO | ARReceipt → ARInvoice | 收款核销 |
-| 25 | BOM_FOR | BOM → Item | BOM父物料 |
-| 26 | USES_COMPONENT | BOMComp → Item | BOM子物料 |
-| 27 | PARENT_ORG | Org → Org | 组织层级 |
-| 28 | BELONGS_TO_ORG | Employee → Org | 员工归属 |
-| 29 | RECEIVED_AT | Receipt → Warehouse | 入库 |
-| 30 | SHIPPED_FROM | Shipment → Warehouse | 出库 |
-| 31 | ACCOUNTING_FOR | XLAEvent → Doc | 会计事件 |
-| 32 | POSTED_TO | JournalLine → GLAccount | 记账 |
-| 33 | HAS_JOURNAL_LINE | Journal → JournalLine | 分录行 |
-| 34 | DISTRIBUTED_TO | AcctDist → GLAccount | 会计分配 |
-| 35 | APPROVED_BY | Approval → Employee | 审批人 |
-| 36 | APPROVAL_FOR | Approval → Doc | 审批单据 |
-| 37 | CONTRACT_WITH | Contract → Party | 合同方 |
-| 38 | UNDER_CONTRACT | PO → Contract | 基于合同 |
+> 完整清单见 `10-ontology.md` 第 14.2 节 及 `deploy/docker/nebula-edges.ngql`
+
+原有 38 个 Edge Type 保持不变，v2.0 新增关键 Edge Type：
+
+| Edge Type | 方向 | 说明 | 域 |
+|-----------|------|------|---|
+| HAS_SUPPLIER_SITE | Supplier → SupplierSite | 供应商地点 | 供应商 |
+| HAS_CUSTOMER_SITE | Customer → CustomerSite | 客户地点 | 客户 |
+| HAS_PO_SHIPMENT | POLine → POShipment | 发运计划 | 采购 |
+| RECEIVES_SHIPMENT | ReceiptLine → POShipment | 收货匹配发运 | 采购 |
+| HAS_RCV_TRANSACTION | ReceiptLine → RcvTxn | 收货事务 | 采购 |
+| RCV_PARENT | RcvTxn → RcvTxn | 事务链 | 采购 |
+| HAS_INVOICE_DIST | InvLine → InvDist | 发票分配 | 应付 |
+| DIST_TO_ACCOUNT | InvDist → CCID | 分配到科目 | 应付 |
+| HAS_HOLD | Invoice → Hold | 冻结 | 应付 |
+| HOLD_RELEASED_BY | Hold → Employee | 释放人 | 应付 |
+| MATCHES_SHIPMENT | InvLine → POShipment | 三单匹配 | 应付 |
+| PAID_TO_SITE | Payment → SupplierSite | 付款到地点 | 应付 |
+| REMIT_TO_SITE | Invoice → SupplierSite | 发票付款地 | 应付 |
+| PAID_FROM_ACCOUNT | Payment → BankAccount | 付款银行 | 应付 |
+| HAS_AR_INVOICE_LINE | ARInvoice → ARInvLine | 应收发票行 | 应收 |
+| BILL_TO_SITE | SO → CustomerSite | 开票地点 | 应收 |
+| GENERATES_ENTRY | XLAEvent → XLAJrnl | XLA凭证 | 会计 |
+| TRANSFERRED_TO_GL | XLAJrnl → GLJrnl | 传输GL | 会计 |
+| IN_LEDGER | GLJrnl → Ledger | 账套 | 总账 |
+| IN_PERIOD | GLJrnl → GLPeriod | 期间 | 总账 |
+| BALANCE_FOR | GLBal → CCID | 余额科目 | 总账 |
 
 ---
 
