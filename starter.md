@@ -1,9 +1,9 @@
 # 企业级知识图谱智能助手项目 - 技术架构与实施全书
 
 > 项目代号：HoneyBadge
-> 文档版本：v3.1
-> 最后更新：2026-04-13
-> 说明：本文档整合了项目启动以来的所有技术讨论、架构决策、选型评估与实施计划，作为项目执行的唯一权威参考。v3.0 新增 Phase 1 Approach B 架构实现说明：浏览器直连 Matrix 方案，解决 HiClaw per-channel-peer 会话隔离问题。v3.1 新增：实际部署状态说明（开发模式单机部署 vs 生产目标架构）、容器清单、10倍流量扩容建议。
+> 文档版本：v3.2
+> 最后更新：2026-04-16
+> 说明：本文档整合了项目启动以来的所有技术讨论、架构决策、选型评估与实施计划，作为项目执行的唯一权威参考。v3.0 新增 Phase 1 Approach B 架构实现说明。v3.1 新增：实际部署状态说明、容器清单、10倍流量扩容建议。v3.2 新增：4.1.1 节—Manager-Worker 完整通信流程图（含 Finite Task Workflow 详细步骤）；4.1.2 节—多 Worker 分工与 SOUL.md 设计原则。
 
 ---
 
@@ -323,6 +323,18 @@ Matrix Room 是极轻量的消息通道（创建成本几乎为零），Worker �
 ```
 每个用户有独立的 Room（隔离会话），但共享 Worker Pool（节省资源）。
 
+> **概念理解：什么是 Matrix Room？**
+>
+> Matrix 是一个开源的去中心化即时通信协议（类似 Slack/微信的底层协议），Room 是其中的"聊天房间"。在本项目中，HiClaw 框架原生基于 Matrix 协议通信，Tuwunel 是 Matrix 服务端实现。
+>
+> 可以这样类比理解：
+> - **Matrix Room ≈ 微信群**：每个用户有自己专属的群，Manager 和 Worker 作为 Bot 加入群里协作
+> - **为什么不用普通 WebSocket/消息队列？** 因为 Matrix Room 提供了三个天然优势：
+>   1. 消息持久化 — 对话历史自动存储在 Tuwunel 中，无需额外实现
+>   2. 会话隔离 — 每用户独立 Room，天然隔离，无需自己管理
+>   3. 可审计性 — Room 历史天然可追溯，符合 L5 审计要求
+> - **Room 创建成本极低**（几乎为零），所以可以为每个用户随意创建；而 Worker 是重量级计算容器，需要 CPU/内存资源，所以少量 Worker 共享服务所有用户
+
 **Phase 1 关键实现细节：per-channel-peer 与用户身份**
 
 HiClaw Manager 的 `per-channel-peer` 设计：每个通信 peer（Matrix 用户 ID）只维护一个活跃的 DM 会话。
@@ -334,6 +346,161 @@ HiClaw Manager 的 `per-channel-peer` 设计：每个通信 peer（Matrix 用户
 - 每个用户用自己的 Matrix 身份与 Manager 建立 DM，Manager 为每个不同的 peer 独立维护会话
 - 浏览器通过 `matrix-js-sdk` 直接连接 Tuwunel（:6167），无需 honeybadge-server 代理
 - 权限信息通过消息中的 `x-hb-auth` 字段（roles JWT）传递给 graph-worker
+
+### 4.1.1 Manager-Worker 完整通信流程
+
+HiClaw 采用 **任务协作模式** 而非直接调用模式：Manager 与 Worker 通过 Matrix Room 异步通信，结果写入共享存储（MinIO），由心跳循环触发下一阶段。这种设计实现了真正的松耦合：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              Manager-Worker 任务协作流程                                        │
+│                              （Finite Task Workflow · 2026-04-16）                              │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────┐  Matrix DM   ┌─────────┐   创建任务目录    ┌─────────────────────┐
+  │ Admin   │ ──────────→  │ Manager │ ─────────────→  │ MinIO Shared Storage  │
+  │用户浏览器│              │ Agent   │                 │ /shared/tasks/{id}/   │
+  └─────────┘              └─────────┘                 │   meta.json           │
+                               │                        │   spec.md              │
+                               │                        └─────────────────────┘
+                               │                                  │
+                               │ 注册到 state.json                       │
+                               ▼                                  │
+                        ┌─────────────┐                            │
+                        │ state.json  │                            │
+                        │ active_tasks│                            │
+                        └─────────────┘                            │
+                               │                                    │
+                               │ @mention Worker                     │
+                               ▼                                    ▼
+  ┌─────────────┐    Matrix Room     ┌─────────────────────────────────────────────────────┐
+  │ Admin DM   │    (Worker Room)   │           Worker Container (graph-worker)            │
+  │ 房间       │ ←─────────────────  │  1. 读取 spec.md                                    │
+  │            │   "请处理任务       │  2. 通过 mcporter 调用 MCP tools                      │
+  │ !W555g2... │    task-xxx"       │  3. 查询 NebulaGraph                                │
+  └─────────────┘                    │  4. 写入 result.md 到共享存储                        │
+                               │       │  5. 在 Worker Room 发送 "Task completed"           │
+                               │       └─────────────────────────────────────────────────────┘
+                               │                                    │
+                               │ 写入 result.md                             │
+                               ▼                                    │
+                        ┌─────────────────────┐                      │
+                        │ MinIO Shared Storage │ ←────────────────────┘
+                        │ /shared/tasks/{id}/ │
+                        │   result.md         │
+                        └─────────────────────┘
+                                   │
+                    ┌──────────────┴──────────────┐
+                    │  Manager Heartbeat Loop     │
+                    │  （每 60 秒检查 state.json）│
+                    │  发现任务状态=completed     │
+                    └──────────────┬──────────────┘
+                                   │
+                                   │ 读取 result.md
+                                   ▼
+                        ┌─────────────────────┐
+                        │ 发送结果到 Admin DM   │
+                        │ 更新 state.json      │
+                        │ 任务状态→ completed  │
+                        └─────────────────────┘
+```
+
+**流程详细说明：**
+
+| 步骤 | 执行者 | 操作 | 存储位置 |
+|------|--------|------|---------|
+| 1 | Admin | 发送 ERP 查询请求 | Admin DM Room |
+| 2 | Manager | 接收请求，识别为 ERP 查询 | — |
+| 3 | Manager | 创建 task-{timestamp}/ 目录 | MinIO |
+| 4 | Manager | 写入 meta.json + spec.md | MinIO |
+| 5 | Manager | 执行 `manage-state.sh add-finite` | state.json |
+| 6 | Manager | @mention Worker in Worker Room | Matrix Room |
+| 7 | Manager | 立即返回"已转交处理"给 Admin | Admin DM Room |
+| 8 | Worker | 接收 @mention，读取 spec.md | MinIO |
+| 9 | Worker | 通过 mcporter 调用 MCP (nebula-mcp) | NebulaGraph |
+| 10 | Worker | 写入 result.md | MinIO |
+| 11 | Worker | 发送 "Task {id} completed" | Worker Room |
+| 12 | Manager | Heartbeat 检测到 completed 任务 | state.json |
+| 13 | Manager | 读取 result.md，发送结果给 Admin | Admin DM Room |
+
+**关键架构原则：**
+- **不直接调用**：Manager 不直接调用 Worker 的 MCP 工具，而是通过消息通知
+- **共享存储中介**：MinIO 充当 Manager 和 Worker 之间的数据中介，Worker 写入 result.md，Manager 后续读取
+- **异步通信**：Manager 在创建任务后立即返回，不阻塞等待 Worker 结果
+- **心跳驱动**：Manager 的 Heartbeat Loop（读取 HEARTBEAT.md）定期检查 state.json，发现完成任务后交付结果
+
+### 4.1.2 多 Worker 分工与 SOUL.md 设计
+
+HoneyBadge 采用 **多 Worker 异构架构**：每个 Worker 运行独立容器，拥有专属的 `SOUL.md`，负责不同类型的任务。
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              Worker Pool 分工架构                                           │
+│                              （按技能分组 · 独立扩缩容）                                      │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+
+                              ┌─────────────────┐
+                              │  HiClaw Manager  │
+                              │   (协调者)        │
+                              └────────┬────────┘
+                                       │
+              ┌────────────────────────┼────────────────────────┐
+              │                        │                        │
+              ▼                        ▼                        ▼
+    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+    │  graph-worker   │    │analytics-worker │    │ future-worker   │
+    │  (图谱查询专家)  │    │  (高级分析师)    │    │  (领域专家)      │
+    └────────┬────────┘    └────────┬────────┘    └────────┬────────┘
+             │                    │                        │
+    SOUL.md: Graph Worker   SOUL.md: Analytics Worker  SOUL.md: [待定义]
+    - nGQL 生成           - 趋势分析                      - 欺诈检测
+    - NebulaGraph 调用     - 异常检测                      - 预算分析
+    - L1-L3 校验          - 多维度统计                    - ...
+    MCP: nebula-mcp      MCP: nebula-mcp + ...          MCP: [待定义]
+```
+
+**为什么需要多个 Worker？**
+
+| 维度 | 单一 Worker 问题 | 多 Worker 优势 |
+|------|------------------|----------------|
+| **关注点分离** | 复杂prompt难以同时优化查询和分析 | 独立 SOUL.md，各司其职 |
+| **安全隔离** | 查询权限和分析权限混在一起 | 按 Worker 配置不同 MCP 访问范围 |
+| **性能隔离** | 重量级分析阻塞轻量级查询 | 独立扩缩容，互不影响 |
+| **资源成本** | 所有用户共享同一 Worker 镜像 | 按需分配计算资源 |
+| **可维护性** | prompt 过长难以维护 | 每个 Worker 专注单一领域 |
+
+**当前 Worker 分工：**
+
+| Worker | SOUL.md 角色定位 | 适用场景 | MCP 工具 |
+|--------|------------------|---------|---------|
+| **graph-worker** | 图谱查询专家 | 供应商查询、订单统计、库存搜索、基础 ERP 数据查询 | nebula-mcp (只读) |
+| **analytics-worker** | 高级数据分析师 | 趋势分析、异常检测、对比统计、fraud 识别 | nebula-mcp + audit + cache |
+| **future-worker-N** | 领域专家（待扩展） | 预算分析、合同风险评估、供应商绩效考核... | 按需扩展 |
+
+**SOUL.md 的作用：**
+
+每个 Worker 的 `SOUL.md` 是该 Agent 的"灵魂"，定义了：
+1. **身份定位**：我是谁，我能做什么
+2. **语言规范**：中文响应、技术术语使用
+3. **工具调用方式**：如何调用 MCP 工具
+4. **任务完成流程**：读取 spec.md → 执行 → 写入 result.md → 通知完成
+5. **约束规则**：不捏造数据、最大查询轮次等
+
+```
+hiclaw/workers/
+├── graph-worker/
+│   └── agent/
+│       └── SOUL.md          ← 图谱查询专家：专注 ERP 数据查询
+├── analytics-worker/
+│   └── agent/
+│       └── SOUL.md          ← 高级分析师：专注趋势与异常分析
+└── [future-workers]/        ← 按需扩展新领域专家
+```
+
+**扩缩容策略：**
+- graph-worker：根据并发查询数自动扩缩（HPA）
+- analytics-worker：由于计算密集，建议固定 2 副本 + 手动扩缩
+- future-worker：按需新增，无需修改 Manager 代码
 
 ### 4.2 图谱存储：NebulaGraph
 
@@ -417,10 +584,21 @@ HiClaw Manager 的 `per-channel-peer` 设计：每个通信 peer（Matrix 用户
 |------|------|----------|------|
 | 会话状态 | 短期上下文 | Redis Cluster | |
 | 长期记忆 | 向量化历史交互 | Milvus | Qdrant 也可选；规模不大时可后置引入 |
-| 非结构化文件 | PDF/图片 | MinIO | S3 兼容，自托管 |
+| 非结构化文件 | PDF/图片 | MinIO | S3 兼容，自托管（见下方说明） |
 | 图谱数据 | 知识存储 | NebulaGraph | |
 | 消息队列 | 异步任务/CDC | Kafka | 从一开始就使用，为 Phase 3 CDC 做准备 |
 | 审计日志 | 全链路审计 | PostgreSQL | 不可篡改，支持审计追溯 |
+
+> **概念理解：什么是 MinIO？**
+>
+> MinIO 是一个开源的高性能对象存储服务，完全兼容 Amazon S3 API——可以理解为"自建的 S3"。它**不是**传统文件系统，而是通过 HTTP API（PUT/GET）存取文件。
+>
+> 在本项目中 MinIO 承担三个角色：
+> 1. **Manager-Worker 数据中介**（最核心）：Manager 将任务规格（spec.md）写入 MinIO，Worker 读取后执行，再将结果（result.md）写回 MinIO，Manager 后续读取——实现了松耦合的异步协作
+> 2. **非结构化文件存储**：合同、图纸等文件存在 MinIO，图谱中只存元数据节点和关联边
+> 3. **备份存储**：NebulaGraph 的全量/增量备份写入 MinIO
+>
+> MinIO 支持挂载本地磁盘或通过 Docker volume 挂载外部存储（NFS 等）作为底层存储介质。但注意 MinIO 本身不能像普通硬盘一样挂载到操作系统（需要借助 s3fs-fuse 等工具，性能有损失）。
 
 **Milvus 在架构中的三个用途**：
 
