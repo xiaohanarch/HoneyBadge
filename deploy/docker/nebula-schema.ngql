@@ -1,5 +1,8 @@
 # ============================================================
-# HoneyBadge NebulaGraph Schema — Tags & Tag Indexes
+# HoneyBadge NebulaGraph Schema — Tags & Tag Indexes (v2.0)
+#
+# v2.0 changes: +23 new Tags based on Oracle EBS R12 ETRM
+# All DDL uses IF NOT EXISTS — safe to re-run on existing DB.
 #
 # Run by init-nebula.sh after space creation.
 # Can also be run manually:
@@ -15,7 +18,13 @@ USE honeybadge;
 # ============================================================
 CREATE TAG IF NOT EXISTS Supplier(supplier_number STRING NOT NULL, supplier_name STRING NOT NULL, supplier_type STRING, status STRING, country STRING, city STRING, address STRING, contact_person STRING, contact_phone STRING, contact_email STRING, bank_account STRING, bank_name STRING, tax_id STRING, currency STRING DEFAULT "CNY", payment_terms STRING, credit_rating STRING, registration_date TIMESTAMP, qualification_expiry TIMESTAMP, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
+# v2.0: SupplierSite — AP_SUPPLIER_SITES_ALL / PO_VENDOR_SITES_ALL
+CREATE TAG IF NOT EXISTS SupplierSite(site_code STRING NOT NULL, site_name STRING, address STRING, city STRING, country STRING, phone STRING, fax STRING, pay_site_flag STRING DEFAULT "Y", purchasing_site_flag STRING DEFAULT "Y", rfq_site_flag STRING DEFAULT "N", bank_account_name STRING, bank_account_number STRING, bank_name STRING, payment_method STRING, payment_terms STRING, pay_group STRING, status STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
 CREATE TAG IF NOT EXISTS Customer(customer_number STRING NOT NULL, customer_name STRING NOT NULL, customer_type STRING, status STRING, country STRING, city STRING, address STRING, contact_person STRING, contact_phone STRING, contact_email STRING, credit_limit DOUBLE, payment_terms STRING, tax_id STRING, currency STRING DEFAULT "CNY", sales_region STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: CustomerSite — HZ_CUST_ACCT_SITES_ALL + HZ_CUST_SITE_USES_ALL
+CREATE TAG IF NOT EXISTS CustomerSite(site_number STRING NOT NULL, site_name STRING, address STRING, city STRING, country STRING, site_use_code STRING, primary_flag STRING DEFAULT "N", status STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS Item(item_number STRING NOT NULL, item_name STRING NOT NULL, item_description STRING, item_type STRING, category STRING, uom STRING, standard_cost DOUBLE, list_price DOUBLE, weight DOUBLE, weight_uom STRING, lead_time_days INT64, safety_stock DOUBLE, min_order_qty DOUBLE, status STRING, abc_class STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
@@ -44,22 +53,40 @@ CREATE TAG IF NOT EXISTS PurchaseOrder(po_number STRING NOT NULL, po_type STRING
 
 CREATE TAG IF NOT EXISTS PurchaseOrderLine(line_number INT64 NOT NULL, line_type STRING, quantity DOUBLE NOT NULL, unit_price DOUBLE NOT NULL, amount DOUBLE NOT NULL, uom STRING, need_by_date TIMESTAMP, promised_date TIMESTAMP, received_quantity DOUBLE DEFAULT 0, invoiced_quantity DOUBLE DEFAULT 0, status STRING, tax_code STRING, tax_rate DOUBLE DEFAULT 0, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
+# v2.0: POShipment — PO_LINE_LOCATIONS_ALL (three-way match unit)
+CREATE TAG IF NOT EXISTS POShipment(shipment_number INT64 NOT NULL, shipment_type STRING, quantity DOUBLE NOT NULL, quantity_received DOUBLE DEFAULT 0, quantity_billed DOUBLE DEFAULT 0, quantity_cancelled DOUBLE DEFAULT 0, need_by_date TIMESTAMP, promised_date TIMESTAMP, ship_to_location STRING, receiving_routing STRING, match_option STRING DEFAULT "R", price_override DOUBLE, amount DOUBLE, status STRING, accrue_on_receipt_flag STRING DEFAULT "Y", inspection_required_flag STRING DEFAULT "N", org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
 CREATE TAG IF NOT EXISTS Receipt(receipt_number STRING NOT NULL, receipt_type STRING, receipt_date TIMESTAMP NOT NULL, status STRING, receiver STRING, total_quantity DOUBLE, warehouse STRING, comments STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS ReceiptLine(line_number INT64 NOT NULL, received_quantity DOUBLE NOT NULL, accepted_quantity DOUBLE, rejected_quantity DOUBLE DEFAULT 0, uom STRING, inspection_status STRING, lot_number STRING, sublocation STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: ReceivingTransaction — RCV_TRANSACTIONS
+CREATE TAG IF NOT EXISTS ReceivingTransaction(transaction_id STRING NOT NULL, transaction_type STRING NOT NULL, transaction_date TIMESTAMP NOT NULL, quantity DOUBLE NOT NULL, uom STRING, parent_transaction_id STRING, source_doc_type STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS SupplierQualification(qualification_id STRING NOT NULL, qualification_type STRING, status STRING, issue_date TIMESTAMP, expiry_date TIMESTAMP, issuing_body STRING, scope STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 # ============================================================
 # Payable Tags (Accounts Payable)
 # ============================================================
-CREATE TAG IF NOT EXISTS Invoice(invoice_number STRING NOT NULL, invoice_type STRING, invoice_date TIMESTAMP NOT NULL, due_date TIMESTAMP, status STRING, total_amount DOUBLE NOT NULL, tax_amount DOUBLE DEFAULT 0, currency STRING DEFAULT "CNY", exchange_rate DOUBLE DEFAULT 1.0, payment_method STRING, description STRING, gl_date TIMESTAMP, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+CREATE TAG IF NOT EXISTS Invoice(invoice_number STRING NOT NULL, invoice_type STRING, invoice_date TIMESTAMP NOT NULL, due_date TIMESTAMP, status STRING, total_amount DOUBLE NOT NULL, tax_amount DOUBLE DEFAULT 0, currency STRING DEFAULT "CNY", exchange_rate DOUBLE DEFAULT 1.0, payment_method STRING, description STRING, gl_date TIMESTAMP, pay_group STRING, source STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS InvoiceLine(line_number INT64 NOT NULL, line_type STRING, quantity DOUBLE, unit_price DOUBLE, amount DOUBLE NOT NULL, tax_code STRING, tax_rate DOUBLE, description STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: InvoiceDistribution — AP_INVOICE_DISTRIBUTIONS_ALL
+CREATE TAG IF NOT EXISTS InvoiceDistribution(distribution_id STRING NOT NULL, distribution_line_number INT64, line_type STRING, amount DOUBLE NOT NULL, base_amount DOUBLE, accounting_date TIMESTAMP, accrual_posted_flag STRING DEFAULT "N", posted_flag STRING DEFAULT "N", match_status STRING, reversal_flag STRING DEFAULT "N", parent_reversal_id STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: InvoiceHold — AP_HOLDS_ALL
+CREATE TAG IF NOT EXISTS InvoiceHold(hold_id STRING NOT NULL, hold_type STRING NOT NULL, hold_reason STRING, hold_date TIMESTAMP NOT NULL, release_date TIMESTAMP, release_reason STRING, held_by STRING, released_by STRING, status STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS Payment(payment_number STRING NOT NULL, payment_type STRING, payment_date TIMESTAMP NOT NULL, amount DOUBLE NOT NULL, currency STRING DEFAULT "CNY", exchange_rate DOUBLE DEFAULT 1.0, status STRING, bank_account STRING, payment_method STRING, check_number STRING, cleared_date TIMESTAMP, void_date TIMESTAMP, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS PaymentBatch(batch_number STRING NOT NULL, batch_date TIMESTAMP, total_amount DOUBLE, payment_count INT64, status STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: PaymentSchedule — AP_PAYMENT_SCHEDULES_ALL
+CREATE TAG IF NOT EXISTS PaymentSchedule(schedule_id STRING NOT NULL, installment_number INT64 DEFAULT 1, due_date TIMESTAMP NOT NULL, gross_amount DOUBLE NOT NULL, amount_remaining DOUBLE, payment_status STRING, discount_date TIMESTAMP, discount_amount_available DOUBLE DEFAULT 0, second_discount_date TIMESTAMP, second_discount_amount DOUBLE DEFAULT 0, third_discount_date TIMESTAMP, third_discount_amount DOUBLE DEFAULT 0, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: ExpenseReport — AP_EXPENSE_REPORTS_ALL
+CREATE TAG IF NOT EXISTS ExpenseReport(report_number STRING NOT NULL, report_date TIMESTAMP NOT NULL, employee_id STRING, total_amount DOUBLE NOT NULL, currency STRING DEFAULT "CNY", status STRING, purpose STRING, submitted_date TIMESTAMP, approved_date TIMESTAMP, paid_date TIMESTAMP, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 # ============================================================
 # Order-to-Cash Tags
@@ -74,29 +101,85 @@ CREATE TAG IF NOT EXISTS ShipmentLine(line_number INT64 NOT NULL, shipped_quanti
 
 CREATE TAG IF NOT EXISTS ARInvoice(invoice_number STRING NOT NULL, invoice_type STRING, invoice_date TIMESTAMP NOT NULL, due_date TIMESTAMP, status STRING, total_amount DOUBLE NOT NULL, tax_amount DOUBLE DEFAULT 0, currency STRING DEFAULT "CNY", exchange_rate DOUBLE DEFAULT 1.0, payment_terms STRING, gl_date TIMESTAMP, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
+# v2.0: ARInvoiceLine — RA_CUSTOMER_TRX_LINES_ALL
+CREATE TAG IF NOT EXISTS ARInvoiceLine(line_number INT64 NOT NULL, line_type STRING, quantity DOUBLE, unit_selling_price DOUBLE, amount DOUBLE NOT NULL, tax_code STRING, tax_rate DOUBLE, description STRING, revenue_amount DOUBLE, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
 CREATE TAG IF NOT EXISTS ARReceipt(receipt_number STRING NOT NULL, receipt_type STRING, receipt_date TIMESTAMP NOT NULL, amount DOUBLE NOT NULL, currency STRING DEFAULT "CNY", status STRING, payment_method STRING, bank_account STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 # ============================================================
 # General Ledger & Accounting Tags
 # ============================================================
+
+# v2.0: Ledger — GL_LEDGERS
+CREATE TAG IF NOT EXISTS Ledger(ledger_id STRING NOT NULL, ledger_name STRING NOT NULL, short_name STRING, chart_of_accounts_id STRING, currency_code STRING, period_set_name STRING, period_type STRING, description STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: GLPeriod — GL_PERIOD_STATUSES
+CREATE TAG IF NOT EXISTS GLPeriod(period_name STRING NOT NULL, period_year INT64, period_num INT64, start_date TIMESTAMP, end_date TIMESTAMP, closing_status STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: GLCodeCombination — GL_CODE_COMBINATIONS (Accounting Flexfield / CCID)
+CREATE TAG IF NOT EXISTS GLCodeCombination(code_combination_id STRING NOT NULL, segment1 STRING, segment2 STRING, segment3 STRING, segment4 STRING, segment5 STRING, concatenated_segments STRING, enabled_flag STRING DEFAULT "Y", summary_flag STRING DEFAULT "N", account_type STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
 CREATE TAG IF NOT EXISTS GLAccount(account_code STRING NOT NULL, account_name STRING NOT NULL, account_type STRING, parent_account STRING, level INT64, is_leaf BOOL DEFAULT true, currency STRING, status STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: GLJournalBatch — GL_JE_BATCHES
+CREATE TAG IF NOT EXISTS GLJournalBatch(batch_id STRING NOT NULL, batch_name STRING, status STRING, default_period_name STRING, posted_date TIMESTAMP, description STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS GLJournalEntry(journal_number STRING NOT NULL, journal_name STRING, journal_source STRING, journal_category STRING, period_name STRING, gl_date TIMESTAMP NOT NULL, status STRING, total_debit DOUBLE, total_credit DOUBLE, description STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS GLJournalLine(line_number INT64 NOT NULL, debit_amount DOUBLE DEFAULT 0, credit_amount DOUBLE DEFAULT 0, description STRING, reference STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
+# v2.0: GLBalance — GL_BALANCES
+CREATE TAG IF NOT EXISTS GLBalance(period_name STRING NOT NULL, currency_code STRING, period_net_dr DOUBLE DEFAULT 0, period_net_cr DOUBLE DEFAULT 0, begin_balance_dr DOUBLE DEFAULT 0, begin_balance_cr DOUBLE DEFAULT 0, translated_flag STRING DEFAULT "N", org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: CurrencyRate — GL_DAILY_RATES
+CREATE TAG IF NOT EXISTS CurrencyRate(from_currency STRING NOT NULL, to_currency STRING NOT NULL, conversion_date TIMESTAMP NOT NULL, conversion_type STRING, conversion_rate DOUBLE NOT NULL, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
 CREATE TAG IF NOT EXISTS XLAEvent(event_id STRING NOT NULL, event_class STRING, event_type STRING, event_date TIMESTAMP NOT NULL, accounting_date TIMESTAMP, status STRING, source_doc_type STRING, source_doc_id STRING, description STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
+# v2.0: XLAJournalEntry — XLA_AE_HEADERS
+CREATE TAG IF NOT EXISTS XLAJournalEntry(ae_header_id STRING NOT NULL, accounting_entry_status STRING, accounting_date TIMESTAMP, period_name STRING, je_category STRING, gl_transfer_status STRING DEFAULT "N", description STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: XLAJournalLine — XLA_AE_LINES
+CREATE TAG IF NOT EXISTS XLAJournalLine(ae_line_num INT64 NOT NULL, accounting_class STRING, entered_dr DOUBLE DEFAULT 0, entered_cr DOUBLE DEFAULT 0, accounted_dr DOUBLE DEFAULT 0, accounted_cr DOUBLE DEFAULT 0, currency_code STRING, currency_conversion_rate DOUBLE DEFAULT 1.0, description STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
 CREATE TAG IF NOT EXISTS AccountingDistribution(distribution_id STRING NOT NULL, line_number INT64, debit_amount DOUBLE DEFAULT 0, credit_amount DOUBLE DEFAULT 0, currency STRING DEFAULT "CNY", accounting_class STRING, posted_flag BOOL DEFAULT false, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: XLADistributionLink — XLA_DISTRIBUTION_LINKS
+CREATE TAG IF NOT EXISTS XLADistributionLink(link_id STRING NOT NULL, source_distribution_type STRING, source_distribution_id STRING, applied_to_dist_id STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS ApprovalRecord(approval_id STRING NOT NULL, doc_type STRING, doc_number STRING, approval_action STRING, approver STRING, approval_date TIMESTAMP, comments STRING, approval_level INT64, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 CREATE TAG IF NOT EXISTS Contract(contract_number STRING NOT NULL, contract_type STRING, contract_name STRING, status STRING, start_date TIMESTAMP, end_date TIMESTAMP, total_amount DOUBLE, currency STRING DEFAULT "CNY", description STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
 
 # ============================================================
+# Inventory Tags (v2.0)
+# ============================================================
+
+# v2.0: InventoryTransaction — MTL_MATERIAL_TRANSACTIONS
+CREATE TAG IF NOT EXISTS InventoryTransaction(transaction_id STRING NOT NULL, transaction_type STRING NOT NULL, transaction_date TIMESTAMP NOT NULL, quantity DOUBLE NOT NULL, uom STRING, transaction_cost DOUBLE, source_type STRING, source_id STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: ItemCategory — MTL_CATEGORIES_B
+CREATE TAG IF NOT EXISTS ItemCategory(category_id STRING NOT NULL, category_set_name STRING, segment1 STRING, segment2 STRING, description STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# ============================================================
+# Cash Management Tags (v2.0)
+# ============================================================
+
+# v2.0: BankAccount — CE_BANK_ACCOUNTS
+CREATE TAG IF NOT EXISTS BankAccount(bank_account_id STRING NOT NULL, bank_account_name STRING, bank_account_number STRING NOT NULL, bank_name STRING, branch_name STRING, currency_code STRING DEFAULT "CNY", account_type STRING, status STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: BankStatement — CE_STATEMENT_HEADERS
+CREATE TAG IF NOT EXISTS BankStatement(statement_id STRING NOT NULL, statement_number STRING, statement_date TIMESTAMP NOT NULL, opening_balance DOUBLE, closing_balance DOUBLE, status STRING, org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# v2.0: BankStatementLine — CE_STATEMENT_LINES
+CREATE TAG IF NOT EXISTS BankStatementLine(line_number INT64 NOT NULL, trx_date TIMESTAMP, trx_type STRING, amount DOUBLE NOT NULL, bank_trx_number STRING, status STRING, reconciled_flag STRING DEFAULT "N", org_id INT64, dept_id INT64, data_scope STRING, created_at TIMESTAMP, updated_at TIMESTAMP, etl_batch_id STRING, source_system STRING, is_active BOOL DEFAULT true);
+
+# ============================================================
 # Tag Indexes
 # (REBUILD TAG INDEX is run by init-nebula.sh after this file)
 # ============================================================
+
+# --- Primary key indexes (exact lookup) ---
 CREATE TAG INDEX IF NOT EXISTS idx_supplier_number ON Supplier(supplier_number(64));
 CREATE TAG INDEX IF NOT EXISTS idx_customer_number ON Customer(customer_number(64));
 CREATE TAG INDEX IF NOT EXISTS idx_item_number ON Item(item_number(64));
@@ -115,17 +198,40 @@ CREATE TAG INDEX IF NOT EXISTS idx_journal_number ON GLJournalEntry(journal_numb
 CREATE TAG INDEX IF NOT EXISTS idx_contract_number ON Contract(contract_number(64));
 CREATE TAG INDEX IF NOT EXISTS idx_bom_number ON BOM(bom_number(64));
 
+# v2.0: indexes for new Tags
+CREATE TAG INDEX IF NOT EXISTS idx_supplier_site_code ON SupplierSite(site_code(64));
+CREATE TAG INDEX IF NOT EXISTS idx_customer_site_number ON CustomerSite(site_number(64));
+CREATE TAG INDEX IF NOT EXISTS idx_hold_type ON InvoiceHold(hold_type(32));
+CREATE TAG INDEX IF NOT EXISTS idx_hold_status ON InvoiceHold(status(20));
+CREATE TAG INDEX IF NOT EXISTS idx_expense_report_number ON ExpenseReport(report_number(64));
+CREATE TAG INDEX IF NOT EXISTS idx_ar_invoice_line_type ON ARInvoiceLine(line_type(20));
+CREATE TAG INDEX IF NOT EXISTS idx_ledger_name ON Ledger(ledger_name(64));
+CREATE TAG INDEX IF NOT EXISTS idx_gl_period_name ON GLPeriod(period_name(20));
+CREATE TAG INDEX IF NOT EXISTS idx_gl_period_status ON GLPeriod(closing_status(4));
+CREATE TAG INDEX IF NOT EXISTS idx_ccid ON GLCodeCombination(code_combination_id(32));
+CREATE TAG INDEX IF NOT EXISTS idx_ccid_segments ON GLCodeCombination(concatenated_segments(64));
+CREATE TAG INDEX IF NOT EXISTS idx_gl_batch_id ON GLJournalBatch(batch_id(64));
+CREATE TAG INDEX IF NOT EXISTS idx_xla_event_id ON XLAEvent(event_id(64));
+CREATE TAG INDEX IF NOT EXISTS idx_xla_ae_header ON XLAJournalEntry(ae_header_id(64));
+CREATE TAG INDEX IF NOT EXISTS idx_xla_gl_transfer ON XLAJournalEntry(gl_transfer_status(4));
+CREATE TAG INDEX IF NOT EXISTS idx_inv_txn_type ON InventoryTransaction(transaction_type(32));
+CREATE TAG INDEX IF NOT EXISTS idx_bank_account_number ON BankAccount(bank_account_number(64));
+CREATE TAG INDEX IF NOT EXISTS idx_rcv_txn_type ON ReceivingTransaction(transaction_type(32));
+
+# --- Status indexes (filter queries) ---
 CREATE TAG INDEX IF NOT EXISTS idx_po_status ON PurchaseOrder(status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_invoice_status ON Invoice(status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_so_status ON SalesOrder(status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_supplier_status ON Supplier(status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_item_status ON Item(status(20));
 
+# --- Permission field indexes (access control) ---
 CREATE TAG INDEX IF NOT EXISTS idx_po_org ON PurchaseOrder(org_id);
 CREATE TAG INDEX IF NOT EXISTS idx_invoice_org ON Invoice(org_id);
 CREATE TAG INDEX IF NOT EXISTS idx_so_org ON SalesOrder(org_id);
 CREATE TAG INDEX IF NOT EXISTS idx_supplier_org ON Supplier(org_id);
 
+# --- Composite indexes ---
 CREATE TAG INDEX IF NOT EXISTS idx_po_date_status ON PurchaseOrder(order_date, status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_invoice_date_status ON Invoice(invoice_date, status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_so_date_status ON SalesOrder(order_date, status(20));
