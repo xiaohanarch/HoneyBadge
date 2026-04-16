@@ -505,7 +505,7 @@ async def get_schema(space: str = "") -> str:
 
 
 @mcp.tool()
-async def generate_query(question: str, schema_info: str = "") -> dict:
+async def generate_query(question: str, schema_info: str = "", user_context: dict | None = None) -> dict:
     """Generate nGQL query from a natural-language question.
 
     Calls the LLM to translate a user question into an nGQL (NebulaGraph
@@ -515,6 +515,8 @@ async def generate_query(question: str, schema_info: str = "") -> dict:
     Args:
         question: User's natural-language question.
         schema_info: Optional pre-loaded schema text. Auto-loaded if empty.
+        user_context: Optional dict with shape {"user_id": str, "permissions": {...}}.
+                      Accepted for compatibility but not used during query generation.
     """
     return await generate_ngql_impl(
         _get_llm(), _get_nebula(), question, schema_info=schema_info

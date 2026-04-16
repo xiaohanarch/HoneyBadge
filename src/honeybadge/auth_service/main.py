@@ -16,8 +16,8 @@ from typing import Any
 
 import httpx
 import structlog
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from jose import jwt
 from pydantic import BaseModel
@@ -79,6 +79,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def options_middleware(request: Request, call_next):
+    """Globally intercept OPTIONS preflight requests and return CORS headers.
+
+    Without this, some HTTP clients (notably the Vite proxy forwarding from a
+    browser) get a 405 because Starlette's routing layer can't find an
+    explicit OPTIONS handler for the path.
+    """
+    if request.method == "OPTIONS":
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+                "Access-Control-Max-Age": "3600",
+            },
+        )
+    return await call_next(request)
 
 # ---------------------------------------------------------------------------
 # Request / Response models
