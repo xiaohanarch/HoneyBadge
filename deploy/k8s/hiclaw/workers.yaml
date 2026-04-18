@@ -1,0 +1,133 @@
+# =============================================================================
+# HiClaw Workers — Stateless agent containers
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hiclaw-graph-worker
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-graph-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hiclaw-graph-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hiclaw-graph-worker
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: graph-worker
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.6
+          command: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
+          env:
+            - name: HICLAW_WORKER_NAME
+              value: "graph-worker"
+            - name: HICLAW_FS_ENDPOINT
+              value: "http://hiclaw-manager:9000"
+            - name: HICLAW_FS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_USER
+            - name: HICLAW_FS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_PASSWORD
+            - name: HICLAW_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_REGISTRATION_TOKEN
+            - name: HICLAW_MATRIX_DOMAIN
+              value: "matrix-local.hiclaw.io"
+            - name: TZ
+              value: "Asia/Shanghai"
+          resources:
+            requests:
+              memory: "512Mi"
+            limits:
+              memory: "2Gi"
+          volumeMounts:
+            - name: init-scripts
+              mountPath: /opt/honeybadge/init/worker-init-wrapper.sh
+              subPath: worker-init-wrapper.sh
+              readOnly: true
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: hiclaw-init-scripts
+            defaultMode: 0755
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hiclaw-analytics-worker
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-analytics-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hiclaw-analytics-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hiclaw-analytics-worker
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: analytics-worker
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.6
+          command: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
+          env:
+            - name: HICLAW_WORKER_NAME
+              value: "analytics-worker"
+            - name: HICLAW_FS_ENDPOINT
+              value: "http://hiclaw-manager:9000"
+            - name: HICLAW_FS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_USER
+            - name: HICLAW_FS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_PASSWORD
+            - name: HICLAW_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_REGISTRATION_TOKEN
+            - name: HICLAW_MATRIX_DOMAIN
+              value: "matrix-local.hiclaw.io"
+            - name: TZ
+              value: "Asia/Shanghai"
+          resources:
+            requests:
+              memory: "512Mi"
+            limits:
+              memory: "2Gi"
+          volumeMounts:
+            - name: init-scripts
+              mountPath: /opt/honeybadge/init/worker-init-wrapper.sh
+              subPath: worker-init-wrapper.sh
+              readOnly: true
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: hiclaw-init-scripts
+            defaultMode: 0755

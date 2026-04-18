@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: honeybadge-permissions
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-permissions
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: honeybadge-permissions
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: honeybadge-permissions
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: permissions
+          image: honeybadge-permissions:latest
+          ports:
+            - containerPort: 8092
+          env:
+            - name: TZ
+              value: "Asia/Shanghai"
+          readinessProbe:
+            tcpSocket:
+              port: 8092
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: honeybadge-permissions
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-permissions
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: honeybadge-permissions
+  ports:
+    - port: 8092
+      targetPort: 8092

@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/part-of: honeybadge
+data:
+  init.sql: |
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+    CREATE SCHEMA IF NOT EXISTS honeybadge_audit;
+    SET search_path TO honeybadge_audit;
+
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+        id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id         VARCHAR(64) NOT NULL,
+        session_id      VARCHAR(64) NOT NULL UNIQUE,
+        title           VARCHAR(256),
+        room_id         VARCHAR(256),
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        archived_at     TIMESTAMPTZ,
+        message_count   INT DEFAULT 0,
+        last_trace_id   VARCHAR(64),
+        status          VARCHAR(20) DEFAULT 'active'
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON chat_sessions(user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON chat_sessions(session_id);
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id      VARCHAR(64) NOT NULL,
+        role            VARCHAR(20) NOT NULL,
+        content         TEXT NOT NULL,
+        message_type    VARCHAR(20) DEFAULT 'text',
+        metadata        JSONB,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        trace_id            VARCHAR(64) NOT NULL UNIQUE,
+        question            TEXT NOT NULL,
+        cypher              TEXT NOT NULL,
+        raw_result          JSONB NOT NULL,
+        summary             TEXT,
+        user_id             VARCHAR(64) NOT NULL,
+        session_id          VARCHAR(64) NOT NULL,
+        execution_time_ms   INT NOT NULL,
+        row_count           INT NOT NULL,
+        error_message       TEXT,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_trace_id ON audit_logs(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_session_id ON audit_logs(session_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS analytics_runs (
+        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        trace_id            VARCHAR(64) NOT NULL UNIQUE,
+        user_question       TEXT NOT NULL,
+        analysis_type       VARCHAR(50),
+        report              TEXT,
+        steps_metadata      JSONB,
+        total_rows          INT DEFAULT 0,
+        user_id             VARCHAR(64) NOT NULL,
+        session_id          VARCHAR(64) NOT NULL,
+        execution_time_ms   INT NOT NULL,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_analytics_trace_id ON analytics_runs(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_analytics_user_id ON analytics_runs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_analytics_created_at ON analytics_runs(created_at DESC);
+
+    CREATE OR REPLACE FUNCTION update_updated_at_column()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        NEW.updated_at = NOW();
+        RETURN NEW;
+    END;
+    $$ language 'plpgsql';
+
+    CREATE TRIGGER update_chat_sessions_updated_at
+        BEFORE UPDATE ON chat_sessions
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column();

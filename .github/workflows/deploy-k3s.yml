@@ -1,0 +1,132 @@
+name: Build & Deploy to k3s
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      skip_deploy:
+        description: 'Skip deployment (build only)'
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: registry.cn-hangzhou.aliyuncs.com
+  NAMESPACE: honeybadge
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: honeybadge-server
+            dockerfile: deploy/docker/Dockerfile.server
+          - name: honeybadge-auth
+            dockerfile: src/honeybadge/auth_service/Dockerfile
+          - name: honeybadge-permissions
+            dockerfile: src/honeybadge/permission_service/Dockerfile
+          - name: honeybadge-nebula-mcp
+            dockerfile: mcp-servers/honeybadge-nebula-mcp/Dockerfile
+          - name: honeybadge-audit-mcp
+            dockerfile: mcp-servers/honeybadge-audit-mcp/Dockerfile
+          - name: honeybadge-cache-mcp
+            dockerfile: mcp-servers/honeybadge-cache-mcp/Dockerfile
+          - name: honeybadge-frontend
+            dockerfile: frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Alibaba Cloud ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:buildcache,mode=max
+
+  deploy:
+    needs: build-and-push
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to k3s via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          command_timeout: 10m
+          script: |
+            set -e
+
+            REGISTRY="${{ env.REGISTRY }}"
+            NAMESPACE="${{ env.NAMESPACE }}"
+            TAG="${{ github.sha }}"
+            REPO_DIR="/opt/honeybadge"
+
+            # Clone or pull repo
+            if [ -d "$REPO_DIR/.git" ]; then
+              cd $REPO_DIR && git fetch origin && git reset --hard origin/master
+            else
+              git clone https://github.com/${{ github.repository }}.git $REPO_DIR
+              cd $REPO_DIR
+            fi
+
+            # Create namespace
+            kubectl create namespace honeybadge --dry-run=client -o yaml | kubectl apply -f -
+
+            # Update image tags
+            cd deploy/k8s
+            kustomize edit set image \
+              honeybadge-server=${REGISTRY}/${NAMESPACE}/honeybadge-server:${TAG} \
+              honeybadge-auth=${REGISTRY}/${NAMESPACE}/honeybadge-auth:${TAG} \
+              honeybadge-permissions=${REGISTRY}/${NAMESPACE}/honeybadge-permissions:${TAG} \
+              honeybadge-nebula-mcp=${REGISTRY}/${NAMESPACE}/honeybadge-nebula-mcp:${TAG} \
+              honeybadge-audit-mcp=${REGISTRY}/${NAMESPACE}/honeybadge-audit-mcp:${TAG} \
+              honeybadge-cache-mcp=${REGISTRY}/${NAMESPACE}/honeybadge-cache-mcp:${TAG} \
+              honeybadge-frontend=${REGISTRY}/${NAMESPACE}/honeybadge-frontend:${TAG}
+
+            # Apply all manifests
+            kubectl apply -k .
+
+            # Wait for stateful services first
+            echo "=== Waiting for stateful services ==="
+            kubectl -n honeybadge rollout status statefulset/nebula-metad --timeout=120s || true
+            kubectl -n honeybadge rollout status statefulset/nebula-storaged --timeout=120s || true
+            kubectl -n honeybadge rollout status statefulset/redis --timeout=60s || true
+            kubectl -n honeybadge rollout status statefulset/postgres --timeout=60s || true
+
+            # Wait for deployments
+            echo "=== Waiting for deployments ==="
+            for deploy in nebula-graphd hiclaw-manager honeybadge-server honeybadge-auth \
+                          honeybadge-permissions honeybadge-nebula-mcp honeybadge-audit-mcp \
+                          honeybadge-cache-mcp frontend; do
+              kubectl -n honeybadge rollout status deployment/${deploy} --timeout=300s || true
+            done
+
+            # Wait for workers (depend on manager)
+            for deploy in hiclaw-graph-worker hiclaw-analytics-worker; do
+              kubectl -n honeybadge rollout status deployment/${deploy} --timeout=300s || true
+            done
+
+            echo ""
+            echo "=== Deployment complete! Tag: ${TAG} ==="
+            kubectl -n honeybadge get pods -o wide

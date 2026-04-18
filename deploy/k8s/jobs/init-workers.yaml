@@ -1,0 +1,50 @@
+# Verify HiClaw worker initialization
+# Manager auto-inits via entrypoint-wrapper.sh → manager-init-internal.sh
+# This job verifies configs exist in MinIO
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-workers
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: init-workers
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-manager
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - 'until wget -q --spider http://hiclaw-manager:9000/minio/health/live; do echo "Waiting for manager MinIO..."; sleep 10; done'
+      containers:
+        - name: verify
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.6
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Verifying MinIO worker configs..."
+              mc alias set hiclaw http://hiclaw-manager:9000 ${HICLAW_ADMIN_USER} ${HICLAW_ADMIN_PASSWORD}
+              mc ls hiclaw/hiclaw-storage/agents/ || {
+                echo "ERROR: Worker configs not found in MinIO"
+                exit 1
+              }
+              echo "Worker initialization verified successfully"
+          env:
+            - name: HICLAW_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_USER
+            - name: HICLAW_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_PASSWORD
