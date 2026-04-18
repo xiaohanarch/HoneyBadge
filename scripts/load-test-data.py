@@ -146,11 +146,14 @@ def execute(pool: ConnectionPool, ngql: str, space: str = "") -> bool:
 
 
 def load_vertices(pool: ConnectionPool, csv_dir: str, space: str,
-                  tag_schema: dict, batch_size: int = 50):
-    """Load vertex CSV files, converting types based on schema."""
+                  tag_schema: dict, batch_size: int = 50) -> dict:
+    """Load vertex CSV files, converting types based on schema.
+
+    Returns: {tag_name: inserted_count} for downstream summary/verification.
+    """
     files = sorted(f for f in os.listdir(csv_dir) if f.endswith(".csv"))
     total_inserted = 0
-    total_skipped = 0
+    inserted_by_tag = {}
 
     for filename in files:
         tag_name = filename.replace(".csv", "")
@@ -169,6 +172,7 @@ def load_vertices(pool: ConnectionPool, csv_dir: str, space: str,
 
         if not rows:
             print(f"  {tag_name}: 0 rows (skip)")
+            inserted_by_tag[tag_name] = 0
             continue
 
         # Check which CSV props are in schema
@@ -211,15 +215,26 @@ def load_vertices(pool: ConnectionPool, csv_dir: str, space: str,
         err_msg = f" ({errors} errors)" if errors else ""
         print(f"  {tag_name}: {inserted}/{len(rows)} inserted{err_msg}{extra}")
         total_inserted += inserted
+        inserted_by_tag[tag_name] = inserted
 
     print(f"\n  Total vertices inserted: {total_inserted}")
+    return inserted_by_tag
 
 
 def load_edges(pool: ConnectionPool, csv_dir: str, space: str,
-               edge_schema: dict, batch_size: int = 50):
-    """Load edge CSV files, converting types based on schema."""
+               edge_schema: dict, batch_size: int = 50,
+               vertex_counts: dict = None) -> dict:
+    """Load edge CSV files, converting types based on schema.
+
+    If vertex_counts is provided, warn (but do not skip) when an edge file is
+    about to load before its expected source/destination vertex tags have any
+    rows in the just-completed vertex pass.
+
+    Returns: {edge_name: (inserted, total_rows, errors)} for downstream summary.
+    """
     files = sorted(f for f in os.listdir(csv_dir) if f.endswith(".csv"))
     total_inserted = 0
+    summary = {}
 
     for filename in files:
         edge_name = filename.replace(".csv", "")
@@ -238,7 +253,24 @@ def load_edges(pool: ConnectionPool, csv_dir: str, space: str,
 
         if not rows:
             print(f"  {edge_name}: 0 rows (skip)")
+            summary[edge_name] = (0, 0, 0)
             continue
+
+        # Defensive check: warn if src/dst vertex tag prefix has no loaded vertices.
+        # This catches the "edge loaded before vertex" failure mode early.
+        if vertex_counts is not None:
+            src_prefix = rows[0]["src_vid"].split(":", 1)[0]
+            dst_prefix = rows[0]["dst_vid"].split(":", 1)[0]
+            warn_parts = []
+            for prefix, side in ((src_prefix, "src"), (dst_prefix, "dst")):
+                # Find tag(s) whose first row matches this VID prefix.
+                # We can't map prefix→tag directly without a registry, so we do a
+                # best-effort warning: if NO vertex tag has any rows, flag it.
+                if not any(c > 0 for c in vertex_counts.values()):
+                    warn_parts.append(f"NO VERTICES LOADED")
+                    break
+            if warn_parts:
+                print(f"  {edge_name}: WARNING — {', '.join(warn_parts)}")
 
         sample_props = json.loads(rows[0]["properties"])
         csv_props = set(sample_props.keys())
@@ -279,8 +311,10 @@ def load_edges(pool: ConnectionPool, csv_dir: str, space: str,
         err_msg = f" ({errors} errors)" if errors else ""
         print(f"  {edge_name}: {inserted}/{len(rows)} inserted{err_msg}")
         total_inserted += inserted
+        summary[edge_name] = (inserted, len(rows), errors)
 
     print(f"\n  Total edges inserted: {total_inserted}")
+    return summary
 
 
 def main():
@@ -289,11 +323,21 @@ def main():
     parser.add_argument("--port", type=int, default=9669, help="NebulaGraph port")
     parser.add_argument("--space", default="honeybadge", help="NebulaGraph space")
     parser.add_argument("--batch-size", type=int, default=50, help="Batch insert size")
+    parser.add_argument(
+        "--csv-dir",
+        default=os.path.join(os.path.dirname(__file__), "..", "deploy", "test-data", "csv"),
+        help="Root CSV directory (must contain vertices/ and edges/ subdirs)",
+    )
     args = parser.parse_args()
 
-    base_dir = os.path.join(os.path.dirname(__file__), "..", "deploy", "test-data", "csv")
+    base_dir = args.csv_dir
     vertex_dir = os.path.join(base_dir, "vertices")
     edge_dir = os.path.join(base_dir, "edges")
+
+    if not os.path.isdir(vertex_dir) or not os.path.isdir(edge_dir):
+        print(f"ERROR: --csv-dir must contain 'vertices/' and 'edges/' subdirs")
+        print(f"  Got: {base_dir}")
+        sys.exit(2)
 
     print(f"Connecting to NebulaGraph at {args.host}:{args.port}...")
     pool = get_connection(args.host, args.port)
@@ -302,23 +346,51 @@ def main():
     tag_schema, edge_schema = fetch_schema(pool, args.space)
     print(f"  Found {len(tag_schema)} tags, {len(edge_schema)} edge types\n")
 
-    print(f"Loading vertices into space '{args.space}'...")
+    print(f"Loading vertices from {vertex_dir} into space '{args.space}'...")
     t0 = time.time()
-    load_vertices(pool, vertex_dir, args.space, tag_schema, args.batch_size)
+    vertex_counts = load_vertices(pool, vertex_dir, args.space, tag_schema, args.batch_size)
     print(f"  Vertex load time: {time.time() - t0:.1f}s\n")
 
-    print(f"Loading edges into space '{args.space}'...")
+    print(f"Loading edges from {edge_dir} into space '{args.space}'...")
     t0 = time.time()
-    load_edges(pool, edge_dir, args.space, edge_schema, args.batch_size)
+    edge_summary = load_edges(pool, edge_dir, args.space, edge_schema,
+                              args.batch_size, vertex_counts=vertex_counts)
     print(f"  Edge load time: {time.time() - t0:.1f}s\n")
 
-    print("Done! Verifying counts...")
+    # ---------------------------------------------------------------
+    # Per-edge zero-row report (catches the "loader silently lost edges" failure mode)
+    # ---------------------------------------------------------------
+    csv_files = sorted(f for f in os.listdir(edge_dir) if f.endswith(".csv"))
+    csv_row_counts = {}
+    for fn in csv_files:
+        with open(os.path.join(edge_dir, fn), "r", encoding="utf-8") as f:
+            csv_row_counts[fn.replace(".csv", "")] = sum(1 for _ in f) - 1
+
+    suspect = []
+    for edge_name, csv_n in csv_row_counts.items():
+        if csv_n <= 0:
+            continue
+        ins, total, errs = edge_summary.get(edge_name, (0, 0, 0))
+        if ins == 0 and total == 0:
+            suspect.append((edge_name, csv_n, "edge not in DB schema"))
+        elif ins == 0 and total > 0:
+            suspect.append((edge_name, csv_n, "all inserts failed"))
+        elif errs > 0:
+            suspect.append((edge_name, csv_n, f"{errs} insert errors"))
+
+    if suspect:
+        print("WARNING — edges with anomalies:")
+        for name, n, reason in suspect:
+            print(f"    {name}: csv has {n} rows but {reason}")
+    else:
+        print("All non-empty edge CSVs were loaded without errors.")
+
+    print("\nDone! Verifying sample tag counts...")
     session = pool.get_session("root", "nebula")
     try:
         session.execute(f"USE {args.space}")
         for tag in ["Supplier", "PurchaseOrder", "Invoice", "Item",
                      "SalesOrder", "Receipt", "Payment", "GLJournalEntry"]:
-            r = session.execute(f"LOOKUP ON `{tag}` YIELD id(vertex) AS vid | LIMIT 1")
             count_r = session.execute(f"MATCH (n:`{tag}`) RETURN count(n) AS cnt")
             if count_r.is_succeeded() and count_r.row_size() > 0:
                 cnt = count_r.row_values(0)[0].as_int()

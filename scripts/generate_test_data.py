@@ -26,46 +26,47 @@ import sys
 # Configuration Constants
 # =============================================================================
 
-# Entity counts for data generation
-NUM_SUPPLIERS = 100
-NUM_CUSTOMERS = 80
-NUM_ITEMS = 500
-NUM_ORGANIZATIONS = 10
-NUM_EMPLOYEES = 50
-NUM_WAREHOUSES = 5
-NUM_GL_ACCOUNTS = 30
-NUM_CURRENCIES = 8
-NUM_UOMS = 15
+# Entity counts for data generation (1.5x of MVP baseline: ~340K vertex / ~430K edge)
+NUM_SUPPLIERS = 150
+NUM_CUSTOMERS = 120
+NUM_ITEMS = 750
+NUM_ORGANIZATIONS = 15
+NUM_EMPLOYEES = 75
+NUM_WAREHOUSES = 8
+NUM_GL_ACCOUNTS = 45
+NUM_CURRENCIES = 12
+NUM_UOMS = 22
 
-# Transaction counts (reduced for testing - full ~500K)
-NUM_PURCHASE_REQUISITIONS = 1000
-NUM_PURCHASE_ORDERS = 3000
-NUM_RECEIPTS = 2500
-NUM_INVOICES = 3000
-NUM_PAYMENTS = 2000
-NUM_SALES_ORDERS = 2000
-NUM_SHIPMENTS = 1800
-NUM_AR_INVOICES = 1500
-NUM_AR_RECEIPTS = 1000
-NUM_GL_JOURNAL_ENTRIES = 5000
-NUM_XLA_EVENTS = 6000
-NUM_APPROVAL_RECORDS = 5000
-NUM_CONTRACTS = 200
-NUM_BOMS = 50
+# Transaction counts (1.5x of MVP baseline)
+# Key driver: GL_JOURNAL_ENTRIES produces GLJournalLine, the largest vertex pool
+NUM_PURCHASE_REQUISITIONS = 1500
+NUM_PURCHASE_ORDERS = 4500
+NUM_RECEIPTS = 3750
+NUM_INVOICES = 4500
+NUM_PAYMENTS = 3000
+NUM_SALES_ORDERS = 3000
+NUM_SHIPMENTS = 2700
+NUM_AR_INVOICES = 2250
+NUM_AR_RECEIPTS = 1500
+NUM_GL_JOURNAL_ENTRIES = 7500
+NUM_XLA_EVENTS = 9000
+NUM_APPROVAL_RECORDS = 7500
+NUM_CONTRACTS = 300
+NUM_BOMS = 75
 
-# v2.0 new entity counts
-NUM_SUPPLIER_SITES = 250       # ~2.5 per supplier
-NUM_CUSTOMER_SITES = 200       # ~2.5 per customer
-NUM_EXPENSE_REPORTS = 500
-NUM_INVENTORY_TXNS = 3000
-NUM_ITEM_CATEGORIES = 30
-NUM_BANK_ACCOUNTS = 20
-NUM_BANK_STATEMENTS = 100
+# v2.0 new entity counts (1.5x of MVP baseline)
+NUM_SUPPLIER_SITES = 375       # ~2.5 per supplier
+NUM_CUSTOMER_SITES = 300       # ~2.5 per customer
+NUM_EXPENSE_REPORTS = 750
+NUM_INVENTORY_TXNS = 4500
+NUM_ITEM_CATEGORIES = 45
+NUM_BANK_ACCOUNTS = 30
+NUM_BANK_STATEMENTS = 150
 NUM_LEDGERS = 3
 NUM_GL_PERIODS = 24            # 24 months
-NUM_GL_CODE_COMBINATIONS = 100
-NUM_GL_JOURNAL_BATCHES = 500
-NUM_CURRENCY_RATES = 200
+NUM_GL_CODE_COMBINATIONS = 150
+NUM_GL_JOURNAL_BATCHES = 750
+NUM_CURRENCY_RATES = 300
 
 # Anomaly rates (realistic noisy data)
 THREE_WAY_MATCH_FAILURE_RATE = 0.05  # 5%
@@ -95,7 +96,7 @@ DATA_START_DATE = datetime(2024, 4, 1)
 DATA_END_DATE = datetime(2026, 4, 1)
 
 # Output configuration
-BATCH_SIZE = 50  # Records per CSV file
+BATCH_SIZE = 5000  # Records per CSV batch write (tuned for large scaled datasets)
 
 # =============================================================================
 # VID Prefix Constants (aligned with constants.py)
@@ -5289,8 +5290,9 @@ Examples:
     parser.add_argument(
         "--output-dir", "-o",
         type=Path,
-        default=Path(__file__).resolve().parent.parent / "deploy" / "test-data",
-        help="Output directory for CSV files (default: deploy/test-data)"
+        default=Path(__file__).resolve().parent.parent / "deploy" / "test-data" / "csv",
+        help="Output directory for CSV files (default: deploy/test-data/csv); "
+             "must align with load-test-data.py --csv-dir"
     )
     parser.add_argument(
         "--seed", "-s",
