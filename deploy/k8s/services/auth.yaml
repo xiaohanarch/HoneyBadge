@@ -43,7 +43,7 @@ spec:
                   name: honeybadge-secrets
                   key: JWT_SECRET
             - name: MATRIX_HOMESERVER_PUBLIC
-              value: "http://hiclaw-manager:6167"
+              value: "http://8.130.95.169:30167"
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:

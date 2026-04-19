@@ -9,8 +9,8 @@ data:
   metad.conf: |
     --local_ip=nebula-metad-0.nebula-metad.honeybadge.svc.cluster.local
     --port=9559
-    --ws_http_port=9619
-    --ws_h2_port=9620
+    --ws_http_port=19559
+    --ws_h2_port=19560
     --meta_server_addrs=nebula-metad-0.nebula-metad.honeybadge.svc.cluster.local:9559
     --local_config=true
     --data_path=/data/meta

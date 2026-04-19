@@ -42,7 +42,7 @@ spec:
             - name: NEBULA_SPACE
               value: "honeybadge"
             - name: LLM_ENDPOINT
-              value: "http://hiclaw-manager:8080"
+              value: "http://aigw-local-hiclaw-io:8080/v1"
             - name: LLM_API_KEY
               valueFrom:
                 secretKeyRef:

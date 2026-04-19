@@ -20,8 +20,8 @@ spec:
       port: 9559
       targetPort: 9559
     - name: http
-      port: 9619
-      targetPort: 9619
+      port: 19559
+      targetPort: 19559
 ---
 # --- Metad StatefulSet ---
 apiVersion: apps/v1
@@ -56,18 +56,18 @@ spec:
           ports:
             - containerPort: 9559
               name: rpc
-            - containerPort: 9619
+            - containerPort: 19559
               name: http
           readinessProbe:
             httpGet:
               path: /status
-              port: 9619
+              port: 19559
             initialDelaySeconds: 30
             periodSeconds: 30
           livenessProbe:
             httpGet:
               path: /status
-              port: 9619
+              port: 19559
             periodSeconds: 30
             failureThreshold: 5
           volumeMounts:

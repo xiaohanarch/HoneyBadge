@@ -47,9 +47,9 @@ images:
 configMapGenerator:
   - name: hiclaw-init-scripts
     files:
-      - entrypoint-wrapper.sh=../../hiclaw/entrypoint-wrapper.sh
-      - manager-init-internal.sh=../../hiclaw/manager-init-internal.sh
-      - worker-init-wrapper.sh=../../hiclaw/worker-init-wrapper.sh
+      - entrypoint-wrapper.sh=../hiclaw/entrypoint-wrapper.sh
+      - manager-init-internal.sh=../hiclaw/manager-init-internal.sh
+      - worker-init-wrapper.sh=../hiclaw/worker-init-wrapper.sh
   - name: nebula-schema
     files:
       - nebula-schema.ngql=../docker/nebula-schema.ngql
