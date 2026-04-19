@@ -5,7 +5,8 @@ namespace: honeybadge
 
 resources:
   - namespace.yaml
-  - secrets.yaml
+  # secrets.yaml intentionally excluded — secrets are applied manually on ECS
+  # via deploy/k8s/scripts/01-apply-secrets.sh (never overwritten by CI/CD)
   - configmaps/nebula-config.yaml
   - configmaps/postgres-init.yaml
   - stateful/nebula.yaml

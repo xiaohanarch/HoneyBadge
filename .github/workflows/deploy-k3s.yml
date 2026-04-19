@@ -2,17 +2,13 @@ name: Build & Deploy to k3s
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, ralph/k8s-deployment]
   workflow_dispatch:
-    inputs:
-      skip_deploy:
-        description: 'Skip deployment (build only)'
-        type: boolean
-        default: false
 
 env:
   REGISTRY: registry.cn-hangzhou.aliyuncs.com
   NAMESPACE: honeybadge
+  DEPLOY_BRANCH: ralph/k8s-deployment
   # ECS public IP — Matrix (Tuwunel) NodePort for browser matrix-js-sdk connection
   MATRIX_HOMESERVER: "http://8.130.95.169:30167"
 
@@ -65,11 +61,8 @@ jobs:
 
   deploy:
     needs: build-and-push
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Deploy to k3s via SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -77,28 +70,49 @@ jobs:
           username: root
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
-          command_timeout: 10m
+          command_timeout: 15m
           script: |
             set -e
 
             REGISTRY="${{ env.REGISTRY }}"
             NAMESPACE="${{ env.NAMESPACE }}"
             TAG="${{ github.sha }}"
+            BRANCH="${{ env.DEPLOY_BRANCH }}"
             REPO_DIR="/opt/honeybadge"
 
-            # Clone or pull repo
+            # ── 1. Install kustomize if missing ──────────────────────────────
+            if ! command -v kustomize &>/dev/null; then
+              echo "=== Installing kustomize ==="
+              curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+              mv kustomize /usr/local/bin/
+            fi
+
+            # ── 2. Clone or update repo ───────────────────────────────────────
             if [ -d "$REPO_DIR/.git" ]; then
-              cd $REPO_DIR && git fetch origin && git reset --hard origin/master
+              cd $REPO_DIR
+              git fetch origin
+              git checkout $BRANCH
+              git reset --hard origin/$BRANCH
             else
-              git clone https://github.com/${{ github.repository }}.git $REPO_DIR
+              git clone -b $BRANCH https://github.com/${{ github.repository }}.git $REPO_DIR
               cd $REPO_DIR
             fi
 
-            # Create namespace
-            kubectl create namespace honeybadge --dry-run=client -o yaml | kubectl apply -f -
+            # ── 3. Create namespace + ACR pull secret ─────────────────────────
+            kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
-            # Update image tags
-            cd deploy/k8s
+            kubectl -n $NAMESPACE create secret docker-registry acr-pull-secret \
+              --docker-server="$REGISTRY" \
+              --docker-username="${{ secrets.ACR_USERNAME }}" \
+              --docker-password="${{ secrets.ACR_PASSWORD }}" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl -n $NAMESPACE patch serviceaccount default \
+              -p '{"imagePullSecrets": [{"name": "acr-pull-secret"}]}' || true
+
+            # ── 4. Update image tags and apply manifests ─────────────────────
+            cd $REPO_DIR/deploy/k8s
+
             kustomize edit set image \
               honeybadge-server=${REGISTRY}/${NAMESPACE}/honeybadge-server:${TAG} \
               honeybadge-auth=${REGISTRY}/${NAMESPACE}/honeybadge-auth:${TAG} \
@@ -108,29 +122,25 @@ jobs:
               honeybadge-cache-mcp=${REGISTRY}/${NAMESPACE}/honeybadge-cache-mcp:${TAG} \
               honeybadge-frontend=${REGISTRY}/${NAMESPACE}/honeybadge-frontend:${TAG}
 
-            # Apply all manifests
             kubectl apply -k .
 
-            # Wait for stateful services first
+            # ── 5. Wait for rollout ───────────────────────────────────────────
             echo "=== Waiting for stateful services ==="
-            kubectl -n honeybadge rollout status statefulset/nebula-metad --timeout=120s || true
-            kubectl -n honeybadge rollout status statefulset/nebula-storaged --timeout=120s || true
-            kubectl -n honeybadge rollout status statefulset/redis --timeout=60s || true
-            kubectl -n honeybadge rollout status statefulset/postgres --timeout=60s || true
+            kubectl -n $NAMESPACE rollout status statefulset/nebula-metad  --timeout=180s || true
+            kubectl -n $NAMESPACE rollout status statefulset/nebula-storaged --timeout=180s || true
+            kubectl -n $NAMESPACE rollout status statefulset/redis          --timeout=90s  || true
+            kubectl -n $NAMESPACE rollout status statefulset/postgres        --timeout=90s  || true
 
-            # Wait for deployments
             echo "=== Waiting for deployments ==="
-            for deploy in nebula-graphd hiclaw-manager honeybadge-server honeybadge-auth \
-                          honeybadge-permissions honeybadge-nebula-mcp honeybadge-audit-mcp \
-                          honeybadge-cache-mcp frontend; do
-              kubectl -n honeybadge rollout status deployment/${deploy} --timeout=300s || true
+            for d in nebula-graphd hiclaw-manager honeybadge-server honeybadge-auth \
+                     honeybadge-permissions honeybadge-nebula-mcp honeybadge-audit-mcp \
+                     honeybadge-cache-mcp frontend; do
+              kubectl -n $NAMESPACE rollout status deployment/${d} --timeout=300s || true
             done
-
-            # Wait for workers (depend on manager)
-            for deploy in hiclaw-graph-worker hiclaw-analytics-worker; do
-              kubectl -n honeybadge rollout status deployment/${deploy} --timeout=300s || true
+            for d in hiclaw-graph-worker hiclaw-analytics-worker; do
+              kubectl -n $NAMESPACE rollout status deployment/${d} --timeout=300s || true
             done
 
             echo ""
-            echo "=== Deployment complete! Tag: ${TAG} ==="
-            kubectl -n honeybadge get pods -o wide
+            echo "=== Deploy complete! Tag: ${TAG} ==="
+            kubectl -n $NAMESPACE get pods -o wide
