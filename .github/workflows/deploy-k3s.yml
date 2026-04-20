@@ -56,8 +56,6 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:buildcache,mode=max
 
   deploy:
     needs: build-and-push
