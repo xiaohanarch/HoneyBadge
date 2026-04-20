@@ -120,7 +120,7 @@ jobs:
               honeybadge-cache-mcp=${REGISTRY}/${NAMESPACE}/honeybadge-cache-mcp:${TAG} \
               honeybadge-frontend=${REGISTRY}/${NAMESPACE}/honeybadge-frontend:${TAG}
 
-            kubectl apply -k .
+            kustomize build --load-restrictor=LoadRestrictionsNone . | kubectl apply -f -
 
             # ── 5. Wait for rollout ───────────────────────────────────────────
             echo "=== Waiting for stateful services ==="
