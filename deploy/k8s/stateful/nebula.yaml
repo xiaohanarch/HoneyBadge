@@ -47,7 +47,7 @@ spec:
       containers:
         - name: metad
           image: vesoft/nebula-metad:v3.8.0
-          command: ["--flagfile=/usr/local/nebula/etc/nebula-metad.conf"]
+          args: ["--flagfile=/usr/local/nebula/etc/nebula-metad.conf"]
           env:
             - name: USER
               value: "root"
@@ -135,7 +135,7 @@ spec:
       containers:
         - name: storaged
           image: vesoft/nebula-storaged:v3.8.0
-          command: ["--flagfile=/usr/local/nebula/etc/nebula-storaged.conf"]
+          args: ["--flagfile=/usr/local/nebula/etc/nebula-storaged.conf"]
           env:
             - name: USER
               value: "root"
@@ -222,7 +222,7 @@ spec:
       containers:
         - name: graphd
           image: vesoft/nebula-graphd:v3.8.0
-          command: ["--flagfile=/usr/local/nebula/etc/nebula-graphd.conf"]
+          args: ["--flagfile=/usr/local/nebula/etc/nebula-graphd.conf"]
           env:
             - name: USER
               value: "root"

@@ -19,6 +19,7 @@ resources:
   - services/permissions.yaml
   - services/mcps.yaml
   - frontend/frontend.yaml
+  - jobs/init-nebula.yaml
 
 # Image overrides — CI/CD sets these via: kustomize edit set image
 images:
@@ -55,6 +56,13 @@ configMapGenerator:
     files:
       - nebula-schema.ngql=../docker/nebula-schema.ngql
       - nebula-edges.ngql=../docker/nebula-edges.ngql
+  - name: hiclaw-agent-configs
+    files:
+      - graph-worker-soul=../../hiclaw/workers/graph-worker/agent/SOUL.md
+      - analytics-worker-soul=../../hiclaw/workers/analytics-worker/agent/SOUL.md
+      - manager-soul=../../hiclaw/manager/agent/SOUL.md
+      - manager-agents=../../hiclaw/manager/agent/AGENTS.md
+      - manager-heartbeat=../../hiclaw/manager/agent/HEARTBEAT.md
 
 generatorOptions:
   disableNameSuffixHash: true

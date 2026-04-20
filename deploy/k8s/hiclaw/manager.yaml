@@ -118,6 +118,26 @@ spec:
               mountPath: /opt/honeybadge/init/manager-init-internal.sh
               subPath: manager-init-internal.sh
               readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/workers/graph-worker/agent/SOUL.md
+              subPath: graph-worker-soul
+              readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/workers/analytics-worker/agent/SOUL.md
+              subPath: analytics-worker-soul
+              readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/manager/agent/SOUL.md
+              subPath: manager-soul
+              readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/manager/agent/AGENTS.md
+              subPath: manager-agents
+              readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/manager/agent/HEARTBEAT.md
+              subPath: manager-heartbeat
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -126,6 +146,9 @@ spec:
           configMap:
             name: hiclaw-init-scripts
             defaultMode: 0755
+        - name: agent-configs
+          configMap:
+            name: hiclaw-agent-configs
 ---
 # Main service — all ports
 apiVersion: v1
