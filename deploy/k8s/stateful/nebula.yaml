@@ -58,6 +58,13 @@ spec:
               name: rpc
             - containerPort: 19559
               name: http
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
           readinessProbe:
             httpGet:
               path: /status
@@ -146,6 +153,13 @@ spec:
               name: rpc
             - containerPort: 19779
               name: http
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1536Mi"
+              cpu: "1"
           readinessProbe:
             httpGet:
               path: /status
@@ -233,6 +247,13 @@ spec:
               name: graph
             - containerPort: 19669
               name: http
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1"
           readinessProbe:
             httpGet:
               path: /status
