@@ -262,6 +262,15 @@ if 'MiniMax-M2.7' not in old_primary:
         print('Updated primary: ' + old_primary + ' -> ' + agents['primary'])
         break
 
+# Fix Matrix homeserver port: Tuwunel runs on 6167, NOT the Higress gateway port 8080.
+# create-worker.sh may generate the wrong port; patch it here.
+matrix_cfg = cfg.get('channels', {}).get('matrix', {})
+hs = matrix_cfg.get('homeserver', '')
+if hs and ':8080' in hs and 'matrix-local.hiclaw.io' in hs:
+    fixed = hs.replace(':8080', ':6167')
+    matrix_cfg['homeserver'] = fixed
+    print('Fixed Matrix homeserver port: ' + hs + ' -> ' + fixed)
+
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)
 print('done')

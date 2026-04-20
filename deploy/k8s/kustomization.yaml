@@ -19,6 +19,7 @@ resources:
   - services/permissions.yaml
   - services/mcps.yaml
   - frontend/frontend.yaml
+  - frontend/ingress-routes.yaml
   - jobs/init-nebula.yaml
 
 # Image overrides — CI/CD sets these via: kustomize edit set image

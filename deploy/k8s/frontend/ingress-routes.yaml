@@ -1,0 +1,65 @@
+# =============================================================================
+# HoneyBadge Traefik IngressRoute + Middleware
+#
+# Replaces standard Kubernetes Ingress to allow per-route path rewriting.
+#
+# Problem: frontend calls POST /auth/login via Traefik, but auth service only
+# handles /login (not /auth/login). The strip-auth-prefix middleware rewrites
+# /auth/login → /login before forwarding to the auth service.
+#
+# Routes:
+#   /api      → honeybadge-server:8090  (no rewrite)
+#   /auth/login → honeybadge-auth:8091 (strip /auth prefix → /login)
+#   /auth/logout → honeybadge-auth:8091 (strip /auth prefix → /logout)
+#   /auth/*   → honeybadge-auth:8091  (no rewrite, for /auth/google/*)
+#   /         → frontend:80           (SPA catch-all)
+# =============================================================================
+
+---
+# Strip /auth prefix for login/logout endpoints
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-auth-prefix
+  namespace: honeybadge
+spec:
+  stripPrefix:
+    prefixes:
+      - /auth
+---
+# IngressRoute — per-route middleware support
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: honeybadge-routes
+  namespace: honeybadge
+spec:
+  entryPoints:
+    - web
+  routes:
+    # API routes → honeybadge-server
+    - match: PathPrefix(`/api`)
+      kind: Rule
+      services:
+        - name: honeybadge-server
+          port: 8090
+    # Auth login/logout: strip /auth prefix so auth service receives /login, /logout
+    - match: PathPrefix(`/auth/login`) || PathPrefix(`/auth/logout`)
+      kind: Rule
+      middlewares:
+        - name: strip-auth-prefix
+      services:
+        - name: honeybadge-auth
+          port: 8091
+    # Other /auth/* routes go as-is (Google OAuth: /auth/google/*)
+    - match: PathPrefix(`/auth`)
+      kind: Rule
+      services:
+        - name: honeybadge-auth
+          port: 8091
+    # Frontend SPA — catch-all (Vue Router handles /login, /chat, etc.)
+    - match: PathPrefix(`/`)
+      kind: Rule
+      services:
+        - name: frontend
+          port: 80
