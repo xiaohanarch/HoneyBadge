@@ -1,0 +1,16 @@
+# Force LF line endings for shell scripts (must work in Linux containers)
+*.sh text eol=lf
+
+# Force LF for other text files that run in containers
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.conf text eol=lf
+*.ngql text eol=lf
+*.sql text eol=lf
+*.env text eol=lf
+Dockerfile* text eol=lf
