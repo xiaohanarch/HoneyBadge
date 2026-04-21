@@ -298,6 +298,11 @@ if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
 if defaults.get('subagents', {}).get('maxConcurrent') != 8:
     defaults['subagents'] = {'maxConcurrent': 8}
     print('Set subagents.maxConcurrent: 8')
+# v1.0.7+: ensure encryption field exists (E2EE for CoPaw); HiClaw adds it on upgrade,
+# but if missing from old volumes, default to disabled so patch does not fail.
+if 'encryption' not in cfg:
+    cfg['encryption'] = {'enabled': False}
+    print('Added encryption default (v1.0.7+ compat)')
 
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)
@@ -350,7 +355,7 @@ done
 RESULT=$(docker exec "$MANAGER_CONTAINER" sh -c \
     "curl -sf -X PUT 'http://localhost:8001/v1/routes/llm-minimax-route' \
       -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
-      -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.6\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"api.minimaxi.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1")
+      -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"api.minimaxi.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1")
 
 if echo "$RESULT" | grep -q '"name":"llm-minimax-route"'; then
     log "  → llm-minimax-route updated (openai-compat.dns → api.minimaxi.com)"
@@ -358,7 +363,7 @@ else
     docker exec "$MANAGER_CONTAINER" sh -c \
         "curl -sf -X POST 'http://localhost:8001/v1/routes' \
           -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
-          -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.6\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"api.minimaxi.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
+          -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"api.minimaxi.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
         && log "  → llm-minimax-route created (openai-compat.dns → api.minimaxi.com)" \
         || warn "  Failed to create/update LLM route (Higress not ready?)"
 fi
