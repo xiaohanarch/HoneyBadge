@@ -11,6 +11,7 @@ Test Coverage:
 - TC-008: Login page renders correctly
 """
 import json
+import os
 import base64
 import pytest
 from playwright.sync_api import expect
@@ -21,7 +22,7 @@ from tests.e2e.selectors import (
 )
 
 
-BASE_URL = "http://localhost:3000"
+BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
 
 class TestAuthentication:
@@ -70,34 +71,19 @@ class TestAuthentication:
         """TC-005: Logout redirects to login and blocks /chat access."""
         page = admin_logged_in
 
-        # Click user avatar to open dropdown
+        # Click user avatar to open the Element Plus dropdown
         page.locator(USER_AVATAR).click(force=True)
-        page.wait_for_timeout(500)
 
-        # Element Plus renders dropdown items as <li> elements with class el-dropdown-menu__item
-        # Find and click the visible logout item
-        page.evaluate("""() => {
-            const menus = document.querySelectorAll('.el-dropdown-menu');
-            for (const menu of menus) {
-                if (menu.offsetParent !== null) {
-                    const children = menu.children;
-                    for (const child of children) {
-                        if (child.offsetParent !== null && child.textContent.includes('退出')) {
-                            child.click();
-                            return;
-                        }
-                    }
-                }
-            }
-        }""")
+        # Element Plus v2 teleports the dropdown menu to <body> with position:fixed,
+        # so offsetParent is always null — must wait with Playwright state check.
+        logout_item = page.locator(LOGOUT_ITEM)
+        logout_item.wait_for(state="visible", timeout=5000)
+        logout_item.click()
 
         # Should be redirected to login
-        page.wait_for_url(f"{BASE_URL}/login", timeout=10000)
+        page.wait_for_url(f"{BASE_URL}/login", timeout=15000)
 
-        # Should be redirected to login
-        page.wait_for_url(f"{BASE_URL}/login", timeout=10000)
-
-        # Attempting to navigate to /chat should redirect back to login (route guard)
+        # Route guard: navigating to /chat should bounce back to /login
         page.goto(f"{BASE_URL}/chat")
         page.wait_for_url(f"{BASE_URL}/login", timeout=10000)
 

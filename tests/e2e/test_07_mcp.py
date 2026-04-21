@@ -71,7 +71,7 @@ class TestMCPServices:
         wait_for_chat_ready()
 
         # Send a query that exercises multiple MCP tools
-        send_chat_query("查询供应商", timeout=60000)
+        send_chat_query("查询供应商", timeout=20000)
 
         # Verify response came through (MCP chain worked)
         response = page.locator(MSG_ASSISTANT)
@@ -82,7 +82,7 @@ class TestMCPServices:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
 
         # Verify response structure is valid
         response = page.locator(MSG_ASSISTANT)
@@ -96,7 +96,7 @@ class TestMCPServices:
         wait_for_chat_ready()
 
         # Normal query should work without crashing
-        send_chat_query("查询供应商", timeout=120000)
+        send_chat_query("查询供应商", timeout=20000)
 
         # Chat should still be functional after query
         expect(page.locator(CHAT_TEXTAREA).first).to_be_visible()
@@ -111,12 +111,12 @@ class TestMCPServices:
         queries = ["查询供应商", "查询采购订单", "查询物料"]
 
         for query in queries:
-            send_chat_query(query, timeout=60000)
+            send_chat_query(query, timeout=20000)
             page.wait_for_timeout(1000)
 
         # All should have responses
         messages = page.locator(MSG_ASSISTANT)
-        expect(messages).to_have_count(3, timeout=120000)
+        expect(messages).to_have_count(3, timeout=20000)
 
     def test_tc609_nebula_mcp_functional(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-609: NebulaGraph MCP returns actual graph data."""

@@ -34,8 +34,9 @@ from tests.e2e.selectors import (
 )
 
 
-BASE_URL = "http://localhost:3000"
-API_BASE_URL = "http://localhost:8090"
+import os
+BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8090")
 
 
 class TestAntiHallucination:
@@ -47,7 +48,7 @@ class TestAntiHallucination:
         wait_for_chat_ready()
 
         # Send query designed to be ambiguous / hard to generate valid Cypher for
-        send_chat_query("查询不存在的哈哈哈哈哈哈哈", timeout=120000)
+        send_chat_query("查询不存在的哈哈哈哈哈哈哈", timeout=60000)
 
         # System should recover (either error message or graceful response)
         # The key assertion: assistant message IS visible (system didn't crash)
@@ -72,7 +73,7 @@ class TestAntiHallucination:
         page = analyst_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher block is empty"
@@ -101,7 +102,7 @@ class TestAntiHallucination:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
 
         # Trace ID link MUST be visible (not optional)
         trace_link = page.locator(MSG_ASSISTANT).last.locator(TRACE_ID_LINK)
@@ -116,7 +117,7 @@ class TestAntiHallucination:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询所有数据不过滤", timeout=120000)
+        send_chat_query("查询所有数据不过滤", timeout=60000)
 
         # System should still generate valid Cypher (MATCH/GO/LOOKUP)
         response = page.locator(MSG_ASSISTANT).last
@@ -172,7 +173,7 @@ class TestAntiHallucination:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
 
         exec_time = page.locator(MSG_ASSISTANT).last.locator(EXECUTION_TIME)
         expect(exec_time).to_be_visible(timeout=5000)
@@ -187,7 +188,7 @@ class TestAntiHallucination:
         wait_for_chat_ready()
 
         # Send a minimal/problematic query
-        send_chat_query("查询", timeout=120000)
+        send_chat_query("查询", timeout=60000)
 
         # Chat input should still be usable after response
         textarea = page.locator(CHAT_TEXTAREA).first

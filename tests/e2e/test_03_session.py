@@ -12,6 +12,7 @@ Test Coverage:
 - TC-207: Session pagination
 - TC-208: Export session conversation
 """
+import os
 import pytest
 from playwright.sync_api import expect
 from tests.e2e.selectors import (
@@ -19,7 +20,7 @@ from tests.e2e.selectors import (
 )
 
 
-BASE_URL = "http://localhost:3000"
+BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
 
 class TestSessionManagement:
@@ -54,7 +55,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create a session first
-        send_chat_query("查询供应商", timeout=60000)
+        send_chat_query("查询供应商", timeout=20000)
         page.wait_for_timeout(1000)
 
         # Right-click or hover to find rename option
@@ -86,7 +87,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create a session to delete
-        send_chat_query("查询采购订单", timeout=60000)
+        send_chat_query("查询采购订单", timeout=20000)
         page.wait_for_timeout(1000)
 
         # Find the session in sidebar
@@ -120,7 +121,7 @@ class TestSessionManagement:
             if new_session_btn.count() > 0:
                 new_session_btn.first.click()
                 page.wait_for_timeout(500)
-            send_chat_query(f"查询供应商 {i}", timeout=60000)
+            send_chat_query(f"查询供应商 {i}", timeout=20000)
             page.wait_for_timeout(500)
 
         # Verify session list in sidebar
@@ -133,7 +134,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create session with query
-        send_chat_query("查询物料", timeout=60000)
+        send_chat_query("查询物料", timeout=20000)
         page.wait_for_timeout(1000)
 
         # Reload page
@@ -184,7 +185,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create session with content
-        send_chat_query("查询供应商", timeout=60000)
+        send_chat_query("查询供应商", timeout=20000)
         page.wait_for_timeout(1000)
 
         # Look for export button

@@ -38,7 +38,7 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000):
         }}""",
         timeout=timeout,
     )
-    page_obj.wait_for_timeout(1000)
+    page_obj.wait_for_timeout(200)
 
 
 def send_query_on_page(page_obj, query: str, timeout: int = 60000):
@@ -141,7 +141,7 @@ def login_as(page: Page):
         page.fill(LOGIN_PASSWORD, password)
         page.click(LOGIN_BUTTON)
         page.wait_for_url(f"{BASE_URL}/chat", timeout=30000)
-        page.wait_for_timeout(2000)
+        _wait_for_textarea_enabled(page, timeout=15000)
         return page
     return _login
 
@@ -178,8 +178,7 @@ def subsidiary_lead_logged_in(page: Page, login_as):
 def wait_for_chat_ready(page: Page):
     """Wait for chat interface to be fully loaded."""
     def _wait():
-        page.wait_for_selector(CHAT_TEXTAREA, timeout=15000)
-        page.wait_for_timeout(2000)
+        _wait_for_textarea_enabled(page, timeout=15000)
     return _wait
 
 
@@ -220,7 +219,7 @@ def create_user_page(browser: Browser):
         new_session_btn = p.locator(NEW_CHAT_BUTTON)
         if new_session_btn.count() > 0 and new_session_btn.first.is_visible():
             new_session_btn.first.click()
-            p.wait_for_timeout(1000)
+            _wait_for_textarea_enabled(p, timeout=10000)
 
         pages.append(p)
         contexts.append(context)
@@ -236,7 +235,7 @@ def create_user_page(browser: Browser):
 @pytest.fixture
 def send_query_and_get_response(page: Page):
     """Send query, wait for full response, return structured data."""
-    def _send(query: str, timeout: int = 120000):
+    def _send(query: str, timeout: int = 60000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
         existing_count = page.locator(MSG_ASSISTANT).count()
