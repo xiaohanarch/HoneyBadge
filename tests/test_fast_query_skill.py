@@ -48,3 +48,16 @@ def test_question_provided_does_not_exit_1():
         f"Script exited 1 (missing question) even though --question was provided. "
         f"stdout: {result.stdout!r}, stderr: {result.stderr!r}"
     )
+
+
+def test_question_with_quotes_does_not_exit_1():
+    """Questions containing quotes are handled (not argument parsing error)."""
+    result = subprocess.run(
+        ["bash", SCRIPT, "--question", 'What\'s the "total" count?'],
+        capture_output=True,
+        text=True,
+    )
+    # Should NOT exit 1 (argument parsing error)
+    assert result.returncode != 1, (
+        f"Script exited 1 on question with quotes. stdout: {result.stdout!r}"
+    )

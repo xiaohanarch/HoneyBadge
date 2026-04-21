@@ -25,20 +25,29 @@ done
 [[ -z "$QUESTION" ]] && { echo '{"error":"--question is required"}'; exit 1; }
 
 # Step 1: 生成 nGQL
+NGQL_ARGS=$(python3 -c "import json,sys; print(json.dumps({'question': sys.argv[1]}))" "$QUESTION") \
+  || { echo '{"error":"nGQL generation failed"}'; exit 2; }
+
 NGQL_RESP=$(mcporter call honeybadge-nebula.generate_query \
-  --args "{\"question\":\"$QUESTION\"}") \
+  --args "$NGQL_ARGS") \
   || { echo '{"error":"nGQL generation failed"}'; exit 2; }
 
 NGQL=$(echo "$NGQL_RESP" | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); print(d['ngql'])" 2>/dev/null) \
+  "import sys,json; d=json.load(sys.stdin); ngql=d.get('ngql',''); sys.exit(2) if not ngql else print(ngql)" \
+  2>/dev/null) \
   || { echo '{"error":"nGQL generation failed"}'; exit 2; }
 
 # Step 2: 带权限执行
-USER_CTX="{}"
-[[ -n "$USER_ID" ]] && USER_CTX="{\"user_id\":\"$USER_ID\"}"
+if [[ -n "$USER_ID" ]]; then
+  EXEC_ARGS=$(python3 -c "import json,sys; print(json.dumps({'ngql': sys.argv[1], 'user_context': {'user_id': sys.argv[2]}}))" "$NGQL" "$USER_ID") \
+    || { echo '{"error":"query execution failed"}'; exit 3; }
+else
+  EXEC_ARGS=$(python3 -c "import json,sys; print(json.dumps({'ngql': sys.argv[1], 'user_context': {}}))" "$NGQL") \
+    || { echo '{"error":"query execution failed"}'; exit 3; }
+fi
 
 RESULT=$(mcporter call honeybadge-nebula.validate_and_execute \
-  --args "{\"ngql\":\"$NGQL\",\"user_context\":$USER_CTX}") \
+  --args "$EXEC_ARGS") \
   || { echo '{"error":"query execution failed"}'; exit 3; }
 
 echo "$RESULT"
