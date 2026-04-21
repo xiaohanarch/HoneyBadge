@@ -73,7 +73,7 @@ When a Worker reports "@manager:matrix-local.hiclaw.io Task {task-id} completed"
 2. Read `result.md` and prepare a summary (≤200 chars, ERP findings only).
 3. **CRITICAL — 用户总结必须通过 `forward-to-user.sh` 发送**（详见 `erp-query-dispatch` skill 的 Step 6）：
    ```bash
-   echo "$SUMMARY" | bash /opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts/forward-to-user.sh \
+   echo "$SUMMARY" | bash /root/manager-workspace/skills/erp-query-dispatch/scripts/forward-to-user.sh \
      --task-id {task-id} --content - \
      --result-json /root/hiclaw-fs/shared/tasks/{task-id}/result.json
    ```
