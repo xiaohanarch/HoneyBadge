@@ -55,6 +55,18 @@ ERP-focused, two main processes:
 - **Order-to-Cash (OTC)**: Sales Order → Shipment → Billing → Collection
 - Master data: Item master, Supplier master, BOM
 
+## Git Workflow (MANDATORY)
+
+**NEVER push directly to `master` or `main`.** All changes must go through a feature branch + Pull Request, no exceptions.
+
+Required workflow for every change:
+1. Create a feature branch: `git checkout -b ralph/<feature-name>`
+2. Commit changes to the feature branch
+3. Push the feature branch: `git push -u origin ralph/<feature-name>`
+4. Create a PR targeting `master` via `gh pr create`
+
+Direct `git push` to `master` is **prohibited**, even for single-commit fixes, CI tweaks, or "trivial" changes.
+
 ## Language Notes
 
 - The architecture document (`README.md`) is written in Chinese
