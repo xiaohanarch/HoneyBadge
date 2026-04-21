@@ -45,7 +45,7 @@ spec:
     spec:
       containers:
         - name: hiclaw-manager
-          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.6
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.9
           command: ["/bin/bash", "/opt/honeybadge/init/entrypoint-wrapper.sh"]
           env:
             - name: HICLAW_ADMIN_USER
@@ -74,7 +74,7 @@ spec:
               value: "openai-compat"
             - name: HICLAW_OPENAI_BASE_URL
               value: "https://api.minimaxi.com/v1"
-            - name: HICLAW_AI_GATEWAY_DOMAIN
+            - name: HICLAW_AI_GATEWAY_SERVER
               value: "aigw-local.hiclaw.io"
             - name: HICLAW_DEFAULT_MODEL
               value: "MiniMax-M2.7"

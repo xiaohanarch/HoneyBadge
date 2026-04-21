@@ -196,6 +196,12 @@ if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     }
     print('Set contextPruning')
     changed = True
+# v1.0.7+: ensure encryption field exists (E2EE for CoPaw); HiClaw adds it on upgrade,
+# but if missing from old volumes, default to disabled so patch does not fail.
+if 'encryption' not in cfg:
+    cfg['encryption'] = {'enabled': False}
+    print('Added encryption default (v1.0.7+ compat)')
+    changed = True
 if defaults.get('subagents', {}).get('maxConcurrent') != 8:
     defaults['subagents'] = {'maxConcurrent': 8}
     print('Set subagents.maxConcurrent: 8')
@@ -246,7 +252,7 @@ for i in $(seq 1 20); do
 done
 
 # Build route JSON
-ROUTE_JSON="{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.6\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"${LLM_HOST}\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}"
+ROUTE_JSON="{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"${LLM_HOST}\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}"
 
 # PUT to update, fall back to POST to create
 RESULT=$(curl -sf -X PUT 'http://localhost:8001/v1/routes/llm-minimax-route' \

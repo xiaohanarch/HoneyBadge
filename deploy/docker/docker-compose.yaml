@@ -225,7 +225,7 @@ services:
   # =============================================================================
 
   hiclaw-manager:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.6
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.9
     container_name: honeybadge-hiclaw-manager
     hostname: hiclaw-manager
     restart: unless-stopped
@@ -258,9 +258,10 @@ services:
       # This is idempotent: setup-higress.sh does PUT on existing service sources.
       - HICLAW_LLM_PROVIDER=openai-compat
       - HICLAW_OPENAI_BASE_URL=https://api.minimaxi.com/v1
-      # AI Gateway domain for Manager's openclaw.json template (envsubst uses this var).
+      # AI Gateway server for Manager's openclaw.json template (envsubst uses this var).
+      # Renamed from HICLAW_AI_GATEWAY_DOMAIN in v1.0.8 to HICLAW_AI_GATEWAY_SERVER.
       # Without this, manager-openclaw.json.tmpl generates baseUrl: http://:8080/v1 (broken).
-      - HICLAW_AI_GATEWAY_DOMAIN=aigw-local.hiclaw.io
+      - HICLAW_AI_GATEWAY_SERVER=aigw-local.hiclaw.io
       # Default model for Manager Agent
       - HICLAW_DEFAULT_MODEL=MiniMax-M2.7
       - TZ=Asia/Shanghai
@@ -300,7 +301,7 @@ services:
   # =============================================================================
 
   hiclaw-graph-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.6
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.9
     container_name: honeybadge-graph-worker
     hostname: hiclaw-graph-worker
     restart: unless-stopped
@@ -323,7 +324,7 @@ services:
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   hiclaw-analytics-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.6
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.9
     container_name: honeybadge-analytics-worker
     hostname: hiclaw-analytics-worker
     restart: unless-stopped

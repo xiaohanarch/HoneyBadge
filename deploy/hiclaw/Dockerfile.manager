@@ -1,5 +1,5 @@
 # deploy/hiclaw/Dockerfile.manager
-# HiClaw Manager container — applies to HiClaw v1.0.6
+# HiClaw Manager container — applies to HiClaw v1.0.9
 #
 # UPGRADE CHECKLIST (see docs/patches/hiclaw-interface-contract-v1.md):
 #   1. Verify x-honeybadge field passthrough (Manager must not strip x-honeybadge)
@@ -13,7 +13,7 @@
 #
 # This Dockerfile is kept as a reference for custom Manager builds only.
 
-FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.6
+FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.9
 
 # Copy custom Manager agent configuration (SOUL.md, AGENTS.md)
 # Mount path inside the Manager for agent identity files

@@ -24,7 +24,7 @@ spec:
             - 'until wget -q --spider http://hiclaw-manager:9000/minio/health/live; do echo "Waiting for manager MinIO..."; sleep 10; done'
       containers:
         - name: verify
-          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.6
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.9
           command:
             - sh
             - -c

@@ -80,7 +80,7 @@
 - 测试数据集覆盖 57 种实体 + 81 种关系，含 12 种欺诈异常模式
 
 **智能 Agent 编排**：
-- **HiClaw** 阿里巴巴开源多 Agent 协作框架（v1.0.6）
+- **HiClaw** 阿里巴巴开源多 Agent 协作框架（v1.0.9）
 - Manager-Worker 架构，任务解耦与弹性伸缩
 - Matrix 协议通信，所有交互可审计
 - **每个用户独立 Matrix 账号**（`@hb-{用户名}:matrix-local.hiclaw.io`），彻底隔离会话
@@ -350,7 +350,7 @@
 - 内置 AI 网关（Higress）实现凭证零暴露
 - 基于 Matrix 协议，所有 Agent 交互可审计
 - 原生 MCP Server 集成
-- 阿里背书 + Apache 协议 + 活跃维护（v1.0.6）
+- 阿里背书 + Apache 协议 + 活跃维护（v1.0.9）
 
 **架构**：
 - **Manager Agent**（基于 OpenClaw）：接收用户任务，创建/调度 Worker，执行心跳检查
