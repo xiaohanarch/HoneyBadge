@@ -43,12 +43,12 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query PTP process - should succeed
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Admin should access PTP (PurchaseOrder)"
 
         # Query OTC process - should succeed
-        send_chat_query("查询销售订单", timeout=120000)
+        send_chat_query("查询销售订单", timeout=20000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Admin should access OTC (SalesOrder)"
 
@@ -64,7 +64,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query PTP - should succeed with data (analyst org_id=1000 has ~320 PO)
-        send_chat_query("统计采购订单数量", timeout=120000)
+        send_chat_query("统计采购订单数量", timeout=20000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Analyst should access PTP (PurchaseOrder)"
 
@@ -85,7 +85,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query OTC - SalesOrder is NOT in analyst's allowed_processes
-        send_chat_query("查询销售订单", timeout=120000)
+        send_chat_query("查询销售订单", timeout=20000)
         page.wait_for_timeout(2000)
 
         # Look for permission denied or error message
@@ -116,9 +116,9 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query should work
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
         response = page.locator(MSG_ASSISTANT)
-        expect(response.last).to_be_visible(timeout=120000)
+        expect(response.last).to_be_visible(timeout=20000)
 
         # Verify write buttons are not present
         write_buttons = page.locator(
@@ -141,7 +141,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Try to query SalesOrder (OTC process - blocked for analyst)
-        send_chat_query("查询销售订单", timeout=120000)
+        send_chat_query("查询销售订单", timeout=20000)
         page.wait_for_timeout(2000)
 
         response = page.locator(MSG_ASSISTANT)
@@ -184,7 +184,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Attempt restricted query (SalesOrder/OTC)
-        send_chat_query("查询销售订单", timeout=120000)
+        send_chat_query("查询销售订单", timeout=20000)
         page.wait_for_timeout(2000)
 
         response = page.locator(MSG_ASSISTANT)
@@ -235,7 +235,7 @@ class TestPermissions:
         """
         # Admin query - separate context
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
+        send_query_on_page(admin_page, "统计采购订单数量", timeout=20000)
         admin_page.wait_for_timeout(2000)
         admin_messages = admin_page.locator(MSG_ASSISTANT)
         admin_text = admin_messages.last.inner_text() if admin_messages.count() > 0 else ""
@@ -245,7 +245,7 @@ class TestPermissions:
 
         # Analyst query - separate context
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
+        send_query_on_page(analyst_page, "统计采购订单数量", timeout=20000)
         analyst_page.wait_for_timeout(2000)
         analyst_messages = analyst_page.locator(MSG_ASSISTANT)
         analyst_text = analyst_messages.last.inner_text() if analyst_messages.count() > 0 else ""
@@ -255,7 +255,7 @@ class TestPermissions:
 
         # Subsidiary query - separate context
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
+        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=20000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_messages = subsidiary_page.locator(MSG_ASSISTANT)
         subsidiary_text = subsidiary_messages.last.inner_text() if subsidiary_messages.count() > 0 else ""
@@ -295,14 +295,14 @@ class TestPermissions:
         """
         # Analyst (org_id=1000) query
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=120000)
+        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=20000)
         analyst_page.wait_for_timeout(2000)
         analyst_messages = analyst_page.locator(MSG_ASSISTANT)
         analyst_text = analyst_messages.last.inner_text() if analyst_messages.count() > 0 else ""
 
         # Subsidiary (org_id=1021) query same PO
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询采购订单PO00000001", timeout=120000)
+        send_query_on_page(subsidiary_page, "查询采购订单PO00000001", timeout=20000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_messages = subsidiary_page.locator(MSG_ASSISTANT)
         subsidiary_text = subsidiary_messages.last.inner_text() if subsidiary_messages.count() > 0 else ""
@@ -334,14 +334,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计所有采购订单的数量", timeout=120000)
+        send_query_on_page(admin_page, "统计所有采购订单的数量", timeout=20000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计所有采购订单的数量", timeout=120000)
+        send_query_on_page(subsidiary_page, "统计所有采购订单的数量", timeout=20000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
@@ -366,14 +366,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "一共有多少条采购订单", timeout=120000)
+        send_query_on_page(admin_page, "一共有多少条采购订单", timeout=20000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst查询
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "一共有多少条采购订单", timeout=120000)
+        send_query_on_page(analyst_page, "一共有多少条采购订单", timeout=20000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count_from_response(analyst_text)
@@ -394,14 +394,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "采购订单总共有多少条", timeout=120000)
+        send_query_on_page(admin_page, "采购订单总共有多少条", timeout=20000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "采购订单总共有多少条", timeout=120000)
+        send_query_on_page(subsidiary_page, "采购订单总共有多少条", timeout=20000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
@@ -422,14 +422,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "报告采购订单的总记录数", timeout=120000)
+        send_query_on_page(admin_page, "报告采购订单的总记录数", timeout=20000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst查询
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "报告采购订单的总记录数", timeout=120000)
+        send_query_on_page(analyst_page, "报告采购订单的总记录数", timeout=20000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count_from_response(analyst_text)
@@ -450,14 +450,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单总数", timeout=120000)
+        send_query_on_page(admin_page, "统计采购订单总数", timeout=20000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计采购订单总数", timeout=120000)
+        send_query_on_page(subsidiary_page, "统计采购订单总数", timeout=20000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
@@ -477,14 +477,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单记录数", timeout=120000)
+        send_query_on_page(admin_page, "统计采购订单记录数", timeout=20000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst查询
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单记录数", timeout=120000)
+        send_query_on_page(analyst_page, "统计采购订单记录数", timeout=20000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count_from_response(analyst_text)
@@ -502,7 +502,7 @@ class TestPermissions:
         page = analyst_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher block is empty"

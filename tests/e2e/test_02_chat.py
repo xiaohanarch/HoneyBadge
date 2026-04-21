@@ -16,6 +16,7 @@ Test Coverage:
 - TC-111: Execution time display
 - TC-112: Raw data toggle
 """
+import os
 import re
 import pytest
 from playwright.sync_api import expect
@@ -28,7 +29,7 @@ from tests.e2e.selectors import (
 )
 
 
-BASE_URL = "http://localhost:3000"
+BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
 
 class TestChatFunctionality:
@@ -98,7 +99,7 @@ class TestChatFunctionality:
         progress = page.locator(f'{PROGRESS_AREA}, .el-steps, [class*="progress"], .processing, [class*="loading"]')
         # Progress is transient — if query is fast it may not appear
         # Main assertion: response eventually arrives
-        page.wait_for_selector(MSG_ASSISTANT, timeout=120000)
+        page.wait_for_selector(MSG_ASSISTANT, timeout=60000)
         expect(page.locator(MSG_ASSISTANT).last).to_be_visible()
 
     def test_tc105_query_results_table(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
@@ -116,7 +117,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询供应商", timeout=120000)
+        send_chat_query("查询供应商", timeout=20000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher code block is empty"
@@ -144,7 +145,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询不存在的标签哈哈哈哈哈哈哈", timeout=120000)
+        send_chat_query("查询不存在的标签哈哈哈哈哈哈哈", timeout=60000)
 
         response = page.locator(MSG_ASSISTANT).last
         expect(response).to_be_visible()
@@ -157,7 +158,7 @@ class TestChatFunctionality:
         wait_for_chat_ready()
 
         # First query establishes context
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
         page.wait_for_timeout(2000)
 
         # Second query references context
@@ -193,7 +194,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
 
         exec_time = page.locator(MSG_ASSISTANT).last.locator(EXECUTION_TIME)
         expect(exec_time).to_be_visible(timeout=5000)
@@ -206,7 +207,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=120000)
+        send_chat_query("查询采购订单", timeout=20000)
 
         row_count = expand_data_table()
         assert row_count > 0, f"Data table should have rows, got {row_count}"
