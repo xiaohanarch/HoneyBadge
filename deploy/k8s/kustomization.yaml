@@ -64,6 +64,9 @@ configMapGenerator:
       - manager-soul=../../hiclaw/manager/agent/SOUL.md
       - manager-agents=../../hiclaw/manager/agent/AGENTS.md
       - manager-heartbeat=../../hiclaw/manager/agent/HEARTBEAT.md
+  - name: hiclaw-fast-query-skill
+    files:
+      - fast-query.sh=../../hiclaw/manager/agent/skills/fast-query/fast-query.sh
 
 generatorOptions:
   disableNameSuffixHash: true

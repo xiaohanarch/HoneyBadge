@@ -105,7 +105,7 @@ spec:
               memory: "1Gi"
               cpu: "500m"
             limits:
-              memory: "2Gi"
+              memory: "3Gi"
               cpu: "2"
           volumeMounts:
             - name: data
@@ -138,6 +138,9 @@ spec:
               mountPath: /opt/honeybadge/config/manager/agent/HEARTBEAT.md
               subPath: manager-heartbeat
               readOnly: true
+            - name: fast-query-skill
+              mountPath: /opt/honeybadge/config/manager/agent/skills/fast-query
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -149,6 +152,10 @@ spec:
         - name: agent-configs
           configMap:
             name: hiclaw-agent-configs
+        - name: fast-query-skill
+          configMap:
+            name: hiclaw-fast-query-skill
+            defaultMode: 0755
 ---
 # Main service — all ports
 apiVersion: v1
