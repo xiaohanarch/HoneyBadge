@@ -418,11 +418,11 @@ docker exec "$MANAGER_CONTAINER" bash -c \
 # ---------------------------------------------------------------------------
 log "Registering MCP servers in workers via mcporter..."
 
-# Map: server-name → SSE endpoint inside the Docker network
+# Map: server-name → streamable-http endpoint inside the Docker network
 declare -A MCP_SERVERS=(
-    [honeybadge-nebula]="http://honeybadge-nebula-mcp:8000/sse"
-    [honeybadge-audit]="http://honeybadge-audit-mcp:8000/sse"
-    [honeybadge-cache]="http://honeybadge-cache-mcp:8000/sse"
+    [honeybadge-nebula]="http://honeybadge-nebula-mcp:8000/mcp"
+    [honeybadge-audit]="http://honeybadge-audit-mcp:8000/mcp"
+    [honeybadge-cache]="http://honeybadge-cache-mcp:8000/mcp"
 )
 
 for worker in graph-worker analytics-worker; do

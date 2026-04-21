@@ -111,4 +111,4 @@ async def cache_result(key: str, value: Any, ttl: int = 300) -> dict:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run(transport="streamable-http")
