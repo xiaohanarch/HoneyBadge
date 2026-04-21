@@ -140,10 +140,18 @@ SUMMARY=$(cat << 'SUM'
 <Worker 结果的精炼摘要，不超过 200 字。完整报告见 MinIO>
 SUM
 )
-echo "$SUMMARY" | bash "$FORWARD_SCRIPT" --task-id "$TASK_ID" --content -
+FWD_OUT=$(echo "$SUMMARY" | bash "$FORWARD_SCRIPT" --task-id "$TASK_ID" --content -)
+echo "$FWD_OUT"
+
+if echo "$FWD_OUT" | grep -q "FORWARD_OK"; then
+    # Mark as delivered so result-watcher does not send a duplicate
+    touch "/tmp/.watcher-delivered-$TASK_ID"
+fi
 ```
 
 - 输出 `FORWARD_OK` → 任务闭环
 - 输出 `FORWARD_ERROR` → 用 `message` 工具向 hb-admin 发错误通知
 
 **绝对规则**：Worker 的任务结果永远不能通过 `message`/`replyMessage` 发——只能用 `forward-to-user.sh`。
+
+**注意**：`result-watcher.sh` 是后台兜底进程，会在交付成功后检查 `/tmp/.watcher-delivered-$TASK_ID` 标记并退出，不会重复交付。

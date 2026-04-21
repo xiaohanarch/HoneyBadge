@@ -73,9 +73,9 @@ When a Worker reports "@manager:matrix-local.hiclaw.io Task {task-id} completed"
    ```
 3. Update meta.json: `status → completed`, `completed_at → now`
 
-**Result delivery to the user is handled automatically** by the `result-watcher.sh` background process that was launched at dispatch time. You do NOT need to call `forward-to-user.sh` here, and you MUST NOT use `message`/`replyMessage` tools to send ERP query results — doing so sends to the Worker room, not the user's DM.
+4. **Forward result to user** using `forward-to-user.sh` (see **erp-query-dispatch** skill Step 6). NEVER use `message`/`replyMessage` tools — they send to the Worker room, not the user's DM.
 
-The heartbeat is a BACKUP mechanism — it catches tasks where the watcher exited early or was not launched.
+`result-watcher.sh` (launched at dispatch time) is a BACKUP — it handles delivery if this step fails. Touch `/tmp/.watcher-delivered-{task-id}` after a successful forward to prevent duplicate delivery.
 
 **IMPORTANT:**
 - NEVER skip task registration. Every delegated task MUST be in `state.json` — the heartbeat loop depends on it.
