@@ -169,6 +169,38 @@ if hs and ':8080' in hs and 'matrix-local.hiclaw.io' in hs:
     print('Fixed Matrix homeserver port: ' + hs + ' -> ' + fixed)
     changed = True
 
+# Context pruning + concurrent boost (performance optimization)
+if 'agents' not in cfg:
+    cfg['agents'] = {}
+if 'defaults' not in cfg['agents']:
+    cfg['agents']['defaults'] = {}
+defaults = cfg['agents']['defaults']
+if defaults.get('maxConcurrent') != 8:
+    defaults['maxConcurrent'] = 8
+    print('Set maxConcurrent: 8')
+    changed = True
+if defaults.get('contextTokens') != 40000:
+    defaults['contextTokens'] = 40000
+    print('Set contextTokens: 40000')
+    changed = True
+if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
+    defaults['contextPruning'] = {
+        'mode': 'cache-ttl',
+        'keepLastAssistants': 10,
+        'softTrimRatio': 0.7,
+        'hardClearRatio': 0.9,
+        'hardClear': {
+            'enabled': True,
+            'placeholder': '[历史对话已自动压缩，当前任务上下文完整保留]'
+        }
+    }
+    print('Set contextPruning')
+    changed = True
+if defaults.get('subagents', {}).get('maxConcurrent') != 8:
+    defaults['subagents'] = {'maxConcurrent': 8}
+    print('Set subagents.maxConcurrent: 8')
+    changed = True
+
 if changed:
     with open(cfg_path, 'w') as f:
         json.dump(cfg, f, indent=2)
