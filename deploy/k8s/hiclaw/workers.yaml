@@ -51,13 +51,15 @@ spec:
               value: "matrix-local.hiclaw.io"
             - name: TZ
               value: "Asia/Shanghai"
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1536"
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
+              memory: "512Mi"
+              cpu: "200m"
             limits:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "2Gi"
+              cpu: "1"
           volumeMounts:
             - name: init-scripts
               mountPath: /opt/honeybadge/init/worker-init-wrapper.sh
@@ -118,13 +120,15 @@ spec:
               value: "matrix-local.hiclaw.io"
             - name: TZ
               value: "Asia/Shanghai"
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1536"
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
+              memory: "512Mi"
+              cpu: "200m"
             limits:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "2Gi"
+              cpu: "1"
           volumeMounts:
             - name: init-scripts
               mountPath: /opt/honeybadge/init/worker-init-wrapper.sh
