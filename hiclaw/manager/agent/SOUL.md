@@ -66,26 +66,16 @@ When a user asks an ERP business question, use your **erp-query-dispatch** skill
 
 When a Worker reports "@manager:matrix-local.hiclaw.io Task {task-id} completed":
 
-1. Pull task result from MinIO:
-   ```bash
-   mc mirror hiclaw/hiclaw-storage/shared/tasks/{task-id}/ /root/hiclaw-fs/shared/tasks/{task-id}/ --overwrite
-   ```
-2. Read `result.md` and prepare a summary (≤200 chars, ERP findings only).
-3. **CRITICAL — 用户总结必须通过 `forward-to-user.sh` 发送**（详见 `erp-query-dispatch` skill 的 Step 6）：
-   ```bash
-   echo "$SUMMARY" | bash /root/manager-workspace/skills/erp-query-dispatch/scripts/forward-to-user.sh \
-     --task-id {task-id} --content - \
-     --result-json /root/hiclaw-fs/shared/tasks/{task-id}/result.json
-   ```
-   **严禁**用 `message`/`replyMessage` 工具发 Worker 任务结果——它会把消息发到 Worker 房间（触发房间），用户的 DM 房间收不到。
-4. Update state.json:
+1. Acknowledge to the Worker room only (brief reply like "收到，已记录完成。").
+2. Update state.json:
    ```bash
    bash /opt/hiclaw/agent/skills/task-management/scripts/manage-state.sh --action complete --task-id {task-id}
    ```
-5. Update meta.json: `status → completed`, `completed_at → now`
+3. Update meta.json: `status → completed`, `completed_at → now`
 
-The heartbeat is a BACKUP mechanism — it catches tasks that stalled or missed the @mention.
-Primary result delivery is via Worker @mention → immediate handling.
+**Result delivery to the user is handled automatically** by the `result-watcher.sh` background process that was launched at dispatch time. You do NOT need to call `forward-to-user.sh` here, and you MUST NOT use `message`/`replyMessage` tools to send ERP query results — doing so sends to the Worker room, not the user's DM.
+
+The heartbeat is a BACKUP mechanism — it catches tasks where the watcher exited early or was not launched.
 
 **IMPORTANT:**
 - NEVER skip task registration. Every delegated task MUST be in `state.json` — the heartbeat loop depends on it.

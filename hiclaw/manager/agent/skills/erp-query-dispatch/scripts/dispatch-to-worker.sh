@@ -139,6 +139,17 @@ STATUS=$(echo "$RESULT" | cut -d' ' -f1)
 EVENT_ID=$(echo "$RESULT" | cut -d' ' -f2-)
 
 if [ "$STATUS" = "OK" ]; then
+    # Launch background result-watcher to deliver the task result deterministically
+    if [ -n "$TASK_ID" ]; then
+        WATCHER_SCRIPT="$(cd "$(dirname "$0")" && pwd)/result-watcher.sh"
+        if [ -f "$WATCHER_SCRIPT" ]; then
+            nohup bash "$WATCHER_SCRIPT" "$TASK_ID" \
+                >> "/tmp/watcher-${TASK_ID}.log" 2>&1 &
+            echo "WATCHER_STARTED pid=$! task=$TASK_ID" >&2
+        else
+            echo "WATCHER_MISSING: $WATCHER_SCRIPT not found, watcher not launched" >&2
+        fi
+    fi
     echo "DISPATCH_OK room_id=$ROOM_ID event_id=$EVENT_ID"
     exit 0
 else
