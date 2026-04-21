@@ -397,9 +397,31 @@ for p in cfg.get('models', {}).get('providers', {}).values():
     for m in p.get('models', []):
         m.pop('reasoning', None)
 
+# Context pruning for Manager (mirrors Worker settings)
+if 'agents' not in cfg:
+    cfg['agents'] = {}
+if 'defaults' not in cfg['agents']:
+    cfg['agents']['defaults'] = {}
+mgr_defaults = cfg['agents']['defaults']
+if mgr_defaults.get('contextTokens') != 40000:
+    mgr_defaults['contextTokens'] = 40000
+    print('Set Manager contextTokens: 40000')
+if mgr_defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
+    mgr_defaults['contextPruning'] = {
+        'mode': 'cache-ttl',
+        'keepLastAssistants': 10,
+        'softTrimRatio': 0.7,
+        'hardClearRatio': 0.9,
+        'hardClear': {
+            'enabled': True,
+            'placeholder': '[历史对话已自动压缩，当前任务上下文完整保留]'
+        }
+    }
+    print('Set Manager contextPruning')
+
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)
-print('allowlist patched, reasoning removed')
+print('allowlist patched, reasoning removed, context pruning applied')
 \"
 " && log "  → Manager allowlist updated" || warn "  Failed to patch Manager allowlist"
 

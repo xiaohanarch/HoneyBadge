@@ -7,6 +7,7 @@ This is the safety gate for the entire HoneyBadge system — every query
 passes through the Anti-Hallucination Framework (L1-L3) before execution.
 """
 
+import asyncio
 import os
 import re
 import sys
@@ -200,18 +201,39 @@ async def get_schema_impl(
             if name:
                 tag_names.append(str(name))
 
-    lines.append("## Tags")
-    for tag in tag_names:
+    async def _describe_tag(tag: str) -> tuple[str, list[str]]:
         desc = await nebula.execute(f"DESCRIBE TAG `{tag}`", space=target_space)
-        lines.append(f"\n### {tag}")
+        props: list[str] = []
         if desc.success:
             for prop_row in desc.rows:
                 prop_name = prop_row.get("Field") or prop_row.get("field") or ""
                 prop_type = prop_row.get("Type") or prop_row.get("type") or ""
-                lines.append(f"  - {prop_name}: {prop_type}")
+                if prop_name:
+                    props.append(f"  - {prop_name}: {prop_type}")
+        return tag, props
 
-    # --- Edges ----------------------------------------------------------
-    edges_result = await nebula.execute("SHOW EDGES", space=target_space)
+    async def _describe_edge(edge: str) -> tuple[str, list[str]]:
+        desc = await nebula.execute(f"DESCRIBE EDGE `{edge}`", space=target_space)
+        props: list[str] = []
+        if desc.success:
+            for prop_row in desc.rows:
+                prop_name = prop_row.get("Field") or prop_row.get("field") or ""
+                prop_type = prop_row.get("Type") or prop_row.get("type") or ""
+                if prop_name:
+                    props.append(f"  - {prop_name}: {prop_type}")
+        return edge, props
+
+    # --- Tags (parallel) ------------------------------------------------
+    edges_result, tag_descs = await asyncio.gather(
+        nebula.execute("SHOW EDGES", space=target_space),
+        asyncio.gather(*[_describe_tag(t) for t in tag_names]),
+    )
+    lines.append("## Tags")
+    for tag, props in tag_descs:
+        lines.append(f"\n### {tag}")
+        lines.extend(props)
+
+    # --- Edges (parallel) -----------------------------------------------
     edge_names: list[str] = []
     if edges_result.success:
         for row in edges_result.rows:
@@ -219,15 +241,11 @@ async def get_schema_impl(
             if name:
                 edge_names.append(str(name))
 
+    edge_descs = await asyncio.gather(*[_describe_edge(e) for e in edge_names])
     lines.append("\n## Edges")
-    for edge in edge_names:
-        desc = await nebula.execute(f"DESCRIBE EDGE `{edge}`", space=target_space)
+    for edge, props in edge_descs:
         lines.append(f"\n### {edge}")
-        if desc.success:
-            for prop_row in desc.rows:
-                prop_name = prop_row.get("Field") or prop_row.get("field") or ""
-                prop_type = prop_row.get("Type") or prop_row.get("type") or ""
-                lines.append(f"  - {prop_name}: {prop_type}")
+        lines.extend(props)
 
     schema_text = "\n".join(lines)
 
