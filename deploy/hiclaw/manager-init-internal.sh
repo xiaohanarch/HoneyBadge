@@ -196,12 +196,6 @@ if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     }
     print('Set contextPruning')
     changed = True
-# v1.0.7+: ensure encryption field exists (E2EE for CoPaw); HiClaw adds it on upgrade,
-# but if missing from old volumes, default to disabled so patch does not fail.
-if 'encryption' not in cfg:
-    cfg['encryption'] = {'enabled': False}
-    print('Added encryption default (v1.0.7+ compat)')
-    changed = True
 if defaults.get('subagents', {}).get('maxConcurrent') != 8:
     defaults['subagents'] = {'maxConcurrent': 8}
     print('Set subagents.maxConcurrent: 8')
