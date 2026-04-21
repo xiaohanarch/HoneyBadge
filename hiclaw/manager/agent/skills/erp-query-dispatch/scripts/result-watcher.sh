@@ -17,7 +17,7 @@ if [ -z "$TASK_ID" ]; then
     exit 1
 fi
 
-POLL_INTERVAL=10
+POLL_INTERVAL=2
 MAX_WAIT=600
 ELAPSED=0
 
