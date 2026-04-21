@@ -67,6 +67,11 @@ configMapGenerator:
   - name: hiclaw-fast-query-skill
     files:
       - fast-query.sh=../../hiclaw/manager/agent/skills/fast-query/fast-query.sh
+  - name: hiclaw-erp-dispatch-scripts
+    files:
+      - result-watcher.sh=../../hiclaw/manager/agent/skills/erp-query-dispatch/scripts/result-watcher.sh
+      - forward-to-user.sh=../../hiclaw/manager/agent/skills/erp-query-dispatch/scripts/forward-to-user.sh
+      - dispatch-to-worker.sh=../../hiclaw/manager/agent/skills/erp-query-dispatch/scripts/dispatch-to-worker.sh
 
 generatorOptions:
   disableNameSuffixHash: true

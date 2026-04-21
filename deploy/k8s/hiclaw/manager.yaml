@@ -143,6 +143,9 @@ spec:
             - name: fast-query-skill
               mountPath: /opt/honeybadge/config/manager/agent/skills/fast-query
               readOnly: true
+            - name: erp-dispatch-scripts
+              mountPath: /opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -157,6 +160,10 @@ spec:
         - name: fast-query-skill
           configMap:
             name: hiclaw-fast-query-skill
+            defaultMode: 0755
+        - name: erp-dispatch-scripts
+          configMap:
+            name: hiclaw-erp-dispatch-scripts
             defaultMode: 0755
 ---
 # Main service — all ports
