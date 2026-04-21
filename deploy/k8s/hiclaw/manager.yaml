@@ -1,0 +1,266 @@
+# =============================================================================
+# HiClaw Manager — All-in-one supervisord container
+# Contains: Tuwunel Matrix, MinIO, Higress Gateway, Element Web, Manager Agent
+#
+# DNS aliases: aigw-local.hiclaw.io and matrix-local.hiclaw.io are Docker
+# network aliases. In K8s, use the service names below or add CoreDNS rewrites:
+#   rewrite name aigw-local.hiclaw.io aigw-local-hiclaw-io.honeybadge.svc.cluster.local
+#   rewrite name matrix-local.hiclaw.io matrix-local-hiclaw-io.honeybadge.svc.cluster.local
+# =============================================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hiclaw-manager-data
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hiclaw-manager
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hiclaw-manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hiclaw-manager
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: hiclaw-manager
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.6
+          command: ["/bin/bash", "/opt/honeybadge/init/entrypoint-wrapper.sh"]
+          env:
+            - name: HICLAW_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_USER
+            - name: HICLAW_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_PASSWORD
+            - name: HICLAW_MATRIX_DOMAIN
+              value: "matrix-local.hiclaw.io"
+            - name: HICLAW_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_REGISTRATION_TOKEN
+            - name: HICLAW_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: LLM_API_KEY
+            - name: HICLAW_LLM_PROVIDER
+              value: "openai-compat"
+            - name: HICLAW_OPENAI_BASE_URL
+              value: "https://api.minimaxi.com/v1"
+            - name: HICLAW_AI_GATEWAY_DOMAIN
+              value: "aigw-local.hiclaw.io"
+            - name: HICLAW_DEFAULT_MODEL
+              value: "MiniMax-M2.7"
+            - name: TZ
+              value: "Asia/Shanghai"
+          ports:
+            - containerPort: 6167
+              name: matrix
+            - containerPort: 8080
+              name: gateway
+            - containerPort: 9000
+              name: minio
+            - containerPort: 9001
+              name: minio-console
+            - containerPort: 8001
+              name: higress-console
+            - containerPort: 18888
+              name: element
+          readinessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 10
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "3Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: init-scripts
+              mountPath: /opt/honeybadge/init/entrypoint-wrapper.sh
+              subPath: entrypoint-wrapper.sh
+              readOnly: true
+            - name: init-scripts
+              mountPath: /opt/honeybadge/init/manager-init-internal.sh
+              subPath: manager-init-internal.sh
+              readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/workers/graph-worker/agent/SOUL.md
+              subPath: graph-worker-soul
+              readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/workers/analytics-worker/agent/SOUL.md
+              subPath: analytics-worker-soul
+              readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/manager/agent/SOUL.md
+              subPath: manager-soul
+              readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/manager/agent/AGENTS.md
+              subPath: manager-agents
+              readOnly: true
+            - name: agent-configs
+              mountPath: /opt/honeybadge/config/manager/agent/HEARTBEAT.md
+              subPath: manager-heartbeat
+              readOnly: true
+            - name: fast-query-skill
+              mountPath: /opt/honeybadge/config/manager/agent/skills/fast-query
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hiclaw-manager-data
+        - name: init-scripts
+          configMap:
+            name: hiclaw-init-scripts
+            defaultMode: 0755
+        - name: agent-configs
+          configMap:
+            name: hiclaw-agent-configs
+        - name: fast-query-skill
+          configMap:
+            name: hiclaw-fast-query-skill
+            defaultMode: 0755
+---
+# Main service — all ports
+apiVersion: v1
+kind: Service
+metadata:
+  name: hiclaw-manager
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hiclaw-manager
+  ports:
+    - name: matrix
+      port: 6167
+      targetPort: 6167
+    - name: gateway
+      port: 8080
+      targetPort: 8080
+    - name: minio
+      port: 9000
+      targetPort: 9000
+    - name: minio-console
+      port: 9001
+      targetPort: 9001
+    - name: higress-console
+      port: 8001
+      targetPort: 8001
+    - name: element
+      port: 18888
+      targetPort: 18888
+---
+# DNS alias: aigw-local.hiclaw.io → hiclaw-manager:8080
+apiVersion: v1
+kind: Service
+metadata:
+  name: aigw-local-hiclaw-io
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hiclaw-manager
+  ports:
+    - name: gateway
+      port: 8080
+      targetPort: 8080
+---
+# DNS alias: matrix-local.hiclaw.io → hiclaw-manager:6167
+apiVersion: v1
+kind: Service
+metadata:
+  name: matrix-local-hiclaw-io
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hiclaw-manager
+  ports:
+    - name: matrix
+      port: 6167
+      targetPort: 6167
+---
+# External access: Matrix (Tuwunel) on NodePort 30167
+# Browser connects to ws://ECS_IP:30167 via matrix-js-sdk
+apiVersion: v1
+kind: Service
+metadata:
+  name: hiclaw-matrix-nodeport
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: hiclaw-manager
+  ports:
+    - name: matrix
+      port: 6167
+      targetPort: 6167
+      nodePort: 30167
+---
+# External access: Element Web on NodePort 30888
+apiVersion: v1
+kind: Service
+metadata:
+  name: hiclaw-element-nodeport
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: hiclaw-manager
+  ports:
+    - name: element
+      port: 18888
+      targetPort: 18888
+      nodePort: 30888

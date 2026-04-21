@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nebula-config
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/part-of: honeybadge
+data:
+  metad.conf: |
+    --local_ip=nebula-metad-0.nebula-metad.honeybadge.svc.cluster.local
+    --port=9559
+    --ws_http_port=19559
+    --ws_h2_port=19560
+    --meta_server_addrs=nebula-metad-0.nebula-metad.honeybadge.svc.cluster.local:9559
+    --local_config=true
+    --data_path=/data/meta
+    --log_dir=/logs
+    --v=0
+    --minloglevel=0
+    --logtimeformat=true
+  storaged.conf: |
+    --local_ip=nebula-storaged-0.nebula-storaged.honeybadge.svc.cluster.local
+    --port=9779
+    --ws_http_port=19779
+    --ws_h2_port=19780
+    --meta_server_addrs=nebula-metad-0.nebula-metad.honeybadge.svc.cluster.local:9559
+    --local_config=true
+    --data_path=/data/storage
+    --log_dir=/logs
+    --v=0
+    --minloglevel=0
+    --logtimeformat=true
+  graphd.conf: |
+    --local_ip=nebula-graphd
+    --port=9669
+    --ws_http_port=19669
+    --ws_h2_port=19670
+    --meta_server_addrs=nebula-metad-0.nebula-metad.honeybadge.svc.cluster.local:9559
+    --local_config=true
+    --log_dir=/logs
+    --v=0
+    --minloglevel=0
+    --logtimeformat=true

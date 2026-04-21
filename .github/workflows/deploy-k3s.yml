@@ -1,0 +1,144 @@
+name: Build & Deploy to k3s
+
+on:
+  push:
+    branches: [master, main, ralph/k8s-deployment]
+  workflow_dispatch:
+
+env:
+  REGISTRY: registry.cn-hangzhou.aliyuncs.com
+  NAMESPACE: honeybadge
+  DEPLOY_BRANCH: ralph/k8s-deployment
+  # ECS public IP — Matrix (Tuwunel) NodePort for browser matrix-js-sdk connection
+  MATRIX_HOMESERVER: "http://8.130.95.169:30167"
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: honeybadge-server
+            dockerfile: deploy/docker/Dockerfile.server
+          - name: honeybadge-auth
+            dockerfile: src/honeybadge/auth_service/Dockerfile
+          - name: honeybadge-permissions
+            dockerfile: src/honeybadge/permission_service/Dockerfile
+          - name: honeybadge-nebula-mcp
+            dockerfile: mcp-servers/honeybadge-nebula-mcp/Dockerfile
+          - name: honeybadge-audit-mcp
+            dockerfile: mcp-servers/honeybadge-audit-mcp/Dockerfile
+          - name: honeybadge-cache-mcp
+            dockerfile: mcp-servers/honeybadge-cache-mcp/Dockerfile
+          - name: honeybadge-frontend
+            dockerfile: frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Alibaba Cloud ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          build-args: |
+            VITE_MATRIX_HOMESERVER=${{ env.MATRIX_HOMESERVER }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.name }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to k3s via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          command_timeout: 15m
+          script: |
+            set -e
+
+            REGISTRY="${{ env.REGISTRY }}"
+            NAMESPACE="${{ env.NAMESPACE }}"
+            TAG="${{ github.sha }}"
+            BRANCH="${{ env.DEPLOY_BRANCH }}"
+            REPO_DIR="/opt/honeybadge"
+
+            # ── 1. Install kustomize if missing ──────────────────────────────
+            if ! command -v kustomize &>/dev/null; then
+              echo "=== Installing kustomize ==="
+              curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+              mv kustomize /usr/local/bin/
+            fi
+
+            # ── 2. Clone or update repo ───────────────────────────────────────
+            if [ -d "$REPO_DIR/.git" ]; then
+              cd $REPO_DIR
+              git fetch origin
+              git checkout $BRANCH
+              git reset --hard origin/$BRANCH
+            else
+              git clone -b $BRANCH https://github.com/${{ github.repository }}.git $REPO_DIR
+              cd $REPO_DIR
+            fi
+
+            # ── 3. Create namespace + ACR pull secret ─────────────────────────
+            kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl -n $NAMESPACE create secret docker-registry acr-pull-secret \
+              --docker-server="$REGISTRY" \
+              --docker-username="${{ secrets.ACR_USERNAME }}" \
+              --docker-password="${{ secrets.ACR_PASSWORD }}" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl -n $NAMESPACE patch serviceaccount default \
+              -p '{"imagePullSecrets": [{"name": "acr-pull-secret"}]}' || true
+
+            # ── 4. Update image tags and apply manifests ─────────────────────
+            cd $REPO_DIR/deploy/k8s
+
+            kustomize edit set image \
+              honeybadge-server=${REGISTRY}/${NAMESPACE}/honeybadge-server:${TAG} \
+              honeybadge-auth=${REGISTRY}/${NAMESPACE}/honeybadge-auth:${TAG} \
+              honeybadge-permissions=${REGISTRY}/${NAMESPACE}/honeybadge-permissions:${TAG} \
+              honeybadge-nebula-mcp=${REGISTRY}/${NAMESPACE}/honeybadge-nebula-mcp:${TAG} \
+              honeybadge-audit-mcp=${REGISTRY}/${NAMESPACE}/honeybadge-audit-mcp:${TAG} \
+              honeybadge-cache-mcp=${REGISTRY}/${NAMESPACE}/honeybadge-cache-mcp:${TAG} \
+              honeybadge-frontend=${REGISTRY}/${NAMESPACE}/honeybadge-frontend:${TAG}
+
+            kustomize build --load-restrictor=LoadRestrictionsNone . | kubectl apply -f -
+
+            # ── 5. Wait for rollout ───────────────────────────────────────────
+            echo "=== Waiting for stateful services ==="
+            kubectl -n $NAMESPACE rollout status statefulset/nebula-metad  --timeout=180s || true
+            kubectl -n $NAMESPACE rollout status statefulset/nebula-storaged --timeout=180s || true
+            kubectl -n $NAMESPACE rollout status statefulset/redis          --timeout=90s  || true
+            kubectl -n $NAMESPACE rollout status statefulset/postgres        --timeout=90s  || true
+
+            echo "=== Waiting for deployments ==="
+            for d in nebula-graphd hiclaw-manager honeybadge-server honeybadge-auth \
+                     honeybadge-permissions honeybadge-nebula-mcp honeybadge-audit-mcp \
+                     honeybadge-cache-mcp frontend; do
+              kubectl -n $NAMESPACE rollout status deployment/${d} --timeout=300s || true
+            done
+            for d in hiclaw-graph-worker hiclaw-analytics-worker; do
+              kubectl -n $NAMESPACE rollout status deployment/${d} --timeout=300s || true
+            done
+
+            echo ""
+            echo "=== Deploy complete! Tag: ${TAG} ==="
+            kubectl -n $NAMESPACE get pods -o wide

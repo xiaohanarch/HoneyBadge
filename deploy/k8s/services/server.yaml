@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: honeybadge-server
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-server
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: honeybadge-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: honeybadge-server
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: server
+          image: honeybadge-server:latest
+          ports:
+            - containerPort: 8090
+          env:
+            - name: NEBULA_HOST
+              value: "nebula-graphd"
+            - name: NEBULA_PORT
+              value: "9669"
+            - name: NEBULA_USER
+              value: "root"
+            - name: NEBULA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: NEBULA_PASSWORD
+            - name: NEBULA_SPACE
+              value: "honeybadge"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: REDIS_PASSWORD
+            - name: PG_HOST
+              value: "postgres"
+            - name: PG_PORT
+              value: "5432"
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: PG_USER
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: PG_PASSWORD
+            - name: PG_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: PG_DATABASE
+            - name: LLM_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: LLM_ENDPOINT
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: LLM_API_KEY
+            - name: LLM_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: LLM_MODEL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: JWT_SECRET
+            - name: SERVER_PORT
+              value: "8090"
+            - name: TZ
+              value: "Asia/Shanghai"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8090
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8090
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: honeybadge-server
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-server
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: honeybadge-server
+  ports:
+    - port: 8090
+      targetPort: 8090

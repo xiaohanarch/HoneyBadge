@@ -89,3 +89,7 @@ frontend/src/components.d.ts
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+
+# K8s local secrets (never commit real values)
+deploy/k8s/secrets.local.yaml
+deploy/k8s/scripts/01-apply-secrets.sh

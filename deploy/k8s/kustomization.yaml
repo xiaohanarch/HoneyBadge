@@ -1,0 +1,72 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: honeybadge
+
+resources:
+  - namespace.yaml
+  # secrets.yaml intentionally excluded — secrets are applied manually on ECS
+  # via deploy/k8s/scripts/01-apply-secrets.sh (never overwritten by CI/CD)
+  - configmaps/nebula-config.yaml
+  - configmaps/postgres-init.yaml
+  - stateful/nebula.yaml
+  - stateful/redis.yaml
+  - stateful/postgres.yaml
+  - hiclaw/manager.yaml
+  - hiclaw/workers.yaml
+  - services/server.yaml
+  - services/auth.yaml
+  - services/permissions.yaml
+  - services/mcps.yaml
+  - frontend/frontend.yaml
+  - frontend/ingress-routes.yaml
+  - jobs/init-nebula.yaml
+
+# Image overrides — CI/CD sets these via: kustomize edit set image
+images:
+  - name: honeybadge-server
+    newName: registry.cn-hangzhou.aliyuncs.com/honeybadge/honeybadge-server
+    newTag: latest
+  - name: honeybadge-auth
+    newName: registry.cn-hangzhou.aliyuncs.com/honeybadge/honeybadge-auth
+    newTag: latest
+  - name: honeybadge-permissions
+    newName: registry.cn-hangzhou.aliyuncs.com/honeybadge/honeybadge-permissions
+    newTag: latest
+  - name: honeybadge-nebula-mcp
+    newName: registry.cn-hangzhou.aliyuncs.com/honeybadge/honeybadge-nebula-mcp
+    newTag: latest
+  - name: honeybadge-audit-mcp
+    newName: registry.cn-hangzhou.aliyuncs.com/honeybadge/honeybadge-audit-mcp
+    newTag: latest
+  - name: honeybadge-cache-mcp
+    newName: registry.cn-hangzhou.aliyuncs.com/honeybadge/honeybadge-cache-mcp
+    newTag: latest
+  - name: honeybadge-frontend
+    newName: registry.cn-hangzhou.aliyuncs.com/honeybadge/honeybadge-frontend
+    newTag: latest
+
+# ConfigMaps from files — Kustomize generates these automatically
+configMapGenerator:
+  - name: hiclaw-init-scripts
+    files:
+      - entrypoint-wrapper.sh=../hiclaw/entrypoint-wrapper.sh
+      - manager-init-internal.sh=../hiclaw/manager-init-internal.sh
+      - worker-init-wrapper.sh=../hiclaw/worker-init-wrapper.sh
+  - name: nebula-schema
+    files:
+      - nebula-schema.ngql=../docker/nebula-schema.ngql
+      - nebula-edges.ngql=../docker/nebula-edges.ngql
+  - name: hiclaw-agent-configs
+    files:
+      - graph-worker-soul=../../hiclaw/workers/graph-worker/agent/SOUL.md
+      - analytics-worker-soul=../../hiclaw/workers/analytics-worker/agent/SOUL.md
+      - manager-soul=../../hiclaw/manager/agent/SOUL.md
+      - manager-agents=../../hiclaw/manager/agent/AGENTS.md
+      - manager-heartbeat=../../hiclaw/manager/agent/HEARTBEAT.md
+  - name: hiclaw-fast-query-skill
+    files:
+      - fast-query.sh=../../hiclaw/manager/agent/skills/fast-query/fast-query.sh
+
+generatorOptions:
+  disableNameSuffixHash: true

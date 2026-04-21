@@ -1,0 +1,277 @@
+# =============================================================================
+# NebulaGraph Cluster (1 metad + 1 storaged + 1 graphd) — v3.8.0
+# =============================================================================
+
+# --- Metad Headless Service ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nebula-metad
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: nebula-metad
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: nebula-metad
+  ports:
+    - name: rpc
+      port: 9559
+      targetPort: 9559
+    - name: http
+      port: 19559
+      targetPort: 19559
+---
+# --- Metad StatefulSet ---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nebula-metad
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: nebula-metad
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  serviceName: nebula-metad
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nebula-metad
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nebula-metad
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: metad
+          image: vesoft/nebula-metad:v3.8.0
+          args: ["--flagfile=/usr/local/nebula/etc/nebula-metad.conf"]
+          env:
+            - name: USER
+              value: "root"
+            - name: TZ
+              value: "Asia/Shanghai"
+          ports:
+            - containerPort: 9559
+              name: rpc
+            - containerPort: 19559
+              name: http
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 19559
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 19559
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data/meta
+            - name: config
+              mountPath: /usr/local/nebula/etc/nebula-metad.conf
+              subPath: metad.conf
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: nebula-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+# --- Storaged Headless Service ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nebula-storaged
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: nebula-storaged
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: nebula-storaged
+  ports:
+    - name: rpc
+      port: 9779
+      targetPort: 9779
+    - name: http
+      port: 19779
+      targetPort: 19779
+---
+# --- Storaged StatefulSet ---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nebula-storaged
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: nebula-storaged
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  serviceName: nebula-storaged
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nebula-storaged
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nebula-storaged
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: storaged
+          image: vesoft/nebula-storaged:v3.8.0
+          args: ["--flagfile=/usr/local/nebula/etc/nebula-storaged.conf"]
+          env:
+            - name: USER
+              value: "root"
+            - name: TZ
+              value: "Asia/Shanghai"
+          ports:
+            - containerPort: 9779
+              name: rpc
+            - containerPort: 19779
+              name: http
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1536Mi"
+              cpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 19779
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 19779
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data/storage
+            - name: config
+              mountPath: /usr/local/nebula/etc/nebula-storaged.conf
+              subPath: storaged.conf
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: nebula-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+---
+# --- Graphd Service (ClusterIP, stateless) ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nebula-graphd
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: nebula-graphd
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nebula-graphd
+  ports:
+    - name: graph
+      port: 9669
+      targetPort: 9669
+    - name: http
+      port: 19669
+      targetPort: 19669
+---
+# --- Graphd Deployment (stateless) ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nebula-graphd
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: nebula-graphd
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nebula-graphd
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nebula-graphd
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: graphd
+          image: vesoft/nebula-graphd:v3.8.0
+          args: ["--flagfile=/usr/local/nebula/etc/nebula-graphd.conf"]
+          env:
+            - name: USER
+              value: "root"
+            - name: TZ
+              value: "Asia/Shanghai"
+          ports:
+            - containerPort: 9669
+              name: graph
+            - containerPort: 19669
+              name: http
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 19669
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 19669
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/nebula/etc/nebula-graphd.conf
+              subPath: graphd.conf
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: nebula-config

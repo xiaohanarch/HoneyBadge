@@ -1,0 +1,229 @@
+# =============================================================================
+# MCP Servers — NebulaGraph, Audit, Cache
+# =============================================================================
+
+# --- honeybadge-nebula-mcp ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: honeybadge-nebula-mcp
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-nebula-mcp
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: honeybadge-nebula-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: honeybadge-nebula-mcp
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: nebula-mcp
+          image: honeybadge-nebula-mcp:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: NEBULA_HOST
+              value: "nebula-graphd"
+            - name: NEBULA_PORT
+              value: "9669"
+            - name: NEBULA_USER
+              value: "root"
+            - name: NEBULA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: NEBULA_PASSWORD
+            - name: NEBULA_SPACE
+              value: "honeybadge"
+            - name: LLM_ENDPOINT
+              value: "http://aigw-local-hiclaw-io:8080/v1"
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: LLM_API_KEY
+            - name: LLM_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: LLM_MODEL
+            - name: PERMISSION_SERVICE_URL
+              value: "http://honeybadge-permissions:8092"
+            - name: TZ
+              value: "Asia/Shanghai"
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: honeybadge-nebula-mcp
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-nebula-mcp
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: honeybadge-nebula-mcp
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+# --- honeybadge-audit-mcp ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: honeybadge-audit-mcp
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-audit-mcp
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: honeybadge-audit-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: honeybadge-audit-mcp
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: audit-mcp
+          image: honeybadge-audit-mcp:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PG_HOST
+              value: "postgres"
+            - name: PG_PORT
+              value: "5432"
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: PG_USER
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: PG_PASSWORD
+            - name: PG_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: PG_DATABASE
+            - name: TZ
+              value: "Asia/Shanghai"
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: honeybadge-audit-mcp
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-audit-mcp
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: honeybadge-audit-mcp
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+# --- honeybadge-cache-mcp ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: honeybadge-cache-mcp
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-cache-mcp
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: honeybadge-cache-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: honeybadge-cache-mcp
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      containers:
+        - name: cache-mcp
+          image: honeybadge-cache-mcp:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: REDIS_PASSWORD
+            - name: TZ
+              value: "Asia/Shanghai"
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: honeybadge-cache-mcp
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: honeybadge-cache-mcp
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: honeybadge-cache-mcp
+  ports:
+    - port: 8000
+      targetPort: 8000

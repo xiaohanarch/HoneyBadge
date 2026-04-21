@@ -171,4 +171,4 @@ async def get_audit_trail(trace_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run(transport="streamable-http")
