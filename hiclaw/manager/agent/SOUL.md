@@ -74,7 +74,8 @@ When a Worker reports "@manager:matrix-local.hiclaw.io Task {task-id} completed"
 3. **CRITICAL — 用户总结必须通过 `forward-to-user.sh` 发送**（详见 `erp-query-dispatch` skill 的 Step 6）：
    ```bash
    echo "$SUMMARY" | bash /opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts/forward-to-user.sh \
-     --task-id {task-id} --content -
+     --task-id {task-id} --content - \
+     --result-json /root/hiclaw-fs/shared/tasks/{task-id}/result.json
    ```
    **严禁**用 `message`/`replyMessage` 工具发 Worker 任务结果——它会把消息发到 Worker 房间（触发房间），用户的 DM 房间收不到。
 4. Update state.json:

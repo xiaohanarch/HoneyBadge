@@ -27,12 +27,14 @@ set -euo pipefail
 
 TASK_ID=""
 CONTENT=""
+RESULT_JSON=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --task-id) TASK_ID="$2"; shift 2 ;;
-        --content) CONTENT="$2"; shift 2 ;;
-        *)         echo "FORWARD_ERROR: Unknown arg: $1" >&2; exit 1 ;;
+        --task-id)     TASK_ID="$2"; shift 2 ;;
+        --content)     CONTENT="$2"; shift 2 ;;
+        --result-json) RESULT_JSON="$2"; shift 2 ;;
+        *)             echo "FORWARD_ERROR: Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
 
@@ -142,6 +144,7 @@ export FWD_TOKEN="$MANAGER_TOKEN"
 export FWD_TUWUNEL_URL="$TUWUNEL_URL"
 export FWD_TXN_ID="$TXN_ID"
 export FWD_CONTENT="$CONTENT"
+export FWD_RESULT_JSON="$RESULT_JSON"
 
 RESULT=$(python3 << 'PYEOF'
 import json, urllib.request, urllib.parse, os
@@ -151,6 +154,7 @@ token = os.environ["FWD_TOKEN"]
 tuwunel = os.environ["FWD_TUWUNEL_URL"]
 txn_id = os.environ["FWD_TXN_ID"]
 content = os.environ["FWD_CONTENT"]
+result_json_path = os.environ.get("FWD_RESULT_JSON", "")
 
 encoded_room = urllib.parse.quote(room_id, safe='')
 encoded_txn = urllib.parse.quote(txn_id, safe='')
@@ -160,6 +164,27 @@ body = {
     'msgtype': 'm.text',
     'body': content,
 }
+
+# Attach x-honeybadge structured payload when result.json is available
+if result_json_path and os.path.isfile(result_json_path):
+    try:
+        with open(result_json_path) as f:
+            result = json.load(f)
+        body['x-honeybadge'] = {
+            'v': '1',
+            'contract': '002',
+            'trace_id': result.get('trace_id', ''),
+            'payload': {
+                'summary': result.get('summary', content),
+                'raw_data': result.get('raw_data', []),
+                'columns': result.get('columns', []),
+                'cypher': result.get('cypher', ''),
+                'execution_time_ms': result.get('execution_time_ms', 0),
+                'row_count': result.get('row_count', 0),
+            },
+        }
+    except Exception:
+        pass  # fall through to plain text if result.json is unreadable
 
 data = json.dumps(body).encode('utf-8')
 req = urllib.request.Request(url, data=data, method='PUT', headers={
