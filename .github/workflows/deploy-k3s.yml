@@ -8,7 +8,7 @@ on:
 env:
   REGISTRY: registry.cn-hangzhou.aliyuncs.com
   NAMESPACE: honeybadge
-  DEPLOY_BRANCH: ralph/k8s-deployment
+  DEPLOY_BRANCH: master
   # ECS public IP — Matrix (Tuwunel) NodePort for browser matrix-js-sdk connection
   MATRIX_HOMESERVER: "http://8.130.95.169:30167"
 
