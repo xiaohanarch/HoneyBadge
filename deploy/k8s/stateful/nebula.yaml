@@ -155,10 +155,10 @@ spec:
               name: http
           resources:
             requests:
-              memory: "512Mi"
+              memory: "1Gi"
               cpu: "200m"
             limits:
-              memory: "1536Mi"
+              memory: "4Gi"
               cpu: "1"
           readinessProbe:
             httpGet:
@@ -252,7 +252,7 @@ spec:
               memory: "512Mi"
               cpu: "200m"
             limits:
-              memory: "1Gi"
+              memory: "2Gi"
               cpu: "1"
           readinessProbe:
             httpGet:
