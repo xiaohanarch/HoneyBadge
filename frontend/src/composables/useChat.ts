@@ -3,6 +3,7 @@ import { ElMessage } from 'element-plus';
 import { useChatStore } from '@/stores/chat';
 import { useWebSocket } from './useWebSocket';
 import { sessionApi } from '@/api/http';
+import { generateTraceId as uuidv4 } from '@/api/matrix';
 import type {
   ChatMessage,
   ChatSession,
@@ -100,7 +101,7 @@ export function useChat() {
 
     // 添加用户消息
     const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       role: 'user',
       content: question,
       message_type: 'text',

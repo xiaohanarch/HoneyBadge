@@ -7,6 +7,7 @@ import {
   createMatrixClient,
   findOrCreateManagerDmRoom,
   sendQuery,
+  generateTraceId as uuidv4,
   type MatrixClient,
 } from '@/api/matrix'
 import type { ChatMessage, ChatSession } from '@/types'
@@ -134,7 +135,7 @@ export function useMatrixChat() {
     }
 
     const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       role: 'user',
       content: question,
       message_type: 'text',
