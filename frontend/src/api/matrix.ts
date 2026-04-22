@@ -66,8 +66,18 @@ export async function findOrCreateManagerDmRoom(
   return resp.room_id
 }
 
+function uuidv4(): string {
+  // crypto.randomUUID() requires a secure context (HTTPS/localhost).
+  // Use a portable UUID v4 implementation so this works over plain HTTP too.
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 export function generateTraceId(): string {
-  return crypto.randomUUID()
+  return uuidv4()
 }
 
 export async function sendQuery(

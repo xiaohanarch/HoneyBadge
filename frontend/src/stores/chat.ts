@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { generateTraceId as uuidv4 } from '@/api/matrix';
 import type {
   ChatMessage,
   ChatSession,
@@ -72,7 +73,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!sessionId) return;
 
     const assistantMessage: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       role: 'assistant',
       content: '',
       message_type: 'text',
