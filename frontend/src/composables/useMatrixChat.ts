@@ -39,7 +39,17 @@ export function useMatrixChat() {
 
     try {
       matrixClient = createMatrixClient(homeserver, token, userId)
-      dmRoomId = await findOrCreateManagerDmRoom(matrixClient, MANAGER_USER_ID)
+
+      // Use the room ID provisioned server-side during login if available,
+      // otherwise fall back to the client-side discovery (first login, no cache).
+      const preProvisionedRoomId = authStore.matrixDmRoomId
+      if (preProvisionedRoomId) {
+        // Start the client for sync/event listening, then use the known room.
+        await matrixClient.startClient({ initialSyncLimit: 10 })
+        dmRoomId = preProvisionedRoomId
+      } else {
+        dmRoomId = await findOrCreateManagerDmRoom(matrixClient, MANAGER_USER_ID)
+      }
 
       // Listen for incoming events
       // @ts-ignore — Room.timeline event string is valid but sdk types are strict
@@ -218,7 +228,7 @@ export function useMatrixChat() {
   }
 
   async function connect() {
-    await initMatrix()
+    await ensureInitialized()
   }
 
   function disconnect() {

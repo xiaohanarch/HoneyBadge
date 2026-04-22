@@ -11,6 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
   const matrixToken = ref<string | null>(null);
   const matrixHomeserver = ref<string | null>(null);
   const matrixUserId = ref<string | null>(null);
+  const matrixDmRoomId = ref<string | null>(null);
   const rolesJwt = ref<string | null>(null);
 
   const isAuthenticated = computed(() => !!token.value && !!user.value);
@@ -21,11 +22,14 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = newUser;
   }
 
-  function setMatrixAuth(mToken: string, homeserver: string, userId: string, jwt: string) {
+  function setMatrixAuth(mToken: string, homeserver: string, userId: string, jwt: string, dmRoomId?: string) {
     matrixToken.value = mToken;
     matrixHomeserver.value = homeserver;
     matrixUserId.value = userId;
     rolesJwt.value = jwt;
+    if (dmRoomId) {
+      matrixDmRoomId.value = dmRoomId;
+    }
   }
 
   function setToken(newToken: string) {
@@ -43,6 +47,7 @@ export const useAuthStore = defineStore('auth', () => {
     matrixToken.value = null;
     matrixHomeserver.value = null;
     matrixUserId.value = null;
+    matrixDmRoomId.value = null;
     rolesJwt.value = null;
   }
 
@@ -62,6 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
     matrixToken,
     matrixHomeserver,
     matrixUserId,
+    matrixDmRoomId,
     rolesJwt,
     isAuthenticated,
     setAuth,

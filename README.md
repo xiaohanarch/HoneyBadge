@@ -595,18 +595,41 @@ def handle_query(user_question, user):
 ### 5.3 多用户会话隔离（Approach B）
 
 ```
-用户 A 登录 → honeybadge-auth 创建 @hb-admin:matrix-local.hiclaw.io
+用户 A 登录 → honeybadge-auth:
+                ├─ 创建/登录 @hb-admin:matrix-local.hiclaw.io
+                └─ 服务端预创建与 @manager 的 DM 房间（Room-A）← 返回 matrix_dm_room_id
       ↓
-浏览器用 @hb-admin 的 access_token 连接 Tuwunel
+浏览器用 @hb-admin 的 access_token + Room-A ID 直连 Tuwunel
       ↓
-用户 A 与 Manager 建立独立 DM 房间（Room-A）
+用户 A 直接向 Room-A 发消息（无需客户端发现房间）
 
-用户 B 登录 → honeybadge-auth 创建 @hb-analyst:matrix-local.hiclaw.io
+用户 B 登录 → honeybadge-auth:
+                ├─ 创建/登录 @hb-analyst:matrix-local.hiclaw.io
+                └─ 服务端预创建与 @manager 的 DM 房间（Room-B）← 返回 matrix_dm_room_id
       ↓
-用户 B 与 Manager 建立独立 DM 房间（Room-B，与 Room-A 完全独立）
+Room-A 与 Room-B 完全独立，@manager 在登录时已 join 两个房间
 ```
 
 **Matrix 密码派生**：`HMAC-SHA256(MATRIX_USER_SECRET, username)`
+
+**为何服务端预创建 DM 房间（而非客户端发现）**：
+
+客户端 `findOrCreateManagerDmRoom()` 存在竞态问题：创建新房间后立即发消息，Manager 的 join 是异步的，消息在 Manager 加入前到达导致丢失。更严重的是，每次 E2E 测试或浏览器冷启动时，初始同步超时（5s）导致 `m.direct` 账户数据无法及时读取，每次都误判为"没有已有房间"，反复创建新房间。
+
+服务端预创建的优势：
+
+| 维度 | 客户端发现 | 服务端预创建（当前） |
+|------|-----------|-------------------|
+| 房间可用性 | 发消息时才确保存在 | 登录完成时就已就绪 |
+| Manager join 竞态 | 存在（新房间需等 Manager join）| 不存在（登录时 Manager 已 join）|
+| 冷启动可靠性 | 依赖 5s 初始同步超时 | 直接使用 room_id，无需同步 |
+| 重复房间风险 | 高（并发 init 导致双重建房）| 低（服务端检查 m.direct 复用）|
+
+`honeybadge-auth` 的 `_provision_dm_room()` 逻辑（幂等）：
+1. 查 `m.direct` 账户数据 → 若已有该 Manager 的 DM 房间则直接返回
+2. 否则调用 `createRoom(is_direct=True, invite=[@manager])` 创建新房间
+3. 写回 `m.direct` 账户数据供下次复用
+4. 返回 `room_id` 给前端
 
 **权限上下文传递（x-hb-auth）**：
 graph-worker 从 Matrix 消息的 `x-hb-auth` 字段解码出 `{user_id, roles, org_id}`，传入 MCP 工具的 `user_context` 参数实现 L3 权限校验。
@@ -671,14 +694,20 @@ NebulaGraph 只存高价值的实体关系网络，其余数据通过 MCP 按需
   浏览器 POST /login → honeybadge-auth
                          ├─ 验证用户名密码
                          ├─ 在 Tuwunel 创建/登录 @hb-{user} 账号
-                         └─ 返回 { matrix_access_token, matrix_homeserver, roles_jwt }
+                         ├─ 服务端预创建与 @manager 的 DM 房间（幂等，复用已有房间）
+                         └─ 返回 { matrix_access_token, matrix_homeserver,
+                                   matrix_dm_room_id, roles_jwt }
+                                            ↑
+                                   房间 ID 直接返回，前端存入 localStorage
 
 聊天流程：
   浏览器 matrix-js-sdk.createClient(homeserver, access_token)
     ↓
-  client.startClient() → 建立 Matrix 长连接
+  ensureInitialized()（单例保护，防止并发二次初始化）
     ↓
-  findOrCreateManagerDmRoom() → 查找/创建与 @manager 的 DM 房间
+  client.startClient({ initialSyncLimit: 10 })
+    ↓
+  dmRoomId = localStorage.matrix_dm_room_id  ← 直接使用，跳过客户端房间发现
     ↓
   sendEvent(roomId, 'm.room.message', { body, x-honeybadge, x-hb-auth })
     ↓
@@ -705,7 +734,7 @@ NebulaGraph 只存高价值的实体关系网络，其余数据通过 MCP 按需
   - 接收错误 → Matrix 事件（x-honeybadge contract: 003）
 
 辅助通道：HTTP REST（honeybadge-auth + honeybadge-server）
-  - POST /login（honeybadge-auth）：认证 + Matrix 账号创建
+  - POST /login（honeybadge-auth）：认证 + Matrix 账号创建 + DM 房间预创建
   - GET /api/health（honeybadge-server）：基础设施健康状态
   - GET /api/audit/{trace_id}（honeybadge-server）：审计查询（Phase 2）
   - GET /api/sessions（honeybadge-server）：历史会话列表（Phase 2）
@@ -1029,13 +1058,20 @@ bash deploy/docker/init-nebula.sh
 
 执行 ADD HOSTS、建 Space、应用 Schema、重建索引，约 30 秒完成。
 
-### 5. 注册 HiClaw Workers（仅第一次）
+### 5. HiClaw 自动初始化（无需手动操作）
 
-```bash
-bash deploy/hiclaw/init-workers.sh
-```
+HiClaw Manager 容器在每次启动时，会通过 `entrypoint-wrapper.sh` → `manager-init-internal.sh` 自动执行完整初始化：
 
-上传 Worker 的 SOUL.md + 技能文件到 MinIO，注册 MCP Server 到 Higress。
+- 上传 Worker SOUL.md + 技能文件到 MinIO
+- 注册 Workers（`create-worker.sh`）
+- 修正 LLM baseUrl / model / contextPruning 配置
+- 创建 Higress LLM 路由（`llm-minimax-route`）
+- 注入 Manager 的 SOUL.md、AGENTS.md、HEARTBEAT.md
+- **修补 Manager allowFrom 白名单**（`@hb-*` 用户列表）← 每次重启都执行，升级 HiClaw 后无需手动恢复
+
+K8s 部署同理：`hiclaw-init-scripts` ConfigMap 将这两个脚本挂载进 Pod，`command` 覆盖默认入口，Pod 每次重启都自动运行。
+
+`deploy/hiclaw/init-workers.sh`（仓库中保留的外部脚本）现为**可选调试工具**，正常启动无需手动执行。
 
 ### 6. 重启 Workers
 

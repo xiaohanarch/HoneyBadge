@@ -60,8 +60,9 @@ router.beforeEach(async (to, from, next) => {
         const matrixToken = localStorage.getItem('matrix_token');
         const matrixHomeserver = localStorage.getItem('matrix_homeserver');
         const matrixUserId = localStorage.getItem('matrix_user_id');
+        const matrixDmRoomId = localStorage.getItem('matrix_dm_room_id');
         if (matrixToken && matrixHomeserver && matrixUserId) {
-          authStore.setMatrixAuth(matrixToken, matrixHomeserver, matrixUserId, token);
+          authStore.setMatrixAuth(matrixToken, matrixHomeserver, matrixUserId, token, matrixDmRoomId || undefined);
         }
 
         next();
@@ -72,6 +73,7 @@ router.beforeEach(async (to, from, next) => {
         localStorage.removeItem('matrix_token');
         localStorage.removeItem('matrix_user_id');
         localStorage.removeItem('matrix_homeserver');
+        localStorage.removeItem('matrix_dm_room_id');
         authStore.clearAuth();
         next('/login');
       }
