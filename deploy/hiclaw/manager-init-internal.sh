@@ -365,6 +365,13 @@ channels = cfg.setdefault('channels', {}).setdefault('matrix', {})
 channels['dm'] = {'policy': 'allowlist', 'allowFrom': hb_users}
 channels['groupAllowFrom'] = hb_users
 
+# Fix Manager LLM baseUrl (template generates http://:8080/v1 if HICLAW_AI_GATEWAY_DOMAIN unset)
+for name, p in cfg.get('models', {}).get('providers', {}).items():
+    old = p.get('baseUrl', '')
+    if old and 'aigw-local.hiclaw.io:8080/v1' not in old:
+        p['baseUrl'] = 'http://aigw-local.hiclaw.io:8080/v1'
+        print('Patched Manager provider ' + name + ' baseUrl: ' + repr(old) + ' -> ' + p['baseUrl'])
+
 # Remove reasoning:true from all models
 for p in cfg.get('models', {}).get('providers', {}).values():
     for m in p.get('models', []):

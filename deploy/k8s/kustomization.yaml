@@ -72,6 +72,7 @@ configMapGenerator:
       - result-watcher.sh=../../hiclaw/manager/agent/skills/erp-query-dispatch/scripts/result-watcher.sh
       - forward-to-user.sh=../../hiclaw/manager/agent/skills/erp-query-dispatch/scripts/forward-to-user.sh
       - dispatch-to-worker.sh=../../hiclaw/manager/agent/skills/erp-query-dispatch/scripts/dispatch-to-worker.sh
+      - dispatch.sh=../../hiclaw/manager/agent/skills/erp-query-dispatch/scripts/dispatch.sh
 
 generatorOptions:
   disableNameSuffixHash: true
