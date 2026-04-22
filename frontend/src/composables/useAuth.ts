@@ -32,6 +32,9 @@ export function useAuth() {
       localStorage.setItem('matrix_token', data.matrix_access_token);
       localStorage.setItem('matrix_user_id', data.matrix_user_id);
       localStorage.setItem('matrix_homeserver', data.matrix_homeserver);
+      if (data.matrix_dm_room_id) {
+        localStorage.setItem('matrix_dm_room_id', data.matrix_dm_room_id);
+      }
 
       // Update stores
       authStore.setAuth(data.roles_jwt, '', data.user);
@@ -39,7 +42,8 @@ export function useAuth() {
         data.matrix_access_token,
         data.matrix_homeserver,
         data.matrix_user_id,
-        data.roles_jwt
+        data.roles_jwt,
+        data.matrix_dm_room_id,
       );
 
       ElMessage.success(`欢迎回来，${data.user.display_name}`);
@@ -66,6 +70,7 @@ export function useAuth() {
       localStorage.removeItem('matrix_token');
       localStorage.removeItem('matrix_user_id');
       localStorage.removeItem('matrix_homeserver');
+      localStorage.removeItem('matrix_dm_room_id');
 
       // 重置 store
       authStore.clearAuth();
@@ -94,6 +99,7 @@ export function useAuth() {
       localStorage.removeItem('matrix_token');
       localStorage.removeItem('matrix_user_id');
       localStorage.removeItem('matrix_homeserver');
+      localStorage.removeItem('matrix_dm_room_id');
       authStore.clearAuth();
       return null;
     }
@@ -104,11 +110,12 @@ export function useAuth() {
     const matrixToken = localStorage.getItem('matrix_token');
     const matrixUserId = localStorage.getItem('matrix_user_id');
     const matrixHomeserver = localStorage.getItem('matrix_homeserver');
+    const matrixDmRoomId = localStorage.getItem('matrix_dm_room_id');
 
     if (token && authStore.user) {
       authStore.setAuth(token, '', authStore.user);
       if (matrixToken && matrixUserId && matrixHomeserver) {
-        authStore.setMatrixAuth(matrixToken, matrixHomeserver, matrixUserId, token);
+        authStore.setMatrixAuth(matrixToken, matrixHomeserver, matrixUserId, token, matrixDmRoomId || undefined);
       }
       return true;
     }
@@ -140,6 +147,7 @@ export function useAuth() {
         matrix_access_token: params.get('matrix_access_token') || '',
         matrix_user_id: params.get('matrix_user_id') || '',
         matrix_homeserver: params.get('matrix_homeserver') || '',
+        matrix_dm_room_id: params.get('matrix_dm_room_id') || '',
         roles_jwt: params.get('roles_jwt') || '',
         user: {
           id: params.get('user_id') || '',
@@ -160,8 +168,11 @@ export function useAuth() {
       localStorage.setItem('matrix_token', data.matrix_access_token);
       localStorage.setItem('matrix_user_id', data.matrix_user_id);
       localStorage.setItem('matrix_homeserver', data.matrix_homeserver);
+      if (data.matrix_dm_room_id) {
+        localStorage.setItem('matrix_dm_room_id', data.matrix_dm_room_id);
+      }
       authStore.setAuth(data.roles_jwt, '', data.user);
-      authStore.setMatrixAuth(data.matrix_access_token, data.matrix_homeserver, data.matrix_user_id, data.roles_jwt);
+      authStore.setMatrixAuth(data.matrix_access_token, data.matrix_homeserver, data.matrix_user_id, data.roles_jwt, data.matrix_dm_room_id || undefined);
       ElMessage.success(`欢迎，${data.user.display_name}`);
       // Clean URL fragment
       window.history.replaceState({}, '', '/login');

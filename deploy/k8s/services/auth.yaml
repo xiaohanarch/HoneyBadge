@@ -58,6 +58,8 @@ spec:
               value: "false"
             - name: AUTH_SERVICE_URL
               value: "http://honeybadge-auth:8091"
+            - name: MANAGER_USER_ID
+              value: "@manager:matrix-local.hiclaw.io"
             - name: DEFAULT_ROLE
               value: "analyst"
             - name: TZ

@@ -59,6 +59,9 @@ JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
 MATRIX_HOMESERVER_PUBLIC: str = os.getenv(
     "MATRIX_HOMESERVER_PUBLIC", "http://localhost:6167"
 )
+MANAGER_USER_ID: str = os.getenv(
+    "MANAGER_USER_ID", "@manager:matrix-local.hiclaw.io"
+)
 
 _ALGORITHM = "HS256"
 
@@ -123,6 +126,7 @@ class LoginResponse(BaseModel):
     matrix_access_token: str
     matrix_homeserver: str
     matrix_user_id: str
+    matrix_dm_room_id: str
     roles_jwt: str
     user: UserInfo
 
@@ -309,6 +313,82 @@ async def _provision_matrix_account(username: str, password: str) -> str:
         ) from exc
 
 
+async def _provision_dm_room(access_token: str, user_id: str) -> str:
+    """Find or create the DM room between user_id and the HiClaw Manager.
+
+    Checks the user's m.direct account data first so the same room is reused
+    across logins.  Creates a new private_chat room with the manager if none
+    exists, then records it in m.direct for future lookups.
+
+    Returns:
+        The Matrix room_id string.
+    """
+    headers = {"Authorization": f"Bearer {access_token}"}
+    manager_user_id = MANAGER_USER_ID
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # 1. Check existing m.direct account data
+        try:
+            resp = await client.get(
+                f"{TUWUNEL_URL}/_matrix/client/v3/user/{user_id}/account_data/m.direct",
+                headers=headers,
+            )
+            if resp.status_code == 200:
+                dm_map: dict[str, list[str]] = resp.json()
+                rooms = dm_map.get(manager_user_id, [])
+                if rooms:
+                    logger.info(
+                        "dm_room_reused",
+                        user_id=user_id,
+                        room_id=rooms[0],
+                    )
+                    return rooms[0]
+        except Exception as exc:
+            logger.warning("dm_room_lookup_failed", user_id=user_id, error=str(exc))
+
+        # 2. Create new DM room
+        create_resp = await client.post(
+            f"{TUWUNEL_URL}/_matrix/client/v3/createRoom",
+            headers=headers,
+            json={
+                "is_direct": True,
+                "invite": [manager_user_id],
+                "preset": "private_chat",
+            },
+        )
+        if create_resp.status_code not in (200, 201):
+            logger.error(
+                "dm_room_create_failed",
+                user_id=user_id,
+                status=create_resp.status_code,
+                body=create_resp.text[:200],
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to create Matrix DM room with manager",
+            )
+        room_id: str = create_resp.json()["room_id"]
+        logger.info("dm_room_created", user_id=user_id, room_id=room_id)
+
+        # 3. Record in m.direct so future logins reuse this room
+        try:
+            await client.put(
+                f"{TUWUNEL_URL}/_matrix/client/v3/user/{user_id}/account_data/m.direct",
+                headers=headers,
+                json={manager_user_id: [room_id]},
+            )
+        except Exception as exc:
+            logger.warning(
+                "dm_room_mdirect_update_failed",
+                user_id=user_id,
+                room_id=room_id,
+                error=str(exc),
+            )
+            # Non-fatal: room was created, just won't be found next time via m.direct
+
+        return room_id
+
+
 def _sign_roles_jwt(user: dict[str, Any], username: str) -> str:
     """Sign and return a roles JWT for the given user."""
     payload: dict[str, Any] = {
@@ -352,16 +432,21 @@ async def login(body: LoginRequest) -> LoginResponse:
 
     matrix_user_id = f"@hb-{body.username}:{MATRIX_DOMAIN}"
 
+    # Step 5: provision (or reuse) the DM room with the HiClaw Manager
+    matrix_dm_room_id = await _provision_dm_room(matrix_access_token, matrix_user_id)
+
     logger.info(
         "login_success",
         username=body.username,
         matrix_user_id=matrix_user_id,
+        matrix_dm_room_id=matrix_dm_room_id,
     )
 
     return LoginResponse(
         matrix_access_token=matrix_access_token,
         matrix_homeserver=MATRIX_HOMESERVER_PUBLIC,
         matrix_user_id=matrix_user_id,
+        matrix_dm_room_id=matrix_dm_room_id,
         roles_jwt=roles_jwt,
         user=UserInfo(
             id=user["id"],
@@ -444,11 +529,15 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
 
     matrix_user_id = f"@hb-{matrix_username}:{MATRIX_DOMAIN}"
 
+    # Provision (or reuse) the DM room with the HiClaw Manager
+    matrix_dm_room_id = await _provision_dm_room(matrix_access_token, matrix_user_id)
+
     # Redirect to frontend with tokens in URL fragment (not sent to server)
     login_response = LoginResponse(
         matrix_access_token=matrix_access_token,
         matrix_homeserver=MATRIX_HOMESERVER_PUBLIC,
         matrix_user_id=matrix_user_id,
+        matrix_dm_room_id=matrix_dm_room_id,
         roles_jwt=roles_jwt,
         user=UserInfo(
             id=f"google:{google_sub}",
@@ -465,6 +554,7 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
         "matrix_access_token": data["matrix_access_token"],
         "matrix_homeserver": data["matrix_homeserver"],
         "matrix_user_id": data["matrix_user_id"],
+        "matrix_dm_room_id": data["matrix_dm_room_id"],
         "roles_jwt": data["roles_jwt"],
         "user_id": data["user"]["id"],
         "user_username": data["user"]["username"],
