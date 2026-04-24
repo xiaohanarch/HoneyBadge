@@ -129,7 +129,7 @@ if cfg_path is None:
 with open(cfg_path) as f:
     cfg = json.load(f)
 
-model_name = os.environ.get('HICLAW_DEFAULT_MODEL', 'MiniMax-M2.7')
+model_name = os.environ.get('HICLAW_DEFAULT_MODEL', 'MiniMax-M2.7-highspeed')
 changed = False
 
 providers = cfg.get('models', {}).get('providers', {})

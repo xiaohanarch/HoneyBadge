@@ -43,6 +43,48 @@ spec:
         app.kubernetes.io/name: hiclaw-manager
         app.kubernetes.io/part-of: honeybadge
     spec:
+      # ---------------------------------------------------------------------
+      # Layer 1 of the CRLF defense-in-depth strategy.
+      # ConfigMap volume mounts are read-only, so we can't `sed -i` them in
+      # place.  Instead:
+      #   1. Mount the raw ConfigMaps at /src/* in this initContainer.
+      #   2. Copy each file to an emptyDir volume, stripping CR bytes.
+      #   3. Main container mounts the emptyDir where the skills are expected.
+      # Guarantees that even if a developer commits a CRLF-tainted script
+      # (Layers 2+3 should prevent this), the runtime sees clean LF files.
+      # ---------------------------------------------------------------------
+      initContainers:
+        - name: normalize-skill-scripts
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              normalize() {
+                  local src="$1" dst="$2"
+                  mkdir -p "$dst"
+                  for f in "$src"/*; do
+                      [ -f "$f" ] || continue
+                      local name="$(basename "$f")"
+                      # Strip CR, preserve permissions via chmod
+                      sed 's/\r$//' "$f" > "$dst/$name"
+                      chmod 0755 "$dst/$name"
+                  done
+                  echo "normalized $src -> $dst ($(ls -1 "$dst" | wc -l) files)"
+              }
+              normalize /src/fast-query     /dst/fast-query
+              normalize /src/erp-dispatch   /dst/erp-dispatch
+              echo "CRLF normalization complete."
+          volumeMounts:
+            - name: fast-query-skill-raw
+              mountPath: /src/fast-query
+              readOnly: true
+            - name: erp-dispatch-scripts-raw
+              mountPath: /src/erp-dispatch
+              readOnly: true
+            - name: normalized-scripts
+              mountPath: /dst
       containers:
         - name: hiclaw-manager
           image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.9
@@ -77,7 +119,7 @@ spec:
             - name: HICLAW_AI_GATEWAY_SERVER
               value: "aigw-local.hiclaw.io"
             - name: HICLAW_DEFAULT_MODEL
-              value: "MiniMax-M2.7"
+              value: "MiniMax-M2.7-highspeed"
             - name: TZ
               value: "Asia/Shanghai"
             - name: NODE_OPTIONS
@@ -140,11 +182,18 @@ spec:
               mountPath: /opt/honeybadge/config/manager/agent/HEARTBEAT.md
               subPath: manager-heartbeat
               readOnly: true
-            - name: fast-query-skill
+            # CRLF-normalized skill scripts (produced by initContainer).
+            - name: normalized-scripts
               mountPath: /opt/honeybadge/config/manager/agent/skills/fast-query
+              subPath: fast-query
               readOnly: true
-            - name: erp-dispatch-scripts
+            - name: normalized-scripts
               mountPath: /opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts
+              subPath: erp-dispatch
+              readOnly: true
+            - name: mcporter-config
+              mountPath: /root/config/mcporter.json
+              subPath: mcporter.json
               readOnly: true
       volumes:
         - name: data
@@ -157,14 +206,19 @@ spec:
         - name: agent-configs
           configMap:
             name: hiclaw-agent-configs
-        - name: fast-query-skill
+        # Raw ConfigMaps consumed by the initContainer only.
+        - name: fast-query-skill-raw
           configMap:
             name: hiclaw-fast-query-skill
-            defaultMode: 0755
-        - name: erp-dispatch-scripts
+        - name: erp-dispatch-scripts-raw
           configMap:
             name: hiclaw-erp-dispatch-scripts
-            defaultMode: 0755
+        # Writable scratch space for the CRLF-normalized skill scripts.
+        - name: normalized-scripts
+          emptyDir: {}
+        - name: mcporter-config
+          configMap:
+            name: hiclaw-mcporter-config
 ---
 # Main service — all ports
 apiVersion: v1
