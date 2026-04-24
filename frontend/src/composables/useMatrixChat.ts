@@ -26,6 +26,9 @@ export function useMatrixChat() {
   let matrixClient: MatrixClient | null = null
   let dmRoomId: string | null = null
   let initPromise: Promise<boolean> | null = null
+  // Timestamp (ms) of the most recent query send. Used to filter out stale DM room events
+  // from previous conversations that Matrix may replay during sync.
+  let queryStartTime: number = 0
 
   async function initMatrix(): Promise<boolean> {
     const token = authStore.matrixToken
@@ -39,6 +42,13 @@ export function useMatrixChat() {
 
     try {
       matrixClient = createMatrixClient(homeserver, token, userId)
+
+      // Seed the stale-event cutoff to "client init time minus a small buffer".
+      // Any DM-room event older than this came from a prior session/test run and
+      // must be ignored, otherwise initial sync replays them as if they were new
+      // assistant responses (corrupting the chat store and breaking E2E assertions).
+      // sendQueryMessage() advances this on every send so older events stay filtered.
+      queryStartTime = Date.now() - 5000
 
       // Use the room ID provisioned server-side during login if available,
       // otherwise fall back to the client-side discovery (first login, no cache).
@@ -89,24 +99,46 @@ export function useMatrixChat() {
     if (event.getType() !== 'm.room.message') return
     if (event.getSender() === authStore.matrixUserId) return // ignore own messages
 
+    // Ignore events that predate the most recent query (stale DM room history).
+    // 5 s clock-skew buffer is generous enough for NTP-synced servers.
+    const eventTs: number = (event.getServerTs?.() as number) || 0
+    if (eventTs > 0 && queryStartTime > 0 && eventTs < queryStartTime - 5000) return
+
     const content = event.getContent()
     const xhb = content['x-honeybadge']
+
+    // Returns true when the last assistant placeholder is still empty (not yet filled).
+    function isPlaceholderEmpty(): boolean {
+      const msgs = chatStore.currentMessages
+      const last = [...msgs].reverse().find((m: any) => m.role === 'assistant')
+      return !last || (last.content === '' && !last.metadata?.raw_data?.length)
+    }
 
     if (!xhb) {
       const body = content.body || ''
       if (!body) return
-      // If the Manager itself replies in plain text (conversational / non-structured),
-      // treat it as a final answer and release the loading state.
       if (event.getSender() === MANAGER_USER_ID) {
-        chatStore.finalizeAssistantMessage({
-          summary: body,
-          rawData: [],
-          columns: [],
-          cypher: '',
-          traceId: '',
-          executionTimeMs: 0,
-          rowCount: 0,
-        })
+        if (isPlaceholderEmpty()) {
+          // Placeholder not yet filled — write into it.
+          chatStore.finalizeAssistantMessage({
+            summary: body,
+            rawData: [],
+            columns: [],
+            cypher: '',
+            traceId: '',
+            executionTimeMs: 0,
+            rowCount: 0,
+          })
+        } else {
+          // Placeholder already filled (e.g. contract 002 arrived first) — append as new reply.
+          chatStore.addMessage({
+            id: uuidv4(),
+            role: 'assistant',
+            content: body,
+            message_type: 'text',
+            created_at: new Date().toISOString(),
+          } as any)
+        }
         chatStore.setLoading(false)
       } else if (chatStore.loading) {
         // Plain text from Worker — progress update
@@ -116,17 +148,35 @@ export function useMatrixChat() {
     }
 
     if (xhb.contract === '002') {
-      // Result
+      // Structured result
       const payload = xhb.payload || {}
-      chatStore.finalizeAssistantMessage({
-        summary: payload.summary || content.body || '',
-        rawData: payload.raw_data || [],
-        columns: payload.columns || [],
-        cypher: payload.cypher || '',
-        traceId: xhb.trace_id || '',
-        executionTimeMs: payload.execution_time_ms || 0,
-        rowCount: payload.row_count || 0,
-      })
+      if (isPlaceholderEmpty()) {
+        chatStore.finalizeAssistantMessage({
+          summary: payload.summary || content.body || '',
+          rawData: payload.raw_data || [],
+          columns: payload.columns || [],
+          cypher: payload.cypher || '',
+          traceId: xhb.trace_id || '',
+          executionTimeMs: payload.execution_time_ms || 0,
+          rowCount: payload.row_count || 0,
+        })
+      } else {
+        // Append contract 002 as a new message (e.g. second result in same session).
+        chatStore.addMessage({
+          id: uuidv4(),
+          role: 'assistant',
+          content: payload.summary || content.body || '',
+          message_type: 'query_result',
+          created_at: new Date().toISOString(),
+          metadata: {
+            cypher: payload.cypher || '',
+            raw_data: payload.raw_data || [],
+            columns: payload.columns || [],
+            trace_id: xhb.trace_id || '',
+            execution_time_ms: payload.execution_time_ms || 0,
+          },
+        } as any)
+      }
       chatStore.setLoading(false)
       ElMessage.success(`查询完成，返回 ${payload.row_count || 0} 条记录`)
     } else if (xhb.contract === '003') {
@@ -154,6 +204,7 @@ export function useMatrixChat() {
     chatStore.addMessage(userMessage)
     chatStore.prepareAssistantMessage()
     chatStore.setLoading(true)
+    queryStartTime = Date.now()  // record send time; filter stale DM events in handleRoomEvent
 
     try {
       await sendQuery(matrixClient!, dmRoomId!, question, authStore.rolesJwt || '')
