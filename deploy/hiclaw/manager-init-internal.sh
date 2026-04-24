@@ -378,6 +378,16 @@ for p in cfg.get('models', {}).get('providers', {}).values():
         if m.pop('reasoning', None) is not None:
             print('Removed reasoning:true from ' + m.get('id', ''))
 
+# Remove memorySearch — template hardcodes model='text-embedding-v4' pointing at the
+# Manager's LLM gateway (aigw-local.hiclaw.io) which only routes chat/completions for
+# MiniMax. Triggering an embedding call produces a Node 'Invalid URL' TypeError that
+# aborts the agent run before any LLM call. Disabling memory search is safe for the
+# HoneyBadge flow: the agent relies on explicit tool calls, not vector recall.
+agents_defaults = cfg.get('agents', {}).get('defaults', {})
+if 'memorySearch' in agents_defaults:
+    agents_defaults.pop('memorySearch', None)
+    print('Removed agents.defaults.memorySearch (incompatible with MiniMax gateway)')
+
 # Context pruning — prevents unbounded Manager context growth (mirrors Worker settings)
 mgr_defaults = cfg.setdefault('agents', {}).setdefault('defaults', {})
 if mgr_defaults.get('contextTokens') != 40000:
