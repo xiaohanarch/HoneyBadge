@@ -2,6 +2,7 @@
 Playwright E2E Test Configuration and Fixtures
 HoneyBadge - Enterprise Knowledge Graph Assistant
 """
+import json
 import os
 import re
 import pytest
@@ -21,6 +22,28 @@ def _wait_for_textarea_enabled(page_obj, timeout=60000):
         """() => {
             const ta = document.querySelector('.input-container .el-textarea__inner');
             return ta && !ta.disabled;
+        }""",
+        timeout=timeout,
+    )
+
+
+def _wait_for_current_session(page_obj, timeout=30000):
+    """Wait until the chat store has a non-null currentSessionId.
+
+    Without this, addMessage / prepareAssistantMessage / finalizeAssistantMessage
+    in stores/chat.ts silently no-op because they early-return when
+    currentSessionId is null. This causes test queries to send (Manager replies
+    correctly) but the frontend never renders any message.
+    """
+    page_obj.wait_for_function(
+        """() => {
+            try {
+                const app = document.querySelector('#app').__vue_app__;
+                const store = app.config.globalProperties.$pinia._s.get('chat');
+                return !!store && !!store.currentSessionId;
+            } catch (e) {
+                return false;
+            }
         }""",
         timeout=timeout,
     )
@@ -83,7 +106,12 @@ def pytest_configure(config):
 def browser():
     """Launch browser for entire test session."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # --disable-web-security disables CORS enforcement so the frontend
+        # (localhost:3000) can reach the Matrix homeserver (localhost:7167 via SSH tunnel).
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-web-security", "--allow-running-insecure-content"],
+        )
         yield browser
         browser.close()
 
@@ -97,6 +125,31 @@ def page(browser: Browser):
     )
     page = context.new_page()
     page.set_default_timeout(30000)  # 30 seconds default
+
+    # Patch Matrix homeserver URL so the local Playwright browser uses the SSH tunnel
+    # (port 7167 forwarded locally) instead of the blocked external NodePort 30167.
+    matrix_local = os.getenv("MATRIX_HOMESERVER_LOCAL", "http://localhost:7167")
+
+    def _patch_login(route):
+        response = route.fetch()
+        try:
+            body = response.json()
+            if "matrix_homeserver" in body:
+                body["matrix_homeserver"] = matrix_local
+            route.fulfill(
+                status=response.status,
+                content_type="application/json",
+                body=json.dumps(body),
+            )
+        except Exception:
+            route.fulfill(response=response)
+
+    page.route("**/login", _patch_login)
+
+    # Debug: log requests to matrix/7167 to verify connectivity
+    page.on("request", lambda req: print(f"[NET] {req.method} {req.url[:80]}") if any(x in req.url for x in ["7167", "30167", "matrix", "_matrix"]) else None)
+    page.on("console", lambda msg: print(f"[CON] {msg.type}: {msg.text[:120]}") if msg.type in ("error", "warning") else None)
+
     yield page
     page.close()
     context.close()
@@ -142,6 +195,14 @@ def login_as(page: Page):
         page.click(LOGIN_BUTTON)
         page.wait_for_url(f"{BASE_URL}/chat", timeout=30000)
         _wait_for_textarea_enabled(page, timeout=15000)
+        # Start a new chat session so existing_count begins at 0 (avoids reading stale historical messages)
+        new_session_btn = page.locator(NEW_CHAT_BUTTON)
+        if new_session_btn.count() > 0 and new_session_btn.first.is_visible():
+            new_session_btn.first.click()
+            _wait_for_textarea_enabled(page, timeout=15000)
+        # Race-guard: chat store's addMessage/prepareAssistantMessage/finalizeAssistantMessage
+        # silently no-op until currentSessionId is set. Wait for it to settle.
+        _wait_for_current_session(page, timeout=30000)
         return page
     return _login
 
@@ -220,6 +281,7 @@ def create_user_page(browser: Browser):
         if new_session_btn.count() > 0 and new_session_btn.first.is_visible():
             new_session_btn.first.click()
             _wait_for_textarea_enabled(p, timeout=10000)
+        _wait_for_current_session(p, timeout=30000)
 
         pages.append(p)
         contexts.append(context)
@@ -243,25 +305,51 @@ def send_query_and_get_response(page: Page):
         textarea.press("Enter")
         _wait_for_new_response(page, existing_count, timeout=timeout)
 
-        last_msg = page.locator(MSG_ASSISTANT).last
-        text = last_msg.inner_text()
+        # If the first response is a plain dispatch message, wait for a data-table message
+        # (contract 002) to arrive as a subsequent message, up to the remaining timeout.
+        # This handles the two-step flow: dispatch text → contract 002.
+        extra_ms = 120000  # Give the full worker pipeline time to complete and deliver
+        try:
+            page.wait_for_function(
+                f"""() => {{
+                    const msgs = document.querySelectorAll('.chat-message.message-assistant');
+                    if (msgs.length > {existing_count + 1}) return true;  // 2nd message arrived
+                    const last = msgs[msgs.length - 1];
+                    return last && last.querySelector('.data-collapse .el-collapse-item__header') !== null;
+                }}""",
+                timeout=extra_ms,
+            )
+            page.wait_for_timeout(300)
+        except Exception:
+            pass  # fallback: use whatever is in the last message
+
+        all_msgs = page.locator(MSG_ASSISTANT)
+        # contract 002 fills the placeholder at index `existing_count`; any subsequent
+        # plain-text Manager reply is appended as a new last message.
+        # Inspect the first NEW message for structured data (data table, cypher, trace_id),
+        # and fall back to the last message if we somehow got fewer messages than expected.
+        first_new_msg = all_msgs.nth(existing_count) if all_msgs.count() > existing_count else all_msgs.last
+        last_msg = all_msgs.last
+
+        # Use first_new_msg for structured-data fields; it holds the contract 002 payload.
+        text = first_new_msg.inner_text()
 
         trace_id = None
-        trace_link = last_msg.locator(TRACE_ID_LINK)
+        trace_link = first_new_msg.locator(TRACE_ID_LINK)
         if trace_link.count() > 0:
             trace_text = trace_link.first.inner_text()
             match = re.search(r'TRC-[\w-]+', trace_text)
             if match:
                 trace_id = match.group(0)
 
-        has_cypher = last_msg.locator(CYPHER_COLLAPSE_HEADER).count() > 0
-        has_data_table = last_msg.locator(DATA_COLLAPSE_HEADER).count() > 0
+        has_cypher = first_new_msg.locator(CYPHER_COLLAPSE_HEADER).count() > 0
+        has_data_table = first_new_msg.locator(DATA_COLLAPSE_HEADER).count() > 0
 
         data_row_count = 0
         if has_data_table:
-            last_msg.locator(DATA_COLLAPSE_HEADER).click()
+            first_new_msg.locator(DATA_COLLAPSE_HEADER).click()
             page.wait_for_timeout(500)
-            data_row_count = last_msg.locator(DATA_ROWS).count()
+            data_row_count = first_new_msg.locator(DATA_ROWS).count()
 
         return {
             "text": text,
