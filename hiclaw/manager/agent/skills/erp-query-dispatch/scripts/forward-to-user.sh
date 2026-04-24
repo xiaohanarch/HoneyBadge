@@ -147,7 +147,7 @@ export FWD_CONTENT="$CONTENT"
 export FWD_RESULT_JSON="$RESULT_JSON"
 
 RESULT=$(python3 << 'PYEOF'
-import json, urllib.request, urllib.parse, os
+import json, math, urllib.request, urllib.parse, os
 
 room_id = os.environ["FWD_ROOM_ID"]
 token = os.environ["FWD_TOKEN"]
@@ -159,6 +159,32 @@ result_json_path = os.environ.get("FWD_RESULT_JSON", "")
 encoded_room = urllib.parse.quote(room_id, safe='')
 encoded_txn = urllib.parse.quote(txn_id, safe='')
 url = f'{tuwunel}/_matrix/client/v3/rooms/{encoded_room}/send/m.room.message/{encoded_txn}'
+
+# Matrix canonical JSON (spec.matrix.org/latest/appendices/#canonical-json):
+#   - Integers MUST fit in js_int::Int range [-2^53+1, 2^53-1]
+#   - Floats (numbers with fractions/exponents) are FORBIDDEN entirely
+#     → out-of-range ints and any non-integer floats must be coerced to strings
+#     → NaN/Inf → None
+_JS_INT_MAX = 9007199254740991  # 2^53 - 1
+
+def safe_for_matrix(obj):
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, int):
+        return str(obj) if abs(obj) > _JS_INT_MAX else obj
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        # Whole-valued floats → int (still subject to js_int range).
+        if obj.is_integer() and abs(obj) <= _JS_INT_MAX:
+            return int(obj)
+        # Fractional floats are invalid in Matrix canonical JSON → stringify.
+        return repr(obj)
+    if isinstance(obj, dict):
+        return {k: safe_for_matrix(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [safe_for_matrix(v) for v in obj]
+    return obj
 
 body = {
     'msgtype': 'm.text',
@@ -186,7 +212,7 @@ if result_json_path and os.path.isfile(result_json_path):
     except Exception:
         pass  # fall through to plain text if result.json is unreadable
 
-data = json.dumps(body).encode('utf-8')
+data = json.dumps(safe_for_matrix(body)).encode('utf-8')
 req = urllib.request.Request(url, data=data, method='PUT', headers={
     'Authorization': f'Bearer {token}',
     'Content-Type': 'application/json',
