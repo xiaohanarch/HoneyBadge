@@ -67,6 +67,10 @@ configMapGenerator:
   - name: hiclaw-fast-query-skill
     files:
       - fast-query.sh=../../hiclaw/manager/agent/skills/fast-query/fast-query.sh
+      - router.sh=../../hiclaw/manager/agent/skills/fast-query/router.sh
+  - name: hiclaw-mcporter-config
+    files:
+      - mcporter.json=configmaps/mcporter-config.json
   - name: hiclaw-erp-dispatch-scripts
     files:
       - result-watcher.sh=../../hiclaw/manager/agent/skills/erp-query-dispatch/scripts/result-watcher.sh

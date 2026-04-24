@@ -20,13 +20,15 @@ set -euo pipefail
 WORKER_NAME=""
 TASK_ID=""
 MESSAGE=""
+USER_MXID=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --worker)  WORKER_NAME="$2"; shift 2 ;;
-        --task-id) TASK_ID="$2"; shift 2 ;;
-        --message) MESSAGE="$2"; shift 2 ;;
-        *)         echo "DISPATCH_ERROR: Unknown arg: $1" >&2; exit 1 ;;
+        --worker)     WORKER_NAME="$2"; shift 2 ;;
+        --task-id)    TASK_ID="$2";     shift 2 ;;
+        --message)    MESSAGE="$2";     shift 2 ;;
+        --user-mxid)  USER_MXID="$2";  shift 2 ;;
+        *)            echo "DISPATCH_ERROR: Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
 
@@ -87,7 +89,22 @@ if [ -z "$MANAGER_TOKEN" ]; then
     exit 1
 fi
 
-# 3. Send message to worker's room via Matrix API
+# 3. Create task directory and meta.json so result-watcher / forward-to-user.sh
+#    can resolve the user's DM room when the Worker result arrives.
+if [ -n "$TASK_ID" ] && [ -n "$USER_MXID" ]; then
+    TASK_META_DIR="/root/hiclaw-fs/shared/tasks/$TASK_ID"
+    mkdir -p "$TASK_META_DIR"
+    python3 -c "
+import json, sys
+meta = {'user_mxid': sys.argv[1]}
+with open(sys.argv[2], 'w') as f:
+    json.dump(meta, f)
+" "$USER_MXID" "$TASK_META_DIR/meta.json" \
+        && echo "META_CREATED $TASK_META_DIR/meta.json" >&2 \
+        || echo "META_CREATE_FAILED (continuing)" >&2
+fi
+
+# 4. Send message to worker's room via Matrix API
 TXN_ID="dispatch-${TASK_ID:-$(date +%s%N)}"
 
 export DISPATCH_ROOM_ID="$ROOM_ID"

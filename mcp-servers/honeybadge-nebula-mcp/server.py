@@ -288,6 +288,9 @@ async def generate_ngql_impl(
 
     ngql = response.content.strip()
 
+    # Strip thinking blocks (<think>...</think>) produced by reasoning models
+    ngql = re.sub(r"<think>.*?</think>\s*", "", ngql, flags=re.DOTALL)
+
     # Strip markdown code fences if present
     ngql = re.sub(r"^```(?:ngql|cypher|nGQL)?\s*\n?", "", ngql)
     ngql = re.sub(r"\n?```\s*$", "", ngql)
