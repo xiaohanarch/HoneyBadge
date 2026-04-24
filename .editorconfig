@@ -1,0 +1,44 @@
+# EditorConfig: https://editorconfig.org/
+# Layer 2 of the HoneyBadge CRLF defense-in-depth strategy.
+# Pairs with .gitattributes (eol=lf) and .githooks/pre-commit (CRLF block).
+#
+# Most editors honor this natively (VSCode, IntelliJ, vim with plugin,
+# Sublime Text, etc.), forcing LF on save and preventing CRLF from
+# entering the tree in the first place.
+
+root = true
+
+# Default for every text file: LF, UTF-8, trim trailing whitespace,
+# ensure final newline.
+[*]
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+
+# Shell scripts — CRLF in *.sh is what breaks containers. Hard LF.
+[*.sh]
+end_of_line = lf
+indent_size = 4
+
+# Python
+[*.py]
+indent_size = 4
+
+# YAML / Kubernetes manifests / kustomize
+[*.{yml,yaml}]
+indent_size = 2
+
+# Makefiles require hard tabs
+[{Makefile,makefile,GNUmakefile,*.mk}]
+indent_style = tab
+
+# Markdown: keep trailing whitespace (used for line breaks)
+[*.md]
+trim_trailing_whitespace = false
+
+# Windows-only files (if any) — explicitly CRLF so they are not flipped
+[*.{bat,cmd,ps1}]
+end_of_line = crlf

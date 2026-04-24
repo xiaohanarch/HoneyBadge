@@ -4,6 +4,7 @@ Provides LLMRequest/LLMResponse dataclasses, abstract LLMAdapter base class,
 OpenAI-compatible adapter with httpx, token metering, and rate limiting.
 """
 
+import asyncio
 import json
 import time
 from abc import ABC, abstractmethod
@@ -249,8 +250,15 @@ class OpenAICompatibleAdapter(LLMAdapter):
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create the HTTP client."""
         if self._client is None:
+            # Normalize endpoint: strip trailing /v1 so that paths like
+            # "/v1/chat/completions" don't produce a doubled /v1/v1/ with httpx.
+            # httpx appends request paths to the base_url path, so if base_url
+            # already ends with /v1, we strip it and let the request path carry it.
+            endpoint = self.endpoint.rstrip("/")
+            if endpoint.endswith("/v1"):
+                endpoint = endpoint[:-3]
             self._client = httpx.AsyncClient(
-                base_url=self.endpoint,
+                base_url=endpoint,
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
@@ -268,7 +276,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
 
     async def chat(self, request: LLMRequest) -> LLMResponse:
         """
-        Execute synchronous chat completion.
+        Execute synchronous chat completion with retry on rate limit (429/529).
 
         Args:
             request: LLMRequest with messages and options.
@@ -279,8 +287,29 @@ class OpenAICompatibleAdapter(LLMAdapter):
         Raises:
             LLMError: On generation failure.
             LLMTimeoutError: On timeout.
-            RateLimitExceeded: On rate limit.
+            RateLimitExceeded: On rate limit (after exhausting retries).
         """
+        max_retries = 3
+        retry_delay = 3.0  # seconds between retries for 429/529
+        for attempt in range(max_retries + 1):
+            try:
+                return await self._chat_once(request)
+            except RateLimitExceeded:
+                if attempt >= max_retries:
+                    raise
+                logger.warning(
+                    "llm_rate_limit_retry",
+                    attempt=attempt + 1,
+                    delay=retry_delay,
+                    trace_id=request.trace_id,
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # exponential back-off
+
+        raise RateLimitExceeded("LLM rate limit exceeded after retries")
+
+    async def _chat_once(self, request: LLMRequest) -> LLMResponse:
+        """Single chat attempt — called by chat() with retry wrapper."""
         start_time = time.monotonic()
 
         # Check rate limit before request
@@ -302,7 +331,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 },
             )
 
-            if response.status_code == 429:
+            if response.status_code in (429, 529):
                 raise RateLimitExceeded("LLM provider rate limit exceeded")
 
             if response.status_code == 401:
@@ -714,6 +743,10 @@ async def generate_ngql(
 - **OPTIONAL MATCH 禁止加 WHERE 子句**：`OPTIONAL MATCH ... WHERE` 语法不支持
   - 正确：分两步查 `MATCH ... WHERE ... RETURN` + `OPTIONAL MATCH ... RETURN`
   - 错误：`OPTIONAL MATCH (a)->(b) WHERE a.x == 1 RETURN ...`（WHERE 放在 OPTIONAL MATCH 后会报 SyntaxError）
+- **MATCH 查询 ORDER BY 必须使用列别名**：ORDER BY 不能直接引用顶点/边属性路径，必须在 RETURN 中先用 `AS` 指定列别名，再在 ORDER BY 中使用该别名
+  - 正确：`MATCH (po:PurchaseOrder) RETURN po.PurchaseOrder.po_number AS po_number, po.PurchaseOrder.total_amount AS amount ORDER BY amount DESC LIMIT 5`
+  - 错误：`MATCH (po:PurchaseOrder) RETURN po.PurchaseOrder.total_amount ORDER BY po.PurchaseOrder.total_amount DESC LIMIT 5`（会报 SemanticError: Only column name can be used as sort item）
+  - **所有 MATCH 查询的每个 RETURN 列都必须有 AS 别名**，ORDER BY 只用别名
 - 最短路径: `FIND SHORTEST PATH FROM "vid1" TO "vid2" OVER * BIDIRECT UPTO 5 STEPS`
 - 标签函数: `tags(n)`（不是 `labels(n)`）
 

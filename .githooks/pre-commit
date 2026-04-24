@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Layer 3 of the HoneyBadge CRLF defense-in-depth strategy.
+# Blocks any commit that introduces CRLF line endings into shell scripts
+# or other deployment-sensitive text files that ConfigMaps / container
+# runtimes are known to mishandle.
+#
+# Install once per clone:
+#     git config core.hooksPath .githooks
+# or run: bash deploy/hiclaw/install-git-hooks.sh
+#
+# Exit 0  — clean
+# Exit 1  — CRLF found; commit blocked (with instructions)
+
+set -euo pipefail
+
+# File extensions that MUST be LF-only.
+# Shell scripts are the primary offender, but any file fed into a
+# Linux-only container entrypoint / ConfigMap deserves the same guard.
+CRLF_FORBIDDEN_REGEX='\.(sh|bash|ngql|cypher|py|ya?ml|json|env|conf|cfg|dockerfile)$|(^|/)(Dockerfile|Makefile)(\..*)?$'
+
+# Collect staged files (added / copied / modified / renamed), null-delimited
+# to survive spaces and unicode paths.
+offenders=()
+while IFS= read -r -d '' file; do
+    # Only inspect files matching the forbidden-CRLF list.
+    if [[ ! "$file" =~ $CRLF_FORBIDDEN_REGEX ]]; then
+        continue
+    fi
+    # Skip deletions — file no longer exists in the working tree.
+    if [[ ! -f "$file" ]]; then
+        continue
+    fi
+    # Detect CR bytes (0x0D). `grep -q $'\r'` is the most portable probe.
+    if LC_ALL=C grep -qU $'\r' -- "$file" 2>/dev/null; then
+        offenders+=("$file")
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if [[ ${#offenders[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+printf '\n\033[1;31mpre-commit: CRLF line endings detected — commit blocked.\033[0m\n\n' >&2
+printf '  The following staged files contain CR (\\r) bytes:\n' >&2
+for f in "${offenders[@]}"; do
+    printf '    - %s\n' "$f" >&2
+done
+
+cat >&2 <<'EOF'
+
+Why this matters:
+  Bash, container entrypoints, and Kubernetes ConfigMaps do not strip CR.
+  A single CRLF in a *.sh file silently breaks production (seen in
+  HiClaw Manager: "dispatch.sh: line 9: $'\r': command not found").
+
+Fix options (choose one):
+
+  1. Automatic — normalize in place and re-stage:
+        for f in <file1> <file2>; do
+            sed -i 's/\r$//' "$f" && git add "$f"
+        done
+
+  2. One-shot for every staged offender (copy-paste friendly):
+        git diff --cached --name-only --diff-filter=ACMR \
+            | while read f; do sed -i 's/\r$//' "$f" && git add "$f"; done
+
+  3. Configure your editor to save as LF (see .editorconfig at repo root).
+
+  4. If you genuinely need CRLF in a specific file, document the reason
+     and exempt it in .githooks/pre-commit CRLF_FORBIDDEN_REGEX.
+
+EOF
+
+exit 1
