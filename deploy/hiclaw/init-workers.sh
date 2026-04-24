@@ -213,7 +213,7 @@ docker exec "$MANAGER_CONTAINER" bash -c \
 #     IRON RULE: Workers NEVER call any LLM directly. ALL LLM calls MUST route
 #     through Higress AI Gateway at http://aigw-local.hiclaw.io:8080/v1. No exceptions.
 # ---------------------------------------------------------------------------
-log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ MiniMax-M2.7)..."
+log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ MiniMax-M2.7-highspeed)..."
 # baseUrl MUST include /v1: OpenAI JS SDK appends /chat/completions directly
 # Without /v1: path becomes /chat/completions → misses llm-minimax-route → no API key → 404
 for worker in graph-worker analytics-worker; do
@@ -246,19 +246,19 @@ for name, p in providers.items():
         print('Patched ' + name + ' baseUrl: ' + old + ' -> ' + p['baseUrl'])
     for model in p.get('models', []):
         old_id = model.get('id', '')
-        if old_id != 'MiniMax-M2.7':
-            model['id'] = 'MiniMax-M2.7'
-            model['name'] = 'MiniMax-M2.7'
-            print('Updated model: ' + old_id + ' -> MiniMax-M2.7')
+        if old_id != 'MiniMax-M2.7-highspeed':
+            model['id'] = 'MiniMax-M2.7-highspeed'
+            model['name'] = 'MiniMax-M2.7-highspeed'
+            print('Updated model: ' + old_id + ' -> MiniMax-M2.7-highspeed')
         # Always remove reasoning:true — openclaw thinking mode sends Claude-style
         # thinking blocks that DashScope rejects with role-ordering 400 errors.
         model.pop('reasoning', None)
 
 agents = cfg.get('agents', {}).get('defaults', {}).get('model', {})
 old_primary = agents.get('primary', '')
-if 'MiniMax-M2.7' not in old_primary:
+if 'MiniMax-M2.7-highspeed' not in old_primary:
     for name in providers.keys():
-        agents['primary'] = name + '/MiniMax-M2.7'
+        agents['primary'] = name + '/MiniMax-M2.7-highspeed'
         print('Updated primary: ' + old_primary + ' -> ' + agents['primary'])
         break
 
@@ -330,7 +330,7 @@ done
 #     IRON RULE: ALL LLM calls MUST go through Higress. Workers never call any
 #     LLM endpoint directly. This route is the single exit point for all LLM traffic.
 # ---------------------------------------------------------------------------
-log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → Minimax/MiniMax-M2.7)..."
+log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → Minimax/MiniMax-M2.7-highspeed)..."
 HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
 LLM_API_KEY="${LLM_API_KEY:-${HICLAW_LLM_API_KEY:-}}"
 

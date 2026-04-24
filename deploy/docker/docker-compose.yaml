@@ -263,7 +263,7 @@ services:
       # Without this, manager-openclaw.json.tmpl generates baseUrl: http://:8080/v1 (broken).
       - HICLAW_AI_GATEWAY_SERVER=aigw-local.hiclaw.io
       # Default model for Manager Agent
-      - HICLAW_DEFAULT_MODEL=MiniMax-M2.7
+      - HICLAW_DEFAULT_MODEL=MiniMax-M2.7-highspeed
       - TZ=Asia/Shanghai
     volumes:
       - hiclaw_manager_data:/data    # Persists MinIO data + Tuwunel DB
