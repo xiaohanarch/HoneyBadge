@@ -84,6 +84,46 @@ for worker in graph-worker analytics-worker; do
 done
 
 # =========================================================================
+# Step 1b: Symlink /root/openclaw.json -> /root/manager-workspace/openclaw.json
+#
+# HiClaw v1.0.9 stores the Manager config at /root/manager-workspace/openclaw.json,
+# but create-worker.sh hardcodes MANAGER_CONFIG="${HOME}/openclaw.json"
+# (= /root/openclaw.json). If that path is missing, Step 7's unguarded
+#   GROUP_ALLOW_LIST=$(jq -c '...' "${MANAGER_CONFIG}" 2>/dev/null)
+# fails under set -e, aborting create-worker.sh before Step 8.5 (registry update).
+# Result: /root/workers-registry.json stays empty and the Manager hallucinates
+# that workers are unregistered.
+#
+# HiClaw itself already symlinks workers-registry.json the same way; we just
+# mirror that pattern here for openclaw.json. Wait up to 120s for the Manager
+# agent to create the real file, then symlink.
+# =========================================================================
+log "Step 1b: Ensuring /root/openclaw.json symlink for create-worker.sh..."
+
+MANAGER_OPENCLAW="$MANAGER_WORKSPACE/openclaw.json"
+ROOT_OPENCLAW="/root/openclaw.json"
+
+for i in $(seq 1 24); do
+    if [ -f "$MANAGER_OPENCLAW" ]; then
+        break
+    fi
+    sleep 5
+done
+
+if [ -f "$MANAGER_OPENCLAW" ]; then
+    # Replace any existing file/symlink with a symlink to the real config.
+    if [ ! -L "$ROOT_OPENCLAW" ] || [ "$(readlink "$ROOT_OPENCLAW")" != "$MANAGER_OPENCLAW" ]; then
+        rm -f "$ROOT_OPENCLAW"
+        ln -s "$MANAGER_OPENCLAW" "$ROOT_OPENCLAW"
+        log "  Symlinked $ROOT_OPENCLAW -> $MANAGER_OPENCLAW"
+    else
+        log "  Symlink already in place"
+    fi
+else
+    warn "  Manager openclaw.json not ready after 120s — create-worker.sh Step 7 will likely abort"
+fi
+
+# =========================================================================
 # Step 2: Register workers using create-worker.sh
 # =========================================================================
 log "Step 2: Registering workers..."
