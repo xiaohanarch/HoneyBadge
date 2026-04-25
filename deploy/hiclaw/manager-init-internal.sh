@@ -418,6 +418,30 @@ mc cp "$MANAGER_WORKSPACE/openclaw.json" \
     || warn "  MinIO sync skipped"
 
 # =========================================================================
+# Step 5: Force Matrix channel resync
+#
+# Step 4's config write triggers an openclaw-gateway hot reload that restarts
+# the Matrix channel. In HiClaw v1.0.9 that restart deadlocks ~28s later:
+#   [reload] config hot reload applied (channels.matrix...)
+#   MatrixClientLite Client stop requested - stopping sync
+# and never recovers. The Manager then silently ignores all DMs — TC105's
+# symptom is that user queries reach Tuwunel but Manager never responds.
+#
+# Workaround: kill openclaw-gateway so supervisord respawns it with the
+# final on-disk config. Cold-start avoids the buggy hot-reload code path
+# and establishes a clean Matrix sync loop.
+# =========================================================================
+log "Step 5: Restarting openclaw-gateway for clean Matrix sync..."
+
+OPENCLAW_PID=$(pgrep -f 'openclaw-gateway' 2>/dev/null | head -1 || true)
+if [ -n "$OPENCLAW_PID" ]; then
+    kill "$OPENCLAW_PID" 2>/dev/null || true
+    log "  Sent SIGTERM to openclaw-gateway (PID=$OPENCLAW_PID); supervisord will respawn it"
+else
+    warn "  openclaw-gateway not running — nothing to restart"
+fi
+
+# =========================================================================
 # Done
 # =========================================================================
 log "HoneyBadge auto-init complete!"
