@@ -71,18 +71,12 @@ bash /opt/honeybadge/config/manager/agent/skills/fast-query/fast-query.sh \
 
 ## Route: graph-worker
 
-**CRITICAL:** Bind the task id to a shell variable so `--task-id` and the
-message body reference the same value. Do NOT call `$(date +%s%3N)` twice —
-each subshell expansion produces a different timestamp, and the
-`result-watcher` will poll the wrong task directory.
-
 ```bash
-TASK_ID="erp-$(date +%s%3N)"
 bash /opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts/dispatch.sh \
   --worker graph-worker \
-  --task-id "$TASK_ID" \
+  --task-id "erp-$(date +%s%3N)" \
   --user-mxid "@hb-${USER_ID}:matrix-local.hiclaw.io" \
-  --message "@graph-worker:matrix-local.hiclaw.io Task ${TASK_ID}: ${USER_QUESTION}"
+  --message "@graph-worker:matrix-local.hiclaw.io Task erp-XXX: ${USER_QUESTION}"
 ```
 
 Register the task in state.json and notify the user that the query is being processed.

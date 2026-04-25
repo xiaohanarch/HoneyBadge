@@ -387,17 +387,8 @@ hb_users = [
     '@honeybadge-gateway:${MATRIX_DOMAIN}'
 ]
 
-# Workers must be allowed to send in group rooms so the Manager can receive
-# their completion messages and forward results to the user DM. Without this,
-# worker replies in group rooms are dropped by groupAllowFrom and
-# result-watcher never sees the completion signal.
-workers = [
-    '@graph-worker:${MATRIX_DOMAIN}',
-    '@analytics-worker:${MATRIX_DOMAIN}',
-]
-
 cfg['channels']['matrix']['dm'] = {'policy': 'allowlist', 'allowFrom': hb_users}
-cfg['channels']['matrix']['groupAllowFrom'] = hb_users + workers
+cfg['channels']['matrix']['groupAllowFrom'] = hb_users
 
 # Remove reasoning:true from all models — openclaw's thinking mode sends Claude-style
 # thinking content blocks that DashScope/qwen3.5-plus rejects with a 400 role error,
