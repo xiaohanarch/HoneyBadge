@@ -120,6 +120,12 @@ spec:
               value: "aigw-local.hiclaw.io"
             - name: HICLAW_DEFAULT_MODEL
               value: "MiniMax-M2.7-highspeed"
+            # Disable memory search — MiniMax/DashScope gateway has no embedding
+            # endpoint, so HiClaw's default text-embedding-v4 produces an
+            # "Invalid URL" TypeError that aborts the agent before any LLM call.
+            # hiclaw-env.sh uses ${VAR-default}, so explicit empty string wins.
+            - name: HICLAW_EMBEDDING_MODEL
+              value: ""
             - name: TZ
               value: "Asia/Shanghai"
             - name: NODE_OPTIONS

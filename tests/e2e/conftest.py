@@ -305,17 +305,25 @@ def send_query_and_get_response(page: Page):
         textarea.press("Enter")
         _wait_for_new_response(page, existing_count, timeout=timeout)
 
-        # If the first response is a plain dispatch message, wait for a data-table message
-        # (contract 002) to arrive as a subsequent message, up to the remaining timeout.
-        # This handles the two-step flow: dispatch text → contract 002.
-        extra_ms = 120000  # Give the full worker pipeline time to complete and deliver
+        # The first response is typically a plain-text dispatch acknowledgement from the
+        # Manager ("已转发给 graph-worker, 任务 ID：..."). Wait for contract 002 (the
+        # Worker's structured result) to arrive as a subsequent message carrying a
+        # data-collapse or cypher-collapse block. Scan ALL new messages (not just the
+        # last one) because the dispatch ack can appear AFTER the data message if
+        # Matrix delivery reorders them.
+        extra_ms = 120000
         try:
             page.wait_for_function(
                 f"""() => {{
                     const msgs = document.querySelectorAll('.chat-message.message-assistant');
-                    if (msgs.length > {existing_count + 1}) return true;  // 2nd message arrived
-                    const last = msgs[msgs.length - 1];
-                    return last && last.querySelector('.data-collapse .el-collapse-item__header') !== null;
+                    for (let i = {existing_count}; i < msgs.length; i++) {{
+                        const m = msgs[i];
+                        if (m.querySelector('.data-collapse .el-collapse-item__header') ||
+                            m.querySelector('.cypher-collapse .el-collapse-item__header')) {{
+                            return true;
+                        }}
+                    }}
+                    return false;
                 }}""",
                 timeout=extra_ms,
             )
@@ -324,32 +332,40 @@ def send_query_and_get_response(page: Page):
             pass  # fallback: use whatever is in the last message
 
         all_msgs = page.locator(MSG_ASSISTANT)
-        # contract 002 fills the placeholder at index `existing_count`; any subsequent
-        # plain-text Manager reply is appended as a new last message.
-        # Inspect the first NEW message for structured data (data table, cypher, trace_id),
-        # and fall back to the last message if we somehow got fewer messages than expected.
-        first_new_msg = all_msgs.nth(existing_count) if all_msgs.count() > existing_count else all_msgs.last
-        last_msg = all_msgs.last
+        total = all_msgs.count()
+        # The Manager sends a plain-text dispatch acknowledgement first (fills the
+        # placeholder at index `existing_count`), then the Worker's contract 002
+        # arrives as a subsequent message carrying the actual data table / cypher.
+        # Scan the NEW messages (from existing_count to end) and pick the one
+        # that actually contains structured-data UI; fall back to the last message.
+        data_msg = None
+        for i in range(existing_count, total):
+            candidate = all_msgs.nth(i)
+            if candidate.locator(DATA_COLLAPSE_HEADER).count() > 0 \
+               or candidate.locator(CYPHER_COLLAPSE_HEADER).count() > 0:
+                data_msg = candidate
+                break
+        if data_msg is None:
+            data_msg = all_msgs.last
 
-        # Use first_new_msg for structured-data fields; it holds the contract 002 payload.
-        text = first_new_msg.inner_text()
+        text = data_msg.inner_text()
 
         trace_id = None
-        trace_link = first_new_msg.locator(TRACE_ID_LINK)
+        trace_link = data_msg.locator(TRACE_ID_LINK)
         if trace_link.count() > 0:
             trace_text = trace_link.first.inner_text()
             match = re.search(r'TRC-[\w-]+', trace_text)
             if match:
                 trace_id = match.group(0)
 
-        has_cypher = first_new_msg.locator(CYPHER_COLLAPSE_HEADER).count() > 0
-        has_data_table = first_new_msg.locator(DATA_COLLAPSE_HEADER).count() > 0
+        has_cypher = data_msg.locator(CYPHER_COLLAPSE_HEADER).count() > 0
+        has_data_table = data_msg.locator(DATA_COLLAPSE_HEADER).count() > 0
 
         data_row_count = 0
         if has_data_table:
-            first_new_msg.locator(DATA_COLLAPSE_HEADER).click()
+            data_msg.locator(DATA_COLLAPSE_HEADER).click()
             page.wait_for_timeout(500)
-            data_row_count = first_new_msg.locator(DATA_ROWS).count()
+            data_row_count = data_msg.locator(DATA_ROWS).count()
 
         return {
             "text": text,
