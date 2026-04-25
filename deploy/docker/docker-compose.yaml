@@ -18,7 +18,7 @@
 # Quick start:
 #   1. cd deploy/docker
 #   2. docker compose up -d
-#   3. Wait ~60s for HiClaw Manager to start all internal services
+#   3. Wait ~60s for HiClaw Embedded to start all internal services
 #   4. Workers and Manager auto-init on startup (no manual step needed)
 #      (init-workers.sh is kept as optional manual fallback/debugging tool)
 #   5. Workers auto-start once their MinIO config exists (restart: unless-stopped)
@@ -553,7 +553,7 @@ services:
       - HICLAW_REGISTRATION_TOKEN=${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}
       - MATRIX_USER_SECRET=${MATRIX_USER_SECRET:-hb-user-secret-dev}
       - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
-      - MATRIX_HOMESERVER_PUBLIC=http://localhost:6167
+      - MATRIX_HOMESERVER_PUBLIC=http://localhost:7167
       - TZ=Asia/Shanghai
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
@@ -624,7 +624,7 @@ services:
       - VITE_API_TARGET=http://honeybadge-server:8090
       - VITE_WS_TARGET=ws://honeybadge-server:8090
       - VITE_AUTH_URL=http://localhost:8091
-      - VITE_MATRIX_HOMESERVER=http://localhost:6167
+      - VITE_MATRIX_HOMESERVER=http://localhost:7167
       - TZ=Asia/Shanghai
     volumes:
       - ../../frontend:/app
@@ -840,9 +840,6 @@ volumes:
 
   postgres_data:
     name: honeybadge-postgres-data
-
-  hiclaw_manager_data:
-    name: honeybadge-hiclaw-manager-data    # Manager workspace persistence (agent state)
 
   hiclaw-embedded-data:
     name: honeybadge-hiclaw-embedded-data   # Persists MinIO data + Tuwunel DB (infra bundle)
