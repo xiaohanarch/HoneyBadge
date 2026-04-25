@@ -60,6 +60,18 @@ inject_after_marker() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# v1.1.0 split: ensure mc alias points at hiclaw-embedded MinIO
+# (upstream may have pre-configured 'hiclaw' to localhost which is now empty)
+# ---------------------------------------------------------------------------
+if command -v mc >/dev/null 2>&1; then
+    mc alias set hiclaw \
+        "http://hiclaw-embedded:9000" \
+        "${HICLAW_ADMIN_USER:-admin}" \
+        "${HICLAW_ADMIN_PASSWORD:-admin1234}" \
+        --api S3v4 >/dev/null 2>&1 || warn "  mc alias set 'hiclaw' failed (will retry on first use)"
+fi
+
 # =========================================================================
 # Step 1: Upload worker SOUL.md + skills to MinIO
 #         (This doesn't need the Manager workspace — can run immediately)
@@ -274,7 +286,7 @@ LLM_HOST=$(echo "$LLM_HOST" | sed -E 's|^https?://||; s|/.*||')
 # Wait for openai-compat.dns service source
 log "  Waiting for openai-compat.dns service source..."
 for i in $(seq 1 20); do
-    SVC=$(curl -sf 'http://localhost:8001/v1/service-sources/openai-compat' 2>/dev/null || true)
+    SVC=$(curl -sf 'http://hiclaw-embedded:8001/v1/service-sources/openai-compat' 2>/dev/null || true)
     if echo "$SVC" | grep -q '"name":"openai-compat"'; then
         log "  openai-compat.dns ready"
         break
@@ -289,14 +301,14 @@ done
 ROUTE_JSON="{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"${LLM_HOST}\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}"
 
 # PUT to update, fall back to POST to create
-RESULT=$(curl -sf -X PUT 'http://localhost:8001/v1/routes/llm-minimax-route' \
+RESULT=$(curl -sf -X PUT 'http://hiclaw-embedded:8001/v1/routes/llm-minimax-route' \
     -H "Authorization: Basic $HIGRESS_AUTH" -H 'Content-Type: application/json' \
     -d "$ROUTE_JSON" 2>&1 || true)
 
 if echo "$RESULT" | grep -q '"name":"llm-minimax-route"'; then
     log "  llm-minimax-route updated"
 else
-    curl -sf -X POST 'http://localhost:8001/v1/routes' \
+    curl -sf -X POST 'http://hiclaw-embedded:8001/v1/routes' \
         -H "Authorization: Basic $HIGRESS_AUTH" -H 'Content-Type: application/json' \
         -d "$ROUTE_JSON" 2>&1 \
         && log "  llm-minimax-route created" \

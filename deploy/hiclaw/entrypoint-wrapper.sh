@@ -18,9 +18,10 @@ mkdir -p "$LOG_DIR"
 echo "[entrypoint] Starting HoneyBadge auto-init in background..." | tee -a "$LOG_FILE"
 
 (
-    # Wait for MinIO to be ready (supervisord starts it)
-    echo "[init-bg] Waiting for MinIO..."
-    while ! curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; do
+    # Wait for MinIO on hiclaw-embedded to be ready (after v1.1.0 split,
+    # MinIO no longer runs inside this container).
+    echo "[init-bg] Waiting for MinIO on hiclaw-embedded..."
+    while ! curl -sf http://hiclaw-embedded:9000/minio/health/live >/dev/null 2>&1; do
         sleep 5
     done
     echo "[init-bg] MinIO is ready."

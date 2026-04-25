@@ -38,6 +38,10 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 MANAGER_CONTAINER="${MANAGER_CONTAINER:-honeybadge-hiclaw-manager}"
+# v1.1.0 split: MinIO/Higress/Tuwunel now run in hiclaw-embedded.
+# mc operations and Higress health checks target EMBEDDED_CONTAINER;
+# manager-workspace file edits and Python patches stay in MANAGER_CONTAINER.
+EMBEDDED_CONTAINER="${EMBEDDED_CONTAINER:-honeybadge-hiclaw-embedded}"
 REG_TOKEN="${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}"
 MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
 
@@ -64,12 +68,23 @@ if [ "$STATUS" != "running" ]; then
     die "Container '$MANAGER_CONTAINER' is not running (status: $STATUS)."
 fi
 
-log "Waiting for MinIO to be ready inside Manager..."
+# v1.1.0 split: verify hiclaw-embedded is also running (MinIO/Higress live there)
+log "Checking HiClaw Embedded container..."
+if ! docker inspect "$EMBEDDED_CONTAINER" &>/dev/null; then
+    die "Container '$EMBEDDED_CONTAINER' not found. Run 'docker compose up -d' first."
+fi
+
+EMBEDDED_STATUS=$(docker inspect --format='{{.State.Status}}' "$EMBEDDED_CONTAINER")
+if [ "$EMBEDDED_STATUS" != "running" ]; then
+    die "Container '$EMBEDDED_CONTAINER' is not running (status: $EMBEDDED_STATUS)."
+fi
+
+log "Waiting for MinIO to be ready inside Embedded..."
 RETRIES=20
-until docker exec "$MANAGER_CONTAINER" curl -sf http://localhost:9000/minio/health/live &>/dev/null; do
+until docker exec "$MANAGER_CONTAINER" curl -sf http://hiclaw-embedded:9000/minio/health/live &>/dev/null; do
     RETRIES=$((RETRIES - 1))
     if [ "$RETRIES" -eq 0 ]; then
-        die "MinIO is not ready after waiting. Check: docker logs $MANAGER_CONTAINER"
+        die "MinIO is not ready after waiting. Check: docker logs $EMBEDDED_CONTAINER"
     fi
     echo -n "."
     sleep 5
@@ -129,12 +144,17 @@ else
     warn "  Manager AGENTS.md not found at $MANAGER_AGENTS"
 fi
 
-# Sync Manager agent files to MinIO for persistence
-docker exec "$MANAGER_CONTAINER" bash -c \
-    "mc cp /root/manager-workspace/SOUL.md hiclaw/hiclaw-storage/agents/manager/SOUL.md 2>/dev/null && echo synced || true" \
+# Sync Manager agent files to MinIO for persistence.
+# v1.1.0 split: stage files via host /tmp, then run mc inside hiclaw-embedded.
+docker cp "$MANAGER_CONTAINER:/root/manager-workspace/SOUL.md" /tmp/hb-manager-SOUL.md 2>/dev/null && \
+    docker cp /tmp/hb-manager-SOUL.md "$EMBEDDED_CONTAINER:/tmp/hb-manager-SOUL.md" && \
+    docker exec "$EMBEDDED_CONTAINER" bash -c \
+        "mc cp /tmp/hb-manager-SOUL.md hiclaw/hiclaw-storage/agents/manager/SOUL.md 2>/dev/null && echo synced || true" \
     && log "  → Manager SOUL.md synced to MinIO" || true
-docker exec "$MANAGER_CONTAINER" bash -c \
-    "mc cp /root/manager-workspace/AGENTS.md hiclaw/hiclaw-storage/agents/manager/AGENTS.md 2>/dev/null && echo synced || true" \
+docker cp "$MANAGER_CONTAINER:/root/manager-workspace/AGENTS.md" /tmp/hb-manager-AGENTS.md 2>/dev/null && \
+    docker cp /tmp/hb-manager-AGENTS.md "$EMBEDDED_CONTAINER:/tmp/hb-manager-AGENTS.md" && \
+    docker exec "$EMBEDDED_CONTAINER" bash -c \
+        "mc cp /tmp/hb-manager-AGENTS.md hiclaw/hiclaw-storage/agents/manager/AGENTS.md 2>/dev/null && echo synced || true" \
     && log "  → Manager AGENTS.md synced to MinIO" || true
 
 # Inject Manager's custom skills (e.g., erp-query-dispatch)
@@ -147,9 +167,12 @@ if [ -d "$MANAGER_SKILLS" ]; then
         docker cp "${skill_dir}SKILL.md" "$MANAGER_CONTAINER:/root/manager-workspace/skills/${skill_name}/SKILL.md" 2>/dev/null && \
             log "  → ${skill_name}/SKILL.md injected" || warn "  Failed to inject ${skill_name}"
     done
-    # Sync all custom skills to MinIO
-    docker exec "$MANAGER_CONTAINER" bash -c \
-        "mc mirror /root/manager-workspace/skills/ hiclaw/hiclaw-storage/agents/manager/skills/ --overwrite 2>/dev/null && echo synced || true" \
+    # Sync all custom skills to MinIO.
+    # v1.1.0 split: copy skills dir to host tmp, then push into embedded for mc.
+    docker cp "$MANAGER_CONTAINER:/root/manager-workspace/skills/" /tmp/hb-manager-skills/ 2>/dev/null && \
+        docker cp /tmp/hb-manager-skills/ "$EMBEDDED_CONTAINER:/tmp/hb-manager-skills/" && \
+        docker exec "$EMBEDDED_CONTAINER" bash -c \
+            "mc mirror /tmp/hb-manager-skills/ hiclaw/hiclaw-storage/agents/manager/skills/ --overwrite 2>/dev/null && echo synced || true" \
         && log "  → Manager skills synced to MinIO" || true
 fi
 
@@ -162,17 +185,17 @@ log "Uploading worker SOUL.md files to MinIO..."
 
 for worker in graph-worker analytics-worker; do
     SOUL_SRC="$PROJECT_ROOT/hiclaw/workers/$worker/agent/SOUL.md"
-    # Copy SOUL.md into manager's tmp, then upload to MinIO via mc
-    docker cp "$SOUL_SRC" "$MANAGER_CONTAINER:/tmp/${worker}-SOUL.md"
-    docker exec "$MANAGER_CONTAINER" bash -c \
+    # v1.1.0 split: mc lives in hiclaw-embedded; copy files there for MinIO upload.
+    docker cp "$SOUL_SRC" "$EMBEDDED_CONTAINER:/tmp/${worker}-SOUL.md"
+    docker exec "$EMBEDDED_CONTAINER" bash -c \
         "mc cp /tmp/${worker}-SOUL.md hiclaw/hiclaw-storage/agents/${worker}/SOUL.md"
     log "  → ${worker}/SOUL.md uploaded to MinIO"
 
     # Upload skills if they exist
     SKILLS_DIR="$PROJECT_ROOT/hiclaw/workers/$worker/agent/skills"
     if [ -d "$SKILLS_DIR" ]; then
-        docker cp "$SKILLS_DIR" "$MANAGER_CONTAINER:/tmp/${worker}-skills"
-        docker exec "$MANAGER_CONTAINER" bash -c \
+        docker cp "$SKILLS_DIR" "$EMBEDDED_CONTAINER:/tmp/${worker}-skills"
+        docker exec "$EMBEDDED_CONTAINER" bash -c \
             "mc mirror /tmp/${worker}-skills/ hiclaw/hiclaw-storage/agents/${worker}/skills/"
         log "  → ${worker}/skills/ uploaded to MinIO"
     fi
@@ -304,9 +327,14 @@ with open(cfg_path, 'w') as f:
 print('done')
 " && log "  → ${worker} baseUrl and model patched" || warn "  Failed to patch ${worker}"
 
-    # Sync patched config to MinIO
-    docker exec "$MANAGER_CONTAINER" bash -c \
-        "mc cp /root/hiclaw-fs/agents/${worker}/openclaw.json hiclaw/hiclaw-storage/agents/${worker}/openclaw.json 2>/dev/null && echo synced || true" \
+    # Sync patched config to MinIO.
+    # v1.1.0 split: stage via host /tmp, then run mc inside hiclaw-embedded.
+    docker cp "$MANAGER_CONTAINER:/root/hiclaw-fs/agents/${worker}/openclaw.json" \
+        "/tmp/${worker}-openclaw.json" 2>/dev/null && \
+    docker cp "/tmp/${worker}-openclaw.json" \
+        "$EMBEDDED_CONTAINER:/tmp/${worker}-openclaw.json" && \
+    docker exec "$EMBEDDED_CONTAINER" bash -c \
+        "mc cp /tmp/${worker}-openclaw.json hiclaw/hiclaw-storage/agents/${worker}/openclaw.json 2>/dev/null && echo synced || true" \
         && log "  → ${worker} openclaw.json synced to MinIO" || warn "  MinIO sync skipped for ${worker}"
 done
 
@@ -338,7 +366,7 @@ LLM_API_KEY="${LLM_API_KEY:-${HICLAW_LLM_API_KEY:-}}"
 log "  Waiting for openai-compat.dns service source..."
 for i in $(seq 1 20); do
     SVC=$(docker exec "$MANAGER_CONTAINER" sh -c \
-        "curl -sf 'http://localhost:8001/v1/service-sources/openai-compat' 2>/dev/null" || true)
+        "curl -sf 'http://hiclaw-embedded:8001/v1/service-sources/openai-compat' 2>/dev/null" || true)
     if echo "$SVC" | grep -q '"name":"openai-compat"'; then
         log "  → openai-compat.dns ready"
         break
@@ -348,7 +376,7 @@ done
 
 # PUT to update if exists, POST to create if not
 RESULT=$(docker exec "$MANAGER_CONTAINER" sh -c \
-    "curl -sf -X PUT 'http://localhost:8001/v1/routes/llm-minimax-route' \
+    "curl -sf -X PUT 'http://hiclaw-embedded:8001/v1/routes/llm-minimax-route' \
       -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
       -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"api.minimaxi.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1")
 
@@ -356,7 +384,7 @@ if echo "$RESULT" | grep -q '"name":"llm-minimax-route"'; then
     log "  → llm-minimax-route updated (openai-compat.dns → api.minimaxi.com)"
 else
     docker exec "$MANAGER_CONTAINER" sh -c \
-        "curl -sf -X POST 'http://localhost:8001/v1/routes' \
+        "curl -sf -X POST 'http://hiclaw-embedded:8001/v1/routes' \
           -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
           -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"api.minimaxi.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
         && log "  → llm-minimax-route created (openai-compat.dns → api.minimaxi.com)" \
@@ -434,9 +462,14 @@ print('allowlist patched, reasoning removed, context pruning applied')
 \"
 " && log "  → Manager allowlist updated" || warn "  Failed to patch Manager allowlist"
 
-# Sync to MinIO so it survives restarts
-docker exec "$MANAGER_CONTAINER" bash -c \
-    "mc cp /root/manager-workspace/openclaw.json hiclaw/hiclaw-storage/agents/manager/openclaw.json 2>/dev/null && echo synced || true" \
+# Sync to MinIO so it survives restarts.
+# v1.1.0 split: stage manager-workspace file via host /tmp, then mc in embedded.
+docker cp "$MANAGER_CONTAINER:/root/manager-workspace/openclaw.json" \
+    /tmp/hb-manager-openclaw.json 2>/dev/null && \
+docker cp /tmp/hb-manager-openclaw.json \
+    "$EMBEDDED_CONTAINER:/tmp/hb-manager-openclaw.json" && \
+docker exec "$EMBEDDED_CONTAINER" bash -c \
+    "mc cp /tmp/hb-manager-openclaw.json hiclaw/hiclaw-storage/agents/manager/openclaw.json 2>/dev/null && echo synced || true" \
     && log "  → Synced to MinIO" || warn "  MinIO sync skipped (optional)"
 
 # ---------------------------------------------------------------------------
@@ -467,12 +500,13 @@ for worker in graph-worker analytics-worker; do
             || warn "    $server_name already exists or failed"
     done
 
-    # Persist mcporter.json to MinIO so it survives container restarts
+    # Persist mcporter.json to MinIO so it survives container restarts.
+    # v1.1.0 split: stage via host /tmp, then mc in hiclaw-embedded.
     docker cp "${WORKER_CONTAINER}:/root/hiclaw-fs/config/mcporter.json" \
         "/tmp/${worker}-mcporter.json" 2>/dev/null && \
     docker cp "/tmp/${worker}-mcporter.json" \
-        "${MANAGER_CONTAINER}:/tmp/${worker}-mcporter.json" && \
-    docker exec "$MANAGER_CONTAINER" bash -c \
+        "$EMBEDDED_CONTAINER:/tmp/${worker}-mcporter.json" && \
+    docker exec "$EMBEDDED_CONTAINER" bash -c \
         "mc cp /tmp/${worker}-mcporter.json hiclaw/hiclaw-storage/agents/${worker}/config/mcporter.json 2>&1 | tail -1" \
         && log "    → mcporter.json synced to MinIO" \
         || warn "    MinIO sync failed (config still active in running container)"
