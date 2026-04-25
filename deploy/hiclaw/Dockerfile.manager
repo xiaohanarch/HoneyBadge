@@ -20,4 +20,4 @@ FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.0
 # Mount path inside the Manager for agent identity files
 COPY hiclaw/manager/agent/ /opt/hiclaw/agent/manager/
 
-EXPOSE 8080 8001 18888 9001
+# No EXPOSE: Manager v1.1.0 is agent-only; Matrix bot is outbound-only.
