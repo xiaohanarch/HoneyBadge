@@ -288,14 +288,32 @@ services:
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/opt/honeybadge/init/entrypoint-wrapper.sh"]
     environment:
+      # v1.1.0 slim manager image: drop supervisord; start-manager-agent.sh acts
+      # as container entrypoint when HICLAW_RUNTIME=k8s|aliyun. We pick "k8s"
+      # for Compose since both modes share the same container-entrypoint code path.
+      # k8s mode also skips Matrix @manager registration and Higress setup —
+      # those are normally done by the HiClaw Operator/ManagerReconciler. In
+      # Compose we do them manually via entrypoint-wrapper.sh + manager-init-internal.sh.
+      - HICLAW_RUNTIME=k8s
       # Admin credentials — used to connect to MinIO on hiclaw-embedded
       # MinIO requires password >= 8 chars; use .env to override
       - HICLAW_ADMIN_USER=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_ADMIN_PASSWORD=${HICLAW_ADMIN_PASSWORD:-admin1234}
       # Tuwunel Matrix server name — must match domain in MATRIX_USER_ID below
       - HICLAW_MATRIX_DOMAIN=matrix-local.hiclaw.io
-      # Registration token — used by create-worker.sh to create Matrix accounts
+      # k8s mode: full URL to Tuwunel (Matrix server). Required with :? hard check.
+      - HICLAW_MATRIX_URL=http://matrix-local.hiclaw.io:6167
+      # Registration token — used by create-worker.sh to create Matrix accounts AND
+      # by entrypoint-wrapper.sh to register @manager (k8s mode skips this in native script)
       - HICLAW_REGISTRATION_TOKEN=${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}
+      # k8s mode: Matrix login password for @manager. Required with :? hard check.
+      # Must be ≥8 chars. Pre-injected here; entrypoint-wrapper registers @manager
+      # with this same password on first boot (idempotent).
+      - HICLAW_MANAGER_PASSWORD=${HICLAW_MANAGER_PASSWORD:-hiclaw-manager-password-dev}
+      # k8s mode: gateway key for openclaw.json + Higress consumer. Required with :?
+      # Must be non-empty. manager-init-internal.sh registers this as the Higress
+      # 'manager' consumer credential (key-auth Bearer).
+      - HICLAW_MANAGER_GATEWAY_KEY=${HICLAW_MANAGER_GATEWAY_KEY:-hiclaw-manager-gw-key-dev-32chars}
       # LLM API key — used by HiClaw startup to configure the Higress AI Gateway route.
       # Without this, HiClaw skips auto-config (the route persists in the data volume,
       # but after "docker compose down -v" a fresh start would have no LLM route).
@@ -307,17 +325,26 @@ services:
       # This is idempotent: setup-higress.sh does PUT on existing service sources.
       - HICLAW_LLM_PROVIDER=openai-compat
       - HICLAW_OPENAI_BASE_URL=https://api.minimaxi.com/v1
-      # AI Gateway server for Manager's openclaw.json template (envsubst uses this var).
-      # Renamed from HICLAW_AI_GATEWAY_DOMAIN in v1.0.8 to HICLAW_AI_GATEWAY_SERVER.
-      # Without this, manager-openclaw.json.tmpl generates baseUrl: http://:8080/v1 (broken).
-      - HICLAW_AI_GATEWAY_SERVER=aigw-local.hiclaw.io
+      # AI Gateway template variables (v1.1.0 renames):
+      #   HICLAW_AI_GATEWAY_SERVER (v1.0.8) → HICLAW_AI_GATEWAY_DOMAIN (template) +
+      #   HICLAW_AI_GATEWAY_URL (k8s validation, full URL)
+      - HICLAW_AI_GATEWAY_DOMAIN=aigw-local.hiclaw.io
+      - HICLAW_AI_GATEWAY_URL=http://aigw-local.hiclaw.io:8080
+      # k8s mode: mc alias setup uses these (same as hiclaw-embedded credentials)
+      - HICLAW_FS_ENDPOINT=http://hiclaw-embedded:9000
+      - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
+      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       # Default model for Manager Agent
       - HICLAW_DEFAULT_MODEL=MiniMax-M2.7-highspeed
+      # Disable memorySearch — MiniMax gateway doesn't support embedding endpoints.
+      # Empty string suppresses memorySearch injection in openclaw.json template.
+      - HICLAW_EMBEDDING_MODEL=
       - TZ=Asia/Shanghai
     volumes:
       - ../hiclaw/entrypoint-wrapper.sh:/opt/honeybadge/init/entrypoint-wrapper.sh:ro
       - ../hiclaw/manager-init-internal.sh:/opt/honeybadge/init/manager-init-internal.sh:ro
       - ../../hiclaw:/opt/honeybadge/config:ro   # HoneyBadge agent configs (SOUL.md, AGENTS.md, skills)
+      - hiclaw-manager-data:/data                # v1.1.0 native manager-agent state (workers-registry.json, openclaw.json, dataset cache)
     networks:
       - honeybadge-net
     depends_on:
@@ -340,7 +367,7 @@ services:
   # =============================================================================
 
   hiclaw-graph-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.9
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
     container_name: honeybadge-graph-worker
     hostname: hiclaw-graph-worker
     restart: unless-stopped
@@ -365,7 +392,7 @@ services:
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   hiclaw-analytics-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.9
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
     container_name: honeybadge-analytics-worker
     hostname: hiclaw-analytics-worker
     restart: unless-stopped
@@ -843,6 +870,9 @@ volumes:
 
   hiclaw-embedded-data:
     name: honeybadge-hiclaw-embedded-data   # Persists MinIO data + Tuwunel DB (infra bundle)
+
+  hiclaw-manager-data:
+    name: honeybadge-hiclaw-manager-data    # v1.1.0 manager-agent /data: workers-registry.json + openclaw.json runtime state
 
   frontend_node_modules:
     name: honeybadge-frontend-node-modules

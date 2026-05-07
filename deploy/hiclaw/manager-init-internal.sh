@@ -316,6 +316,37 @@ else
 fi
 
 # =========================================================================
+# Step 2d: Create/update Higress manager consumer (v1.1.0 k8s-mode parity)
+#
+# In real k8s, the controller registers the manager as a Higress consumer
+# with key-auth using HICLAW_MANAGER_GATEWAY_KEY. The slim manager-agent
+# uses this token to call MCP servers via the gateway.
+#
+# In Compose we simulate the controller by creating the consumer here.
+# Idempotent: PUT first, fall back to POST.
+# =========================================================================
+log "Step 2d: Ensuring Higress manager consumer..."
+
+MGR_GW_KEY="${HICLAW_MANAGER_GATEWAY_KEY:-}"
+if [ -z "$MGR_GW_KEY" ]; then
+    warn "  HICLAW_MANAGER_GATEWAY_KEY not set — skipping consumer registration"
+else
+    CONSUMER_JSON="{\"name\":\"manager\",\"credentials\":[{\"type\":\"key-auth\",\"source\":\"BEARER\",\"values\":[\"${MGR_GW_KEY}\"]}]}"
+    RESULT=$(curl -sf -X PUT 'http://hiclaw-embedded:8001/v1/consumers/manager' \
+        -H "Authorization: Basic $HIGRESS_AUTH" -H 'Content-Type: application/json' \
+        -d "$CONSUMER_JSON" 2>&1 || true)
+    if echo "$RESULT" | grep -q '"name":"manager"'; then
+        log "  manager consumer updated"
+    else
+        curl -sf -X POST 'http://hiclaw-embedded:8001/v1/consumers' \
+            -H "Authorization: Basic $HIGRESS_AUTH" -H 'Content-Type: application/json' \
+            -d "$CONSUMER_JSON" 2>&1 \
+            && log "  manager consumer created" \
+            || warn "  Failed to create/update manager consumer"
+    fi
+fi
+
+# =========================================================================
 # Step 3: Wait for Manager workspace, then inject SOUL.md + AGENTS.md
 #
 # The manager-agent creates /root/manager-workspace/ asynchronously after
@@ -470,28 +501,16 @@ mc cp "$MANAGER_WORKSPACE/openclaw.json" \
     || warn "  MinIO sync skipped"
 
 # =========================================================================
-# Step 5: Force Matrix channel resync
+# Step 5: REMOVED in v1.1.0 upgrade
 #
-# Step 4's config write triggers an openclaw-gateway hot reload that restarts
-# the Matrix channel. In HiClaw v1.0.9 that restart deadlocks ~28s later:
-#   [reload] config hot reload applied (channels.matrix...)
-#   MatrixClientLite Client stop requested - stopping sync
-# and never recovers. The Manager then silently ignores all DMs — TC105's
-# symptom is that user queries reach Tuwunel but Manager never responds.
+# v1.0.9 had a hot-reload deadlock workaround that killed openclaw-gateway
+# so supervisord would respawn it. v1.1.0's slim manager image dropped
+# supervisord — there is no respawner. Killing the process here would now
+# kill the container itself (PID 1 chain), causing a restart loop.
 #
-# Workaround: kill openclaw-gateway so supervisord respawns it with the
-# final on-disk config. Cold-start avoids the buggy hot-reload code path
-# and establishes a clean Matrix sync loop.
+# v1.1.0's native manager-agent does not exhibit the v1.0.9 hot-reload
+# deadlock; this workaround is dead code and dangerous, so it is removed.
 # =========================================================================
-log "Step 5: Restarting openclaw-gateway for clean Matrix sync..."
-
-OPENCLAW_PID=$(pgrep -f 'openclaw-gateway' 2>/dev/null | head -1 || true)
-if [ -n "$OPENCLAW_PID" ]; then
-    kill "$OPENCLAW_PID" 2>/dev/null || true
-    log "  Sent SIGTERM to openclaw-gateway (PID=$OPENCLAW_PID); supervisord will respawn it"
-else
-    warn "  openclaw-gateway not running — nothing to restart"
-fi
 
 # =========================================================================
 # Done
