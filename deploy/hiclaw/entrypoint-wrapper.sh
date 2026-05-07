@@ -47,6 +47,19 @@ echo "[entrypoint] Starting HoneyBadge auto-init in background..." | tee -a "$LO
         sleep 5
     done
 
+    # IMPORTANT: native start-manager-agent.sh sources /data/hiclaw-secrets.env
+    # AFTER reading env vars, so the persisted file overrides compose env on
+    # subsequent boots. We must register @manager with the SAME password the
+    # native agent will use to log in. Mirror that precedence here:
+    #   - if /data/hiclaw-secrets.env exists, use its values
+    #   - else fall back to env (first boot — native will persist these)
+    SECRETS_FILE="/data/hiclaw-secrets.env"
+    if [ -f "$SECRETS_FILE" ]; then
+        # shellcheck disable=SC1090
+        . "$SECRETS_FILE"
+        echo "[init-bg] Loaded persisted secrets from $SECRETS_FILE"
+    fi
+
     # Idempotent @manager registration. v1 register endpoint returns:
     #   200 + access_token on success
     #   400 with errcode=M_USER_IN_USE if already registered (treat as success)
