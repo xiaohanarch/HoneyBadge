@@ -177,9 +177,10 @@ if [ -d "$MANAGER_SKILLS" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Upload worker SOUL.md files into MinIO via mc (inside Manager container)
+# 2. Upload worker SOUL.md files into MinIO via mc (inside hiclaw-embedded)
 #    MinIO bucket path: hiclaw-storage/agents/{WORKER_NAME}/SOUL.md
-#    The mc alias 'hiclaw' is pre-configured by start-mc-mirror.sh
+#    v1.1.0 split: mc runs in EMBEDDED_CONTAINER; the 'hiclaw' alias is
+#    pre-configured by the upstream hiclaw-embedded image (localhost:9000).
 # ---------------------------------------------------------------------------
 log "Uploading worker SOUL.md files to MinIO..."
 
