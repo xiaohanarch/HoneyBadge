@@ -191,7 +191,7 @@ fi
 log "Step 2: Registering workers..."
 
 REG_TOKEN="${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}"
-DEFAULT_MODEL="${HICLAW_DEFAULT_MODEL:-MiniMax-M2.7-highspeed}"
+DEFAULT_MODEL="${HICLAW_DEFAULT_MODEL:-qwen3-coder-plus}"
 WORKER_CREDS_DIR="/data/worker-creds"
 mkdir -p "$WORKER_CREDS_DIR"
 
@@ -353,7 +353,7 @@ if not os.path.exists(cfg_path):
 with open(cfg_path) as f:
     cfg = json.load(f)
 
-model_name = os.environ.get('HICLAW_DEFAULT_MODEL', 'MiniMax-M2.7-highspeed')
+model_name = os.environ.get('HICLAW_DEFAULT_MODEL', 'qwen3-coder-plus')
 changed = False
 
 providers = cfg.get('models', {}).get('providers', {})

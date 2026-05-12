@@ -396,10 +396,13 @@ services:
       - HICLAW_FS_ENDPOINT=http://hiclaw-embedded:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
-      # Default model for Manager Agent
-      - HICLAW_DEFAULT_MODEL=MiniMax-M2.7-highspeed
-      # Disable memorySearch — MiniMax gateway doesn't support embedding endpoints.
-      # Empty string suppresses memorySearch injection in openclaw.json template.
+      # Default model for Manager Agent (Aliyun DashScope coding endpoint).
+      # Inherits LLM_MODEL from .env so a single source of truth controls the
+      # upstream model name across nginx-bypass and worker openclaw.json.
+      - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-qwen3-coder-plus}
+      # Disable memorySearch — coding.dashscope.aliyuncs.com does not expose an
+      # OpenAI-compatible embedding endpoint at /v1/embeddings. Empty string
+      # suppresses memorySearch injection in openclaw.json template.
       - HICLAW_EMBEDDING_MODEL=
       - TZ=Asia/Shanghai
     volumes:
