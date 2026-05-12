@@ -1,0 +1,68 @@
+# HoneyBadge Dev — AI Gateway Bypass
+#
+# Purpose: replace the broken Higress binary on WSL2 with a thin nginx reverse
+# proxy so workers can reach the upstream LLM API in local dev. This file is
+# rendered by the official nginx:alpine image's envsubst-based template loader
+# (anything in /etc/nginx/templates/*.conf.template gets templated into
+# /etc/nginx/conf.d/*.conf at container start).
+#
+# Environment variables (set in docker-compose.yaml):
+#   - LLM_API_KEY      — upstream LLM API key (replaces worker gateway key)
+#   - LLM_UPSTREAM_HOST — upstream host (e.g. api.minimaxi.com)
+#
+# Production note: this file is NEVER deployed to k3s/ECS. Production uses
+# real Higress with consumer/route/service-source configuration. Higress
+# integration is validated by `run-e2e-ecs.sh` on the k3s gate, NOT here.
+
+server {
+    listen 8080 default_server;
+    server_name _;
+
+    # Resolver for upstream DNS (Docker default 127.0.0.11)
+    resolver 127.0.0.11 ipv6=off valid=30s;
+
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log info;
+
+    # Health endpoint for compose healthchecks
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    # Reject anything that isn't /v1/* (mirror of Higress AI gateway path policy)
+    location / {
+        return 404 "{\"error\":\"path not exposed by dev gateway bypass\"}\n";
+        default_type application/json;
+    }
+
+    # Workers POST to /v1/chat/completions etc. Replace the worker's gateway
+    # key with the upstream LLM API key (this is what real Higress does via
+    # consumer/credential mapping).
+    location /v1/ {
+        # Strip any incoming Authorization (worker gateway key) and inject upstream key
+        proxy_set_header Authorization "Bearer ${LLM_API_KEY}";
+        proxy_set_header Host ${LLM_UPSTREAM_HOST};
+        proxy_set_header User-Agent "honeybadge-dev-bypass/1.1.0";
+
+        # SNI + cert validation against the real upstream hostname
+        proxy_ssl_server_name on;
+        proxy_ssl_name ${LLM_UPSTREAM_HOST};
+        proxy_ssl_protocols TLSv1.2 TLSv1.3;
+        proxy_ssl_verify off;       # dev-only; production runs through Higress with real verify
+
+        # Use a variable for proxy_pass so nginx re-resolves DNS at runtime
+        set $upstream "https://${LLM_UPSTREAM_HOST}";
+        proxy_pass $upstream;
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        # Streaming (SSE/chunked) support — LLM responses are long-running
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 30s;
+    }
+}

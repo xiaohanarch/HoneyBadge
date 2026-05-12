@@ -234,6 +234,11 @@ services:
     hostname: hiclaw-embedded
     image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.0
     restart: unless-stopped
+    # NOTE (2026-05-08): the higress + pilot-discovery binaries inside this image
+    # segfault on WSL2 kernel 6.6.x regardless of any container sandbox setting.
+    # Other binaries (tuwunel, minio, hiclaw-controller, kube-apiserver) work
+    # fine. Dev compose works around this with a separate `hiclaw-aigw-bypass`
+    # nginx service (see below). Production k3s/ECS uses real Higress.
     environment:
       HICLAW_ADMIN_USER: ${HICLAW_ADMIN_USER:-admin}
       HICLAW_ADMIN_PASSWORD: ${HICLAW_ADMIN_PASSWORD:-admin1234}
@@ -254,7 +259,11 @@ services:
           # These hostnames are used by workers and other services to reach
           # infrastructure inside this container. Docker DNS resolves them to
           # hiclaw-embedded's current IP automatically — no hardcoded IPs.
-          - aigw-local.hiclaw.io        # Higress AI Gateway (port 8080) — LLM calls
+          #
+          # NOTE (2026-05-08): the `aigw-local.hiclaw.io` alias has been MOVED
+          # to the `hiclaw-aigw-bypass` service (see below). Higress segfaults
+          # on WSL2; production k3s/ECS still uses real Higress. This split is
+          # documented in deploy/docker/README.md.
           - matrix-local.hiclaw.io      # Tuwunel Matrix server (port 6167)
     volumes:
       - hiclaw-embedded-data:/data    # Persists MinIO data + Tuwunel DB
@@ -267,6 +276,55 @@ services:
     labels:
       com.honeybadge.service: "hiclaw-embedded"
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
+
+  # =============================================================================
+  # AI Gateway Bypass — DEV ONLY (WSL2 workaround)
+  #
+  # Higress + pilot-discovery (96M Go binaries from istio fork) segfault on
+  # WSL2 kernel 6.6.x even under privileged: true + seccomp:unconfined +
+  # apparmor:unconfined. Other binaries in hiclaw-embedded (kube-apiserver,
+  # minio, hiclaw-controller, tuwunel) work fine, so the issue is binary-
+  # specific (build flags vs. WSL2 kernel ABI).
+  #
+  # This nginx sidecar reverse-proxies /v1/* to the upstream LLM API, mirroring
+  # what real Higress does (consumer/credential mapping → upstream auth).
+  # Workers reach it via the `aigw-local.hiclaw.io` Docker network alias,
+  # which has been moved here from `hiclaw-embedded`.
+  #
+  # Production k3s/ECS uses real Higress with real consumer/route/service-source
+  # configuration. Higress integration is validated by `run-e2e-ecs.sh` on the
+  # k3s gate. This bypass is NEVER deployed beyond local dev compose.
+  #
+  # See deploy/docker/README.md for the full WSL2 + Higress finding writeup.
+  # =============================================================================
+
+  hiclaw-aigw-bypass:
+    container_name: honeybadge-hiclaw-aigw-bypass
+    hostname: aigw-bypass
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    environment:
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY required for dev gateway bypass}
+      LLM_UPSTREAM_HOST: ${LLM_UPSTREAM_HOST:-api.minimaxi.com}
+    volumes:
+      - ../hiclaw/aigw-bypass.conf.template:/etc/nginx/templates/default.conf.template:ro
+    networks:
+      honeybadge-net:
+        aliases:
+          - aigw-local.hiclaw.io        # Workers' LLM gateway (was on hiclaw-embedded → broken Higress)
+    ports:
+      - "18082:8080"                    # Optional: host access for curl debugging
+    healthcheck:
+      # Use 127.0.0.1 explicitly — Alpine wget may resolve `localhost` to ::1
+      # before IPv4, causing spurious "connection refused" health failures.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    labels:
+      com.honeybadge.service: "hiclaw-aigw-bypass"
+      com.honeybadge.note: "WSL2 dev-only — Higress is bypassed; prod uses real Higress on k3s"
 
   # =============================================================================
   # HiClaw Manager — agent-only (v1.1.0)
@@ -314,6 +372,10 @@ services:
       # Must be non-empty. manager-init-internal.sh registers this as the Higress
       # 'manager' consumer credential (key-auth Bearer).
       - HICLAW_MANAGER_GATEWAY_KEY=${HICLAW_MANAGER_GATEWAY_KEY:-hiclaw-manager-gw-key-dev-32chars}
+      # Dev gateway mode: 'nginx-bypass' skips Higress route/consumer wiring
+      # (used on WSL2 where Higress segfaults). 'higress' uses the embedded
+      # Higress instance. Production k3s ALWAYS uses real Higress regardless.
+      - HICLAW_DEV_GATEWAY=${HICLAW_DEV_GATEWAY:-higress}
       # LLM API key — used by HiClaw startup to configure the Higress AI Gateway route.
       # Without this, HiClaw skips auto-config (the route persists in the data volume,
       # but after "docker compose down -v" a fresh start would have no LLM route).
