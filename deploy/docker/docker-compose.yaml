@@ -400,9 +400,14 @@ services:
       # Inherits LLM_MODEL from .env so a single source of truth controls the
       # upstream model name across nginx-bypass and worker openclaw.json.
       - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-qwen3-coder-plus}
-      # Disable memorySearch — coding.dashscope.aliyuncs.com does not expose an
-      # OpenAI-compatible embedding endpoint at /v1/embeddings. Empty string
-      # suppresses memorySearch injection in openclaw.json template.
+      # Disable memorySearch (LOAD-BEARING in v1.1.0).
+      # hiclaw-env.sh uses `${HICLAW_EMBEDDING_MODEL-text-embedding-v4}` (single
+      # dash), so unset falls back to the broken default — empty string is the
+      # only way to opt out. coding.dashscope.aliyuncs.com does not expose an
+      # OpenAI-compatible embedding endpoint at /v1/embeddings, so injecting
+      # `text-embedding-v4` against the AI gateway aborts the Manager agent run
+      # before any chat call. Empty string here keeps start-manager-agent.sh's
+      # `if $emb_model != ""` branch from ever firing.
       - HICLAW_EMBEDDING_MODEL=
       - TZ=Asia/Shanghai
     volumes:
