@@ -1,22 +1,24 @@
 # HoneyBadge Local Development Infrastructure
-# Docker Compose — Phase 1 (HiClaw Mode)
+# Docker Compose — Phase 1 (HiClaw Mode, v1.1.0 split topology)
 #
 # Architecture:
 #   Browser → Frontend (3000)        (static assets + audit API proxy)
 #   Browser → honeybadge-auth (8091) (POST /login → Matrix token + roles JWT)
-#   Browser → Tuwunel (6167)         (matrix-js-sdk direct connection)
-#                                   HiClaw Manager (all-in-one)
-#                                     ├─ Tuwunel Matrix server
+#   Browser → Tuwunel (7167)         (matrix-js-sdk direct connection)
+#                                   HiClaw Embedded (infra bundle)
+#                                     ├─ Tuwunel Matrix server (:6167 → host :7167)
 #                                     ├─ MinIO (worker config storage)
 #                                     ├─ Higress AI Gateway (:8080)
 #                                     └─ Element Web chat UI (:18888)
+#                                   HiClaw Manager (agent-only)
+#                                     └─ Manager Agent (OpenClaw)
 #                                          ↓ Worker dispatch via Matrix
 #                                   HiClaw Workers → MCP Servers → NebulaGraph/Redis/PostgreSQL
 #
 # Quick start:
 #   1. cd deploy/docker
 #   2. docker compose up -d
-#   3. Wait ~60s for HiClaw Manager to start all internal services
+#   3. Wait ~60s for HiClaw Embedded to start all internal services
 #   4. Workers and Manager auto-init on startup (no manual step needed)
 #      (init-workers.sh is kept as optional manual fallback/debugging tool)
 #   5. Workers auto-start once their MinIO config exists (restart: unless-stopped)
@@ -34,6 +36,7 @@
 # Commands:
 #   docker compose up -d
 #   docker compose ps
+#   docker compose logs -f hiclaw-embedded
 #   docker compose logs -f hiclaw-manager
 #   docker compose logs -f hiclaw-graph-worker
 #   docker compose down          # stop, keep volumes
@@ -210,43 +213,169 @@ services:
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================
-  # HiClaw Manager — all-in-one supervisord container
+  # HiClaw Embedded — infrastructure bundle (v1.1.0)
   #
-  # Bundles: Tuwunel Matrix server (:6167), MinIO (:9000/:9001),
+  # Bundles: Tuwunel Matrix server (:6167 → host :7167), MinIO (:9000/:9001),
   #          Higress AI Gateway (:8080), Higress Console (:8001),
-  #          Element Web (:18888), Manager Agent (OpenClaw)
+  #          Element Web (:18888)
+  #
+  # Network aliases aigw-local.hiclaw.io and matrix-local.hiclaw.io live here
+  # so workers and other services resolve them to this container's IP.
   #
   # MATRIX_DOMAIN: sets Tuwunel server name → determines Matrix user ID format.
   #   User IDs: @username:matrix-local.hiclaw.io
   #   This must match MATRIX_USER_ID configured in honeybadge-server.
   #
+  # Host port 7167 (not 6167) avoids Windows Hyper-V reserved range 6124-6223.
+  # =============================================================================
+
+  hiclaw-embedded:
+    container_name: honeybadge-hiclaw-embedded
+    hostname: hiclaw-embedded
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.0
+    restart: unless-stopped
+    # NOTE (2026-05-08): the higress + pilot-discovery binaries inside this image
+    # segfault on WSL2 kernel 6.6.x regardless of any container sandbox setting.
+    # Other binaries (tuwunel, minio, hiclaw-controller, kube-apiserver) work
+    # fine. Dev compose works around this with a separate `hiclaw-aigw-bypass`
+    # nginx service (see below). Production k3s/ECS uses real Higress.
+    environment:
+      HICLAW_ADMIN_USER: ${HICLAW_ADMIN_USER:-admin}
+      HICLAW_ADMIN_PASSWORD: ${HICLAW_ADMIN_PASSWORD:-admin1234}
+      HICLAW_REGISTRATION_TOKEN: ${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}
+      HICLAW_MATRIX_DOMAIN: ${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}
+      HICLAW_GATEWAY_BIND: lan
+      HICLAW_MATRIX_AUTOJOIN: always
+      TZ: Asia/Shanghai
+    ports:
+      - "7167:6167"     # Tuwunel Matrix — host :7167 dodges Windows Hyper-V reserved range
+      - "18888:18888"   # Element Web — Matrix chat UI for agent monitoring
+      - "19001:9001"    # MinIO Console — inspect/manage worker config files
+      - "18001:8001"    # Higress Admin Console — register/manage MCP tools
+      - "18080:8080"    # Higress AI Gateway — external gateway access
+    networks:
+      honeybadge-net:
+        aliases:
+          # These hostnames are used by workers and other services to reach
+          # infrastructure inside this container. Docker DNS resolves them to
+          # hiclaw-embedded's current IP automatically — no hardcoded IPs.
+          #
+          # NOTE (2026-05-08): the `aigw-local.hiclaw.io` alias has been MOVED
+          # to the `hiclaw-aigw-bypass` service (see below). Higress segfaults
+          # on WSL2; production k3s/ECS still uses real Higress. This split is
+          # documented in deploy/docker/README.md.
+          - matrix-local.hiclaw.io      # Tuwunel Matrix server (port 6167)
+    volumes:
+      - hiclaw-embedded-data:/data    # Persists MinIO data + Tuwunel DB
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    labels:
+      com.honeybadge.service: "hiclaw-embedded"
+      com.honeybadge.version: "${IMAGE_TAG:-latest}"
+
+  # =============================================================================
+  # AI Gateway Bypass — DEV ONLY (WSL2 workaround)
+  #
+  # Higress + pilot-discovery (96M Go binaries from istio fork) segfault on
+  # WSL2 kernel 6.6.x even under privileged: true + seccomp:unconfined +
+  # apparmor:unconfined. Other binaries in hiclaw-embedded (kube-apiserver,
+  # minio, hiclaw-controller, tuwunel) work fine, so the issue is binary-
+  # specific (build flags vs. WSL2 kernel ABI).
+  #
+  # This nginx sidecar reverse-proxies /v1/* to the upstream LLM API, mirroring
+  # what real Higress does (consumer/credential mapping → upstream auth).
+  # Workers reach it via the `aigw-local.hiclaw.io` Docker network alias,
+  # which has been moved here from `hiclaw-embedded`.
+  #
+  # Production k3s/ECS uses real Higress with real consumer/route/service-source
+  # configuration. Higress integration is validated by `run-e2e-ecs.sh` on the
+  # k3s gate. This bypass is NEVER deployed beyond local dev compose.
+  #
+  # See deploy/docker/README.md for the full WSL2 + Higress finding writeup.
+  # =============================================================================
+
+  hiclaw-aigw-bypass:
+    container_name: honeybadge-hiclaw-aigw-bypass
+    hostname: aigw-bypass
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    environment:
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY required for dev gateway bypass}
+      LLM_UPSTREAM_HOST: ${LLM_UPSTREAM_HOST:-api.minimaxi.com}
+    volumes:
+      - ../hiclaw/aigw-bypass.conf.template:/etc/nginx/templates/default.conf.template:ro
+    networks:
+      honeybadge-net:
+        aliases:
+          - aigw-local.hiclaw.io        # Workers' LLM gateway (was on hiclaw-embedded → broken Higress)
+    ports:
+      - "18082:8080"                    # Optional: host access for curl debugging
+    healthcheck:
+      # Use 127.0.0.1 explicitly — Alpine wget may resolve `localhost` to ::1
+      # before IPv4, causing spurious "connection refused" health failures.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    labels:
+      com.honeybadge.service: "hiclaw-aigw-bypass"
+      com.honeybadge.note: "WSL2 dev-only — Higress is bypassed; prod uses real Higress on k3s"
+
+  # =============================================================================
+  # HiClaw Manager — agent-only (v1.1.0)
+  #
+  # Runs the Manager Agent (OpenClaw) only. Infrastructure (Tuwunel, MinIO,
+  # Higress, Element Web) has moved to the hiclaw-embedded service above.
+  #
   # AUTO-INIT: entrypoint-wrapper.sh runs manager-init-internal.sh on every start.
   #   Manual fallback: bash deploy/hiclaw/init-workers.sh
+  #
+  # Healthcheck removed: manager no longer exposes MinIO or any other health
+  # endpoint on localhost. Downstream services use service_started condition.
   # =============================================================================
 
   hiclaw-manager:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.9
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.0
     container_name: honeybadge-hiclaw-manager
     hostname: hiclaw-manager
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/opt/honeybadge/init/entrypoint-wrapper.sh"]
-    ports:
-      - "6167:6167"     # Tuwunel Matrix — browser connects here directly (Approach B)
-      - "18888:18888"    # Element Web — Matrix chat UI for agent monitoring
-      - "19001:9001"     # MinIO Console — inspect/manage worker config files
-      - "18001:8001"     # Higress Admin Console — register/manage MCP tools
-      - "18080:8080"     # Higress AI Gateway — external gateway access
-      # Note: Tuwunel (:6167) is exposed on host for browser matrix-js-sdk (Approach B)
-      # MinIO API (:9000) is internal only
     environment:
-      # Admin credentials — used for MinIO root user and Higress console login
+      # v1.1.0 slim manager image: drop supervisord; start-manager-agent.sh acts
+      # as container entrypoint when HICLAW_RUNTIME=k8s|aliyun. We pick "k8s"
+      # for Compose since both modes share the same container-entrypoint code path.
+      # k8s mode also skips Matrix @manager registration and Higress setup —
+      # those are normally done by the HiClaw Operator/ManagerReconciler. In
+      # Compose we do them manually via entrypoint-wrapper.sh + manager-init-internal.sh.
+      - HICLAW_RUNTIME=k8s
+      # Admin credentials — used to connect to MinIO on hiclaw-embedded
       # MinIO requires password >= 8 chars; use .env to override
       - HICLAW_ADMIN_USER=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_ADMIN_PASSWORD=${HICLAW_ADMIN_PASSWORD:-admin1234}
       # Tuwunel Matrix server name — must match domain in MATRIX_USER_ID below
       - HICLAW_MATRIX_DOMAIN=matrix-local.hiclaw.io
-      # Registration token — used by create-worker.sh to create Matrix accounts
+      # k8s mode: full URL to Tuwunel (Matrix server). Required with :? hard check.
+      - HICLAW_MATRIX_URL=http://matrix-local.hiclaw.io:6167
+      # Registration token — used by create-worker.sh to create Matrix accounts AND
+      # by entrypoint-wrapper.sh to register @manager (k8s mode skips this in native script)
       - HICLAW_REGISTRATION_TOKEN=${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}
+      # k8s mode: Matrix login password for @manager. Required with :? hard check.
+      # Must be ≥8 chars. Pre-injected here; entrypoint-wrapper registers @manager
+      # with this same password on first boot (idempotent).
+      - HICLAW_MANAGER_PASSWORD=${HICLAW_MANAGER_PASSWORD:-hiclaw-manager-password-dev}
+      # k8s mode: gateway key for openclaw.json + Higress consumer. Required with :?
+      # Must be non-empty. manager-init-internal.sh registers this as the Higress
+      # 'manager' consumer credential (key-auth Bearer).
+      - HICLAW_MANAGER_GATEWAY_KEY=${HICLAW_MANAGER_GATEWAY_KEY:-hiclaw-manager-gw-key-dev-32chars}
+      # Dev gateway mode: 'nginx-bypass' skips Higress route/consumer wiring
+      # (used on WSL2 where Higress segfaults). 'higress' uses the embedded
+      # Higress instance. Production k3s ALWAYS uses real Higress regardless.
+      - HICLAW_DEV_GATEWAY=${HICLAW_DEV_GATEWAY:-higress}
       # LLM API key — used by HiClaw startup to configure the Higress AI Gateway route.
       # Without this, HiClaw skips auto-config (the route persists in the data volume,
       # but after "docker compose down -v" a fresh start would have no LLM route).
@@ -258,32 +387,34 @@ services:
       # This is idempotent: setup-higress.sh does PUT on existing service sources.
       - HICLAW_LLM_PROVIDER=openai-compat
       - HICLAW_OPENAI_BASE_URL=https://api.minimaxi.com/v1
-      # AI Gateway server for Manager's openclaw.json template (envsubst uses this var).
-      # Renamed from HICLAW_AI_GATEWAY_DOMAIN in v1.0.8 to HICLAW_AI_GATEWAY_SERVER.
-      # Without this, manager-openclaw.json.tmpl generates baseUrl: http://:8080/v1 (broken).
-      - HICLAW_AI_GATEWAY_SERVER=aigw-local.hiclaw.io
-      # Default model for Manager Agent
-      - HICLAW_DEFAULT_MODEL=MiniMax-M2.7-highspeed
+      # AI Gateway template variables (v1.1.0 renames):
+      #   HICLAW_AI_GATEWAY_SERVER (v1.0.8) → HICLAW_AI_GATEWAY_DOMAIN (template) +
+      #   HICLAW_AI_GATEWAY_URL (k8s validation, full URL)
+      - HICLAW_AI_GATEWAY_DOMAIN=aigw-local.hiclaw.io
+      - HICLAW_AI_GATEWAY_URL=http://aigw-local.hiclaw.io:8080
+      # k8s mode: mc alias setup uses these (same as hiclaw-embedded credentials)
+      - HICLAW_FS_ENDPOINT=http://hiclaw-embedded:9000
+      - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
+      - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
+      # Default model for Manager Agent (Aliyun DashScope coding endpoint).
+      # Inherits LLM_MODEL from .env so a single source of truth controls the
+      # upstream model name across nginx-bypass and worker openclaw.json.
+      - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-qwen3-coder-plus}
+      # Disable memorySearch — coding.dashscope.aliyuncs.com does not expose an
+      # OpenAI-compatible embedding endpoint at /v1/embeddings. Empty string
+      # suppresses memorySearch injection in openclaw.json template.
+      - HICLAW_EMBEDDING_MODEL=
       - TZ=Asia/Shanghai
     volumes:
-      - hiclaw_manager_data:/data    # Persists MinIO data + Tuwunel DB
       - ../hiclaw/entrypoint-wrapper.sh:/opt/honeybadge/init/entrypoint-wrapper.sh:ro
       - ../hiclaw/manager-init-internal.sh:/opt/honeybadge/init/manager-init-internal.sh:ro
       - ../../hiclaw:/opt/honeybadge/config:ro   # HoneyBadge agent configs (SOUL.md, AGENTS.md, skills)
+      - hiclaw-manager-data:/data                # v1.1.0 native manager-agent state (workers-registry.json, openclaw.json, dataset cache)
     networks:
-      honeybadge-net:
-        aliases:
-          # These hostnames are used by HiClaw workers to reach services inside this container.
-          # Docker DNS resolves them to the manager's current IP automatically — no hardcoded IPs.
-          - aigw-local.hiclaw.io        # Higress AI Gateway (port 8080) — LLM calls
-          - matrix-local.hiclaw.io      # Tuwunel Matrix server (port 6167)
-    healthcheck:
-      # MinIO health endpoint — confirms internal MinIO is ready for Workers
-      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 60s    # Multiple services start via supervisord; allow time
+      - honeybadge-net
+    depends_on:
+      hiclaw-embedded:
+        condition: service_healthy
     labels:
       com.honeybadge.service: "hiclaw-manager"
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
@@ -301,14 +432,14 @@ services:
   # =============================================================================
 
   hiclaw-graph-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.9
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
     container_name: honeybadge-graph-worker
     hostname: hiclaw-graph-worker
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
     environment:
       - HICLAW_WORKER_NAME=graph-worker
-      - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
+      - HICLAW_FS_ENDPOINT=http://hiclaw-embedded:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       - TZ=Asia/Shanghai
@@ -317,21 +448,23 @@ services:
     networks:
       - honeybadge-net
     depends_on:
-      hiclaw-manager:
+      hiclaw-embedded:
         condition: service_healthy
+      hiclaw-manager:
+        condition: service_started
     labels:
       com.honeybadge.service: "hiclaw-graph-worker"
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   hiclaw-analytics-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.9
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
     container_name: honeybadge-analytics-worker
     hostname: hiclaw-analytics-worker
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
     environment:
       - HICLAW_WORKER_NAME=analytics-worker
-      - HICLAW_FS_ENDPOINT=http://hiclaw-manager:9000
+      - HICLAW_FS_ENDPOINT=http://hiclaw-embedded:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       - TZ=Asia/Shanghai
@@ -340,8 +473,10 @@ services:
     networks:
       - honeybadge-net
     depends_on:
-      hiclaw-manager:
+      hiclaw-embedded:
         condition: service_healthy
+      hiclaw-manager:
+        condition: service_started
     labels:
       com.honeybadge.service: "hiclaw-analytics-worker"
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
@@ -367,7 +502,7 @@ services:
       - NEBULA_USER=${NEBULA_USER:-root}
       - NEBULA_PASSWORD=${NEBULA_PASSWORD:-nebula}
       - NEBULA_SPACE=${NEBULA_SPACE:-honeybadge}
-      - LLM_ENDPOINT=${MCP_LLM_ENDPOINT:-http://hiclaw-manager:8080}
+      - LLM_ENDPOINT=${MCP_LLM_ENDPOINT:-http://aigw-local.hiclaw.io:8080}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
       - PERMISSION_SERVICE_URL=http://honeybadge-permissions:8092
@@ -473,8 +608,10 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      hiclaw-manager:
+      hiclaw-embedded:
         condition: service_healthy
+      hiclaw-manager:
+        condition: service_started
     networks:
       - honeybadge-net
     healthcheck:
@@ -503,12 +640,12 @@ services:
     ports:
       - "8091:8091"
     environment:
-      - TUWUNEL_URL=http://hiclaw-manager:6167
+      - TUWUNEL_URL=http://matrix-local.hiclaw.io:6167
       - MATRIX_DOMAIN=matrix-local.hiclaw.io
       - HICLAW_REGISTRATION_TOKEN=${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}
       - MATRIX_USER_SECRET=${MATRIX_USER_SECRET:-hb-user-secret-dev}
       - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
-      - MATRIX_HOMESERVER_PUBLIC=http://localhost:6167
+      - MATRIX_HOMESERVER_PUBLIC=http://localhost:7167
       - TZ=Asia/Shanghai
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
@@ -516,8 +653,10 @@ services:
       - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://localhost:8091}
       - DEFAULT_ROLE=${DEFAULT_ROLE:-analyst}
     depends_on:
-      hiclaw-manager:
+      hiclaw-embedded:
         condition: service_healthy
+      hiclaw-manager:
+        condition: service_started
     networks:
       - honeybadge-net
     healthcheck:
@@ -577,7 +716,7 @@ services:
       - VITE_API_TARGET=http://honeybadge-server:8090
       - VITE_WS_TARGET=ws://honeybadge-server:8090
       - VITE_AUTH_URL=http://localhost:8091
-      - VITE_MATRIX_HOMESERVER=http://localhost:6167
+      - VITE_MATRIX_HOMESERVER=http://localhost:7167
       - TZ=Asia/Shanghai
     volumes:
       - ../../frontend:/app
@@ -794,8 +933,11 @@ volumes:
   postgres_data:
     name: honeybadge-postgres-data
 
-  hiclaw_manager_data:
-    name: honeybadge-hiclaw-manager-data    # Persists MinIO + Tuwunel state
+  hiclaw-embedded-data:
+    name: honeybadge-hiclaw-embedded-data   # Persists MinIO data + Tuwunel DB (infra bundle)
+
+  hiclaw-manager-data:
+    name: honeybadge-hiclaw-manager-data    # v1.1.0 manager-agent /data: workers-registry.json + openclaw.json runtime state
 
   frontend_node_modules:
     name: honeybadge-frontend-node-modules

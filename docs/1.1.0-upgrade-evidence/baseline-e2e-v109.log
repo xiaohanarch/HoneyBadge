@@ -1,0 +1,117 @@
+Could not find platform independent libraries <prefix>
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.3, pluggy-1.6.0 -- D:\code\HoneyBadge7777\tests\e2e\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+metadata: {'Python': '3.14.3', 'Platform': 'Windows-11-10.0.26200-SP0', 'Packages': {'pytest': '9.0.3', 'pluggy': '1.6.0'}, 'Plugins': {'anyio': '4.13.0', 'asyncio': '1.3.0', 'base-url': '2.1.0', 'html': '4.2.0', 'metadata': '3.1.1', 'playwright': '0.7.2', 'timeout': '2.4.0', 'xdist': '3.8.0'}, 'Base URL': ''}
+rootdir: D:\dev\HoneyBadge\.claude\worktrees\1.1.0-upgrade
+configfile: pytest.ini (WARNING: ignoring pytest config in pyproject.toml!)
+plugins: anyio-4.13.0, asyncio-1.3.0, base-url-2.1.0, html-4.2.0, metadata-3.1.1, playwright-0.7.2, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+timeout: 180.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 12 items
+
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc101_create_new_session PASSED [  8%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc102_send_query_receives_response_with_trace FAILED [ 16%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc103_streaming_response PASSED [ 25%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc104_progress_steps_display PASSED [ 33%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc105_query_results_table FAILED [ 41%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc106_ngql_display SKIPPED [ 50%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc107_trace_id_format SKIPPED [ 58%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc108_error_handling PASSED [ 66%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc109_continue_conversation_context PASSED [ 75%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc110_multiple_queries_with_traces SKIPPED the timeout thread kill triggers a Windows
+asyncio deadlock in GetQueuedCompletionStatus (Python 3.14 +
+Playwright). Test infrastructure issue, not a stack regression ¡ª runs
+fine on Linux/ECS. Tracked in docs/1.1.0-upgrade-followups.md Bucket 4.) [ 83%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc111_execution_time_display SKIPPED [ 91%]
+tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc112_raw_data_toggle SKIPPED [100%]
+
+================================== FAILURES ===================================
+__ TestChatFunctionality.test_tc102_send_query_receives_response_with_trace ___
+tests\e2e\test_02_chat.py:64: in test_tc102_send_query_receives_response_with_trace
+    assert result["trace_id"], f"No trace ID in response"
+E   AssertionError: No trace ID in response
+E   assert None
+---------------------------- Captured stdout setup ----------------------------
+[NET] GET http://localhost:3000/src/api/matrix.ts
+[NET] GET http://localhost:3000/node_modules/.vite/deps/matrix-js-sdk.js?v=a1ce2559
+[NET] GET http://localhost:6167/_matrix/client/v3/voip/turnServer
+[NET] GET http://localhost:6167/_matrix/client/versions
+[CON] error: Failed to load resource: the server responded with a status of 404 (Not Found)
+[CON] error: Failed to get TURN URIs M_NOT_FOUND: MatrixError: [404] M_NOT_FOUND: Not Found (http://localhost:6167/_matrix/client/v3/
+[NET] GET http://localhost:6167/_matrix/client/v3/pushrules/
+[NET] GET http://localhost:6167/_matrix/client/v3/capabilities
+[CON] warning: Adding default global override push rule .org.matrix.msc3786.rule.room.server_acl
+[CON] warning: Adding default global underride push rule .org.matrix.msc3914.rule.room.call
+[NET] POST http://localhost:6167/_matrix/client/v3/user/%40hb-admin%3Amatrix-local.hiclaw.i
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=%7B%22room%22%3A%7B%22timeli
+[CON] warning: Adding default global override push rule .org.matrix.msc3786.rule.room.server_acl
+[CON] warning: Adding default global underride push rule .org.matrix.msc3914.rule.room.call
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] POST http://localhost:6167/_matrix/client/v3/createRoom
+---------------------------- Captured stdout call -----------------------------
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] PUT http://localhost:6167/_matrix/client/v3/rooms/!OfZDyNjZkS1NlsMt4l%3Amatrix-local
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=jtqA&timeout=30000&org.matri
+____________ TestChatFunctionality.test_tc105_query_results_table _____________
+tests\e2e\test_02_chat.py:113: in test_tc105_query_results_table
+    assert result["has_data_table"], "Response should have data table collapse"
+E   AssertionError: Response should have data table collapse
+E   assert False
+---------------------------- Captured stdout setup ----------------------------
+[NET] GET http://localhost:3000/src/api/matrix.ts
+[NET] GET http://localhost:3000/node_modules/.vite/deps/matrix-js-sdk.js?v=a1ce2559
+[NET] GET http://localhost:6167/_matrix/client/v3/voip/turnServer
+[NET] GET http://localhost:6167/_matrix/client/versions
+[CON] error: Failed to load resource: the server responded with a status of 404 (Not Found)
+[CON] error: Failed to get TURN URIs M_NOT_FOUND: MatrixError: [404] M_NOT_FOUND: Not Found (http://localhost:6167/_matrix/client/v3/
+[NET] GET http://localhost:6167/_matrix/client/v3/pushrules/
+[NET] GET http://localhost:6167/_matrix/client/v3/capabilities
+[CON] warning: Adding default global override push rule .org.matrix.msc3786.rule.room.server_acl
+[CON] warning: Adding default global underride push rule .org.matrix.msc3914.rule.room.call
+[NET] POST http://localhost:6167/_matrix/client/v3/user/%40hb-admin%3Amatrix-local.hiclaw.i
+---------------------------- Captured stdout call -----------------------------
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=%7B%22room%22%3A%7B%22timeli
+[CON] warning: Adding default global override push rule .org.matrix.msc3786.rule.room.server_acl
+[CON] warning: Adding default global underride push rule .org.matrix.msc3914.rule.room.call
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] POST http://localhost:6167/_matrix/client/v3/createRoom
+[NET] PUT http://localhost:6167/_matrix/client/v3/rooms/!I65DMdAoy5uhx3qZf4%3Amatrix-local
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+[NET] GET http://localhost:6167/_matrix/client/v3/sync?filter=njKu&timeout=30000&org.matri
+=========================== short test summary info ===========================
+FAILED tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc102_send_query_receives_response_with_trace - AssertionError: No trace ID in response
+assert None
+FAILED tests/e2e/test_02_chat.py::TestChatFunctionality::test_tc105_query_results_table - AssertionError: Response should have data table collapse
+assert False
+============= 2 failed, 5 passed, 5 skipped in 445.53s (0:07:25) ==============

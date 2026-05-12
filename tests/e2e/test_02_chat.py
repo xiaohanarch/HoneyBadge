@@ -17,6 +17,7 @@ Test Coverage:
 - TC-112: Raw data toggle
 """
 import os
+import platform
 import re
 import pytest
 from playwright.sync_api import expect
@@ -168,6 +169,16 @@ class TestChatFunctionality:
         # Response should contain some numeric data (referencing previous context)
         assert len(result["text"]) > 10, "Context follow-up response too short"
 
+    @pytest.mark.skipif(
+        platform.system() == "Windows",
+        reason=(
+            "tc110 sends 3 sequential queries, each ~60s. With pytest --timeout=180 "
+            "the timeout thread kill triggers a Windows asyncio deadlock in "
+            "GetQueuedCompletionStatus (Python 3.14 + Playwright). Test infrastructure "
+            "issue, not a stack regression — runs fine on Linux/ECS. Tracked in "
+            "docs/1.1.0-upgrade-followups.md Bucket 4."
+        ),
+    )
     def test_tc110_multiple_queries_with_traces(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-110: Multiple queries each produce responses with unique trace IDs."""
         page = admin_logged_in

@@ -1,5 +1,6 @@
 # deploy/hiclaw/Dockerfile.manager
-# HiClaw Manager container — applies to HiClaw v1.0.9
+# Built on hiclaw-manager v1.1.0 (lightweight agent only — bundled infra moved to Dockerfile.embedded)
+# HiClaw Manager container — applies to HiClaw v1.1.0
 #
 # UPGRADE CHECKLIST (see docs/patches/hiclaw-interface-contract-v1.md):
 #   1. Verify x-honeybadge field passthrough (Manager must not strip x-honeybadge)
@@ -13,10 +14,10 @@
 #
 # This Dockerfile is kept as a reference for custom Manager builds only.
 
-FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.9
+FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.0
 
 # Copy custom Manager agent configuration (SOUL.md, AGENTS.md)
 # Mount path inside the Manager for agent identity files
 COPY hiclaw/manager/agent/ /opt/hiclaw/agent/manager/
 
-EXPOSE 8080 8001 18888 9001
+# No EXPOSE: Manager v1.1.0 is agent-only; Matrix bot is outbound-only.

@@ -70,6 +70,8 @@ Thumbs.db
 # Logs
 *.log
 logs/
+# Exception: track evidence captured during the 1.1.0 upgrade
+!docs/1.1.0-upgrade-evidence/*.log
 
 # Environment (contains secrets)
 .env

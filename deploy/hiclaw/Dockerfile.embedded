@@ -1,0 +1,22 @@
+# deploy/hiclaw/Dockerfile.embedded
+# Built on hiclaw-embedded v1.1.0 — bundles Tuwunel + MinIO + Higress + Element Web
+# under upstream supervisord.
+#
+# All HoneyBadge customization is runtime — env vars at compose level
+# (HICLAW_ADMIN_USER, HICLAW_REGISTRATION_TOKEN, HICLAW_MATRIX_DOMAIN, etc.)
+# plus deploy/hiclaw/init-workers.sh for routes/consumers/Matrix users.
+# No infra configs are baked in.
+#
+# NOTE: In docker-compose (local dev), the embedded image is used directly
+# without a custom build. This Dockerfile is kept as a reference for
+# custom embedded builds only.
+
+FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.0
+
+# Tuwunel (Matrix)   : 6167
+# Higress Console    : 8001
+# Higress Gateway    : 8080
+# MinIO API          : 9000
+# MinIO Console      : 9001
+# Element Web        : 18888
+EXPOSE 6167 8001 8080 9000 9001 18888

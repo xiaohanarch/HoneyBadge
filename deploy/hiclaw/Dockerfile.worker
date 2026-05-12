@@ -1,5 +1,6 @@
 # deploy/hiclaw/Dockerfile.worker
-# HiClaw Worker (OpenClaw) container — applies to HiClaw v1.0.9
+# Built on hiclaw-worker v1.1.0
+# HiClaw Worker (OpenClaw) container — applies to HiClaw v1.1.0
 #
 # UPGRADE CHECKLIST (see docs/patches/hiclaw-interface-contract-v1.md):
 #   1. Verify Worker SKILL.md directory structure and instruction syntax
@@ -13,7 +14,7 @@
 # This Dockerfile is kept as a reference for custom Worker image builds only
 # (e.g. baking in skills for production deployments without MinIO dependency).
 
-FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.9
+FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
 
 # Workers get their config from MinIO at runtime.
 # Nothing to COPY here for standard deployments.
