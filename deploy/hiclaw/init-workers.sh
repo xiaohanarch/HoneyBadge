@@ -514,6 +514,53 @@ for worker in graph-worker analytics-worker; do
 done
 
 # ---------------------------------------------------------------------------
+# 5b. Register MCP servers in the MANAGER via direct config write
+#
+#     The Manager's fast-query and ERP-dispatch skills call mcporter with
+#     unprefixed names: `honeybadge-nebula`, `honeybadge-audit`,
+#     `honeybadge-cache`. HiClaw's setup-mcp-server.sh would write
+#     `mcp-honeybadge-*` (prepends `mcp-`) and point at the broken
+#     `localhost:8080/mcp-servers/...` Higress route. To keep parity with
+#     the worker config (direct SSE to the MCP containers), we write the
+#     file ourselves and sync to MinIO.
+#
+#     Note: FastMCP exposes /sse (Server-Sent Events) on port 8000.
+#     mcporter detects transport from the URL path.
+# ---------------------------------------------------------------------------
+log "Provisioning Manager mcporter.json (direct SSE, unprefixed names)..."
+
+MANAGER_MCPORTER_JSON='{
+  "mcpServers": {
+    "honeybadge-nebula": { "baseUrl": "http://honeybadge-nebula-mcp:8000/sse" },
+    "honeybadge-audit":  { "baseUrl": "http://honeybadge-audit-mcp:8000/sse"  },
+    "honeybadge-cache":  { "baseUrl": "http://honeybadge-cache-mcp:8000/sse"  }
+  }
+}'
+
+# Write into the Manager container at both the active path
+# (/root/config/mcporter.json — what fast-query.sh reads via default
+# MCPORTER_CONFIG) and the workspace path (/root/manager-workspace/config/).
+printf '%s\n' "$MANAGER_MCPORTER_JSON" > /tmp/hb-manager-mcporter.json
+docker cp /tmp/hb-manager-mcporter.json \
+    "$MANAGER_CONTAINER:/root/config/mcporter.json" \
+    && log "  → /root/config/mcporter.json written" \
+    || warn "  Failed to write /root/config/mcporter.json"
+
+docker exec "$MANAGER_CONTAINER" bash -c \
+    'mkdir -p /root/manager-workspace/config && \
+     cp /root/config/mcporter.json /root/manager-workspace/config/mcporter.json' \
+    && log "  → /root/manager-workspace/config/mcporter.json written" \
+    || warn "  Failed to mirror to manager-workspace"
+
+# Sync to MinIO so it survives Manager container restarts.
+docker cp /tmp/hb-manager-mcporter.json \
+    "$EMBEDDED_CONTAINER:/tmp/hb-manager-mcporter.json" && \
+docker exec "$EMBEDDED_CONTAINER" bash -c \
+    "mc cp /tmp/hb-manager-mcporter.json hiclaw/hiclaw-storage/agents/manager/config/mcporter.json 2>&1 | tail -1" \
+    && log "  → Manager mcporter.json synced to MinIO" \
+    || warn "  MinIO sync failed (config still active in running Manager)"
+
+# ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 echo ""

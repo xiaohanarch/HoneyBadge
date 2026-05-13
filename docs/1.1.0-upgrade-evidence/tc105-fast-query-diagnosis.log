@@ -1,0 +1,272 @@
+# TC-105 fast-query diagnosis (data-collapse render gap)
+
+> Date: 2026-05-13
+> Branch: `ralph/tc-105-data-table`
+> Trigger: TC-105 from `docs/1.1.0-upgrade-followups.md` Bucket 4
+> Test: `tests/e2e/test_02_chat.py::test_tc105_query_results_table`
+>   query "查询前5个采购订单" must produce `.data-collapse` with rows.
+
+## Summary
+
+TC-105 fails because the front-end never receives an x-honeybadge contract 002
+payload from the Manager. The render contract is:
+
+| Source | Renders as |
+|---|---|
+| Matrix text + x-honeybadge contract 002 (raw_data + columns) | `query_result` → `.data-collapse` |
+| Matrix text only (no x-honeybadge) | plain assistant text — **no .data-collapse** |
+
+So the data-collapse gap is upstream of the frontend. Walking the manager
+pipeline turned up **two stacked infrastructure bugs** in the fast-query path
+that the Manager router selects for this query:
+
+1. **Bug A — mcporter server-name mismatch (CODE)**
+   Manager's `/root/config/mcporter.json` registers servers under the
+   `mcp-honeybadge-*` prefix (HiClaw `setup-mcp-server.sh` line 82 forces it)
+   and points them at `http://localhost:8080/mcp-servers/mcp-honeybadge-*/mcp`
+   — a Higress route that doesn't exist locally and has no listener on
+   localhost:8080 from the Manager.
+   The skills under `hiclaw/manager/agent/skills/fast-query/` and
+   `erp-query-dispatch/` call `mcporter call honeybadge-nebula.<tool>` with
+   the **unprefixed** name (matching what workers use). Result:
+   ```
+   [mcporter] Unknown MCP server 'honeybadge-nebula'.
+   {"error":"nGQL generation failed"}
+   ```
+
+2. **Bug B — nebula-mcp stale LLM model (OPS)**
+   The `honeybadge-nebula-mcp` container had `LLM_MODEL=MiniMax-M2.7` baked
+   in from an earlier startup, but the Higress AI gateway only proxies to
+   Bailian / DashScope. The model name returns 400:
+   ```
+   {"error":{"code":"invalid_parameter_error",
+            "message":"model `MiniMax-M2.7` is not supported.",...}}
+   ```
+   The current `.env` already has `LLM_MODEL=qwen3-coder-plus` and
+   `LLM_API_KEY=sk-sp-264b...` (matches the workers), so the fix is just a
+   container recreate — no code change needed.
+
+After both fixes, the fast-query path is healthy and emits contract 002.
+The remaining reason TC-105 still wouldn't pass against this local stack is
+that the NebulaGraph `honeybadge` space has **0 PurchaseOrder vertices** —
+an ETL/seed concern outside the v1.1.0 upgrade scope.
+
+## Routing confirmation
+
+```
+$ docker exec honeybadge-hiclaw-manager bash \
+    /opt/honeybadge/config/manager/agent/skills/fast-query/router.sh \
+    "查询前5个采购订单"
+ROUTE=fast-query
+```
+
+So `fast-query.sh` is the active path; `dispatch.sh --worker graph-worker`
+is the fallback when fast-query exits non-zero.
+
+## Bug A — mcporter name mismatch
+
+### Broken config (before)
+
+```
+$ docker exec honeybadge-hiclaw-manager cat /root/config/mcporter.json
+{
+  "mcpServers": {
+    "mcp-honeybadge-nebula": {
+      "url": "http://localhost:8080/mcp-servers/mcp-honeybadge-nebula/mcp",
+      "transport": "http",
+      "headers": {"Authorization": "Bearer dummy-key"}
+    },
+    "mcp-honeybadge-audit":  {...same shape...},
+    "mcp-honeybadge-cache":  {...same shape...}
+  }
+}
+```
+
+`localhost:8080` from inside the Manager container is not listening:
+```
+$ docker exec honeybadge-hiclaw-manager curl -sS -m 2 http://localhost:8080
+curl: (7) Failed to connect to localhost port 8080
+```
+
+### Working pattern (workers)
+
+```
+$ docker exec honeybadge-graph-worker mcporter config list
+honeybadge-nebula
+  Source: local (/root/hiclaw-fs/config/mcporter.json)
+  Transport: http (http://honeybadge-nebula-mcp:8000/sse)
+honeybadge-audit  ...sse
+honeybadge-cache  ...sse
+```
+
+### Fix
+
+`deploy/hiclaw/init-workers.sh` previously only provisioned mcporter for
+workers (lines 484–514). Added a Manager block (§5b) that writes
+`/root/config/mcporter.json` directly with the worker pattern:
+
+```json
+{
+  "mcpServers": {
+    "honeybadge-nebula": { "baseUrl": "http://honeybadge-nebula-mcp:8000/sse" },
+    "honeybadge-audit":  { "baseUrl": "http://honeybadge-audit-mcp:8000/sse"  },
+    "honeybadge-cache":  { "baseUrl": "http://honeybadge-cache-mcp:8000/sse"  }
+  }
+}
+```
+
+…mirrors it to `/root/manager-workspace/config/mcporter.json`, and syncs to
+MinIO at `hiclaw/hiclaw-storage/agents/manager/config/mcporter.json` so the
+config survives container restarts.
+
+Bypassing the Higress MCP route is intentional for now:
+
+- `setup-mcp-server.sh` adds the `mcp-` prefix at line 82
+  (`MCP_SERVER_NAME="mcp-${SERVER_NAME}"`), which doesn't match what the
+  skills call.
+- The Higress MCP route requires console-login state and re-registration
+  every time the Higress pod restarts.
+- `deploy/k8s/configmaps/mcporter-config.json` (canonical k8s pattern)
+  already uses direct SSE URLs for the same reason.
+
+If/when the Higress MCP route is stabilized, we can swap back to the
+gateway-routed form without changing skill code (names stay the same).
+
+## Bug B — nebula-mcp stale LLM model
+
+### Symptom
+
+```
+$ docker exec honeybadge-hiclaw-manager bash -c \
+    'mcporter --config /tmp/test-mcporter.json call \
+     honeybadge-nebula.generate_query --args "{\"question\":\"查询前5个采购订单\"}"'
+Error calling tool 'generate_query': Failed to generate nGQL from question:
+  LLM HTTP error: Client error '400 Bad Request'
+  for url 'http://aigw-local.hiclaw.io:8080/v1/chat/completions'
+```
+
+### Root cause
+
+```
+$ docker exec honeybadge-nebula-mcp env | grep LLM_
+LLM_API_KEY=sk-cp-6KXLA9...     # stale
+LLM_MODEL=MiniMax-M2.7          # not supported by AI gateway
+LLM_ENDPOINT=http://aigw-local.hiclaw.io:8080
+
+# Reproduce the 400:
+$ curl -sS -i -X POST http://aigw-local.hiclaw.io:8080/v1/chat/completions \
+    -H "Authorization: Bearer $LLM_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"MiniMax-M2.7","messages":[...],"max_tokens":10}'
+HTTP/1.1 400 Bad Request
+{"error":{"code":"invalid_parameter_error",
+          "message":"model `MiniMax-M2.7` is not supported.",...}}
+```
+
+### Fix (operational — no code change)
+
+The current `.env` is already correct:
+
+```
+LLM_API_KEY=sk-sp-264b0e52aba64ade970e13fb7a8adb10
+LLM_MODEL=qwen3-coder-plus
+LLM_ENDPOINT=https://coding.dashscope.aliyuncs.com
+MCP_LLM_ENDPOINT=http://aigw-local.hiclaw.io:8080
+```
+
+The nebula-mcp container just needs a force-recreate to pick the values up:
+
+```
+$ docker-compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env \
+    up -d --force-recreate --no-deps honeybadge-nebula-mcp
+$ docker exec honeybadge-nebula-mcp env | grep LLM_
+LLM_API_KEY=sk-sp-264b0e52aba64ade970e13fb7a8adb10
+LLM_MODEL=qwen3-coder-plus
+LLM_ENDPOINT=http://aigw-local.hiclaw.io:8080
+```
+
+Both routes verified working with the new credentials:
+
+```
+$ curl ... https://coding.dashscope.aliyuncs.com/v1/chat/completions \
+    -d '{"model":"qwen3-coder-plus", ...}'
+{"created":...,"choices":[{"message":{"content":"Hello! How can I assist..."}}]}
+
+$ curl ... http://aigw-local.hiclaw.io:8080/v1/chat/completions \
+    -d '{"model":"qwen3-coder-plus", ...}'
+{"created":...,"choices":[{"message":{"content":"Hello! How can I assist..."}}]}
+```
+
+## Post-fix end-to-end check
+
+```
+$ docker exec honeybadge-hiclaw-manager bash -c '
+    bash /opt/honeybadge/config/manager/agent/skills/fast-query/fast-query.sh \
+      --question "查询前5个采购订单" --user-id admin --task-id tc105-final'
+{
+  "success": true,
+  "columns": [
+    "po.PurchaseOrder.po_number",
+    "po.PurchaseOrder.order_date",
+    "po.PurchaseOrder.total_amount",
+    "po.PurchaseOrder.status"
+  ],
+  "rows": [],
+  "row_count": 0,
+  "execution_time_ms": 17,
+  "trace_id": "TRC-20260514-003944-f99435c9",
+  "warnings": []
+}
+EXIT=0
+```
+
+The pipeline now reaches NebulaGraph and returns a clean (empty) result.
+With `--forward-to-user-id` set, `fast-query.sh` writes a `result.json` and
+hands it to `forward-to-user.sh --result-json`, which emits x-honeybadge
+contract 002 — which the frontend renders as `.data-collapse`.
+
+## Remaining gap (out of scope for this PR)
+
+NebulaGraph has 0 PurchaseOrder vertices:
+
+```
+$ mcporter call honeybadge-nebula.validate_and_execute \
+    --args '{"ngql":"MATCH (po:PurchaseOrder) RETURN po LIMIT 3"}'
+{"success": true, "rows": [], "row_count": 0, ...}
+
+$ mcporter call honeybadge-nebula.validate_and_execute \
+    --args '{"ngql":"USE honeybadge; SHOW STATS;"}'
+{"success": false, "error": "EXECUTION_ERROR",
+ "details": [{"code":"E999",
+              "message":"There is no any stats info to show, please execute 'submit job stats' firstly!"}]}
+```
+
+The seed-data step doesn't exist in `deploy/docker/init-nebula.sh` (only
+schema DDL). TC-105 cannot pass until either:
+
+- the local dev stack ships seed PurchaseOrder vertices, or
+- the test fixture seeds them before running the assertion.
+
+That is a separate Bucket 4 / fixture task and tracked in
+`docs/1.1.0-upgrade-followups.md`.
+
+## Also noticed
+
+- The LLM occasionally hallucinates an ORDER BY clause for "查询前N个…"
+  questions, producing nGQL like:
+  ```
+  ... RETURN ... ORDER BY po.PurchaseOrder.order_date DESC LIMIT 5
+  ```
+  which NebulaGraph rejects with
+  `SemanticError: Only column name can be used as sort item`.
+  This shows up intermittently because of LLM non-determinism. The skill
+  could benefit from a retry-with-feedback loop (re-prompt with the
+  semantic error). Not in scope here; flag for L1/L2 validator follow-up.
+
+- `deploy/hiclaw/mcp-honeybadge-nebula.yaml` lists tools
+  `[get_schema, generate_ngql, validate_and_execute, explain_ngql,
+    summarize_query_results]` but the actual server exposes
+  `generate_query`, not `generate_ngql`. The YAML is only consumed by the
+  Higress MCP route (which we're now bypassing for the Manager), so it
+  doesn't affect runtime — but it would mislead anyone enabling the
+  Higress route. Worth correcting separately.
