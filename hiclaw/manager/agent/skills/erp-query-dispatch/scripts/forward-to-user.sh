@@ -54,7 +54,11 @@ if [ -z "$CONTENT" ]; then
 fi
 
 META_PATH="/root/hiclaw-fs/shared/tasks/$TASK_ID/meta.json"
-TUWUNEL_URL="http://127.0.0.1:6167"
+# Tuwunel base URL. Honor HICLAW_MATRIX_URL when set (split topology — Tuwunel
+# lives in honeybadge-hiclaw-embedded, not the Manager container). Falls back
+# to the matrix-local.hiclaw.io network alias, which resolves correctly in
+# both embedded and split deployments.
+TUWUNEL_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
 
 # 1. Look up user_room_id (and user_mxid) from task meta.json
 if [ ! -f "$META_PATH" ]; then

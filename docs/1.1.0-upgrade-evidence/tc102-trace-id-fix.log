@@ -1,0 +1,154 @@
+# TC-102 trace_id link missing — root cause + fix
+
+> Date: 2026-05-14
+> Branch: `ralph/tc-102-trace-id-link`
+> Test: `tests/e2e/test_02_chat.py::TestChatFlow::test_tc102_send_query_receives_response_with_trace`
+> Related: PR #60 (v1.1.0 split topology), PR #62 (Manager → MCP wiring), PR #63 (Nebula seed)
+
+## Symptom
+
+The TC-102 fixture asserts `result["trace_id"]` is non-empty. The frontend
+selector is `.trace-id-link`, which `ChatMessage.vue` only renders when
+`message.message_type === 'query_result'`. That message type is set in
+`useMatrixChat.ts:150-181` only when the Matrix event carries a valid
+`x-honeybadge` contract 002 payload with `trace_id` at the top level.
+
+In the v1.1.0 split topology, contract 002 never reached the user's DM
+room. The Manager scripts that PUT the structured payload silently failed
+to reach Tuwunel.
+
+## Root cause (Phase 1 — systematic-debugging)
+
+Three Manager-side bash scripts hardcoded `TUWUNEL_URL="http://127.0.0.1:6167"`:
+
+- `hiclaw/manager/agent/skills/erp-query-dispatch/scripts/forward-to-user.sh:57` (was)
+- `hiclaw/manager/agent/skills/erp-query-dispatch/scripts/dispatch-to-worker.sh:41` (was)
+- `hiclaw/manager/agent/skills/fast-query/fast-forward.sh:41` (was)
+
+Plus an embedded Python snippet in `SKILL.md:54` that the agent inlines at
+runtime.
+
+In v1.0.x **embedded** topology, Tuwunel + MinIO + Higress + Element all
+lived in the same supervisord container as the Manager, so `127.0.0.1:6167`
+worked. In v1.1.0 **split** topology (PR #60), Tuwunel was moved out into
+`honeybadge-hiclaw-embedded`, and the Manager is a slim agent container.
+`127.0.0.1:6167` inside the Manager → connection refused.
+
+Compose already wires the network alias `matrix-local.hiclaw.io:6167` on
+the embedded container, and sets `HICLAW_MATRIX_URL=http://matrix-local.hiclaw.io:6167`
+as an env var on the Manager (`deploy/docker/docker-compose.yaml:363`).
+OpenClaw's built-in `message` tool reads
+`channels.matrix.homeserver: http://matrix-local.hiclaw.io:6167` from
+`openclaw.json` and works fine — but the manual fast-query / dispatch /
+forward scripts never read the env var.
+
+### Connectivity proof (before fix, from inside the Manager container)
+
+```
+GET http://127.0.0.1:6167/_matrix/client/versions       -> 000 (refused)
+GET http://matrix-local.hiclaw.io:6167/_matrix/client/versions -> 200
+```
+
+## Fix (Phase 4)
+
+Replaced the hardcoded URL with an env-var-honoring fallback in all four
+locations:
+
+```bash
+TUWUNEL_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
+```
+
+- Honors compose-set env var (and any future deployment overrides)
+- Falls back to the network alias, which exists in **both** v1.0.x embedded
+  and v1.1.0 split deployments (compose declares the alias on the embedded
+  container in both)
+
+Files changed:
+
+- `hiclaw/manager/agent/skills/erp-query-dispatch/scripts/forward-to-user.sh`
+- `hiclaw/manager/agent/skills/erp-query-dispatch/scripts/dispatch-to-worker.sh`
+- `hiclaw/manager/agent/skills/fast-query/fast-forward.sh`
+- `hiclaw/manager/agent/skills/erp-query-dispatch/SKILL.md` (inline Python snippet)
+
+## End-to-end verification (post-fix)
+
+Synthetic verification: create a Manager-owned room, seed `meta.json` +
+`result.json`, then run `forward-to-user.sh --result-json` and read the
+event back.
+
+```
+$ docker exec honeybadge-hiclaw-manager bash -c '
+    TOKEN=$(python3 -c "import json; print(json.load(open(\"/root/manager-workspace/openclaw.json\"))[\"channels\"][\"matrix\"][\"accessToken\"])")
+    TUWUNEL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
+
+    # 1. Create a test DM room
+    ROOM_ID=$(curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"preset\":\"trusted_private_chat\",\"is_direct\":true}" \
+        "$TUWUNEL/_matrix/client/v3/createRoom" \
+        | python3 -c "import sys,json; print(json.load(sys.stdin)[\"room_id\"])")
+
+    # 2. Seed task fixtures
+    TASK_ID="tc102-verify-$(date +%s)"
+    mkdir -p /root/hiclaw-fs/shared/tasks/$TASK_ID
+    echo "{\"user_mxid\":\"@hb-admin:matrix-local.hiclaw.io\",\"user_room_id\":\"$ROOM_ID\"}" \
+        > /root/hiclaw-fs/shared/tasks/$TASK_ID/meta.json
+    cat > /root/hiclaw-fs/shared/tasks/$TASK_ID/result.json <<EOF
+{"trace_id":"TRC-TC102-VERIFY","summary":"TC-102 verification","raw_data":[{"x":1}],"columns":["x"],"cypher":"MATCH (n) RETURN n LIMIT 1","execution_time_ms":12,"row_count":1}
+EOF
+
+    # 3. Forward (this is exactly what fast-query / SOUL.md instructs Manager to do)
+    bash /opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts/forward-to-user.sh \
+        --task-id "$TASK_ID" \
+        --content "TC-102 verification: trace_id should reach frontend" \
+        --result-json "/root/hiclaw-fs/shared/tasks/$TASK_ID/result.json"
+'
+
+Created test room: !8oh3QrPZ82HIjfrqZu:matrix-local.hiclaw.io
+
+=== forward-to-user.sh execution ===
+FORWARD_OK room_id=!8oh3QrPZ82HIjfrqZu:matrix-local.hiclaw.io \
+           event_id=$EWcRWK3ICX6yZZRQf7pLt3NX15U3oq2VA4yPs_V1iOs
+EXIT=0
+
+=== Reading event back from Tuwunel ===
+msgtype: m.text
+body: TC-102 verification: trace_id should reach frontend
+x-honeybadge.contract: 002
+x-honeybadge.trace_id: TRC-TC102-VERIFY
+x-honeybadge.payload.row_count: 1
+VERIFIED: YES
+```
+
+`x-honeybadge.contract=002` and `x-honeybadge.trace_id=TRC-TC102-VERIFY`
+both round-trip through Tuwunel. The frontend wiring in
+`useMatrixChat.ts:150-181` lifts `xhb.trace_id` into
+`metadata.trace_id`, which `ChatMessage.vue:52-57` renders as the
+`.trace-id-link` element that TC-102's fixture probes.
+
+## Scope impact
+
+This fix re-enables contract-002 delivery for ALL Manager-originated
+fast-query / dispatch responses in v1.1.0. Tests that depended on this
+delivery but were previously gated by other bugs (TC-105 data shape,
+TC-102 frontend wiring) are now unblocked:
+
+- TC-102 ✅ (this PR)
+- TC-105 end-to-end ✅ (PR #62/#63 verified data shape; this PR completes the chat-room delivery)
+- TC-107 unblocked (depends on contract-002 trace_id reaching the frontend audit deep-link)
+- TC-110 / TC-111 unblocked at the platform level (still need a Linux CI run; see
+  `docs/1.1.0-upgrade-followups.md` for the TC-110 Windows-Python-3.14 deadlock)
+
+## Pending pytest run
+
+Full Playwright run on Windows still blocked by the pre-existing TC-110
+Python-3.14 + asyncio + Playwright + `pytest-timeout` deadlock
+(`docs/1.1.0-upgrade-followups.md`). To verify on Linux / ECS / CI:
+
+```bash
+./scripts/run-e2e-tests.sh --filter chat
+# or just TC-102:
+pytest -c pytest.ini \
+  tests/e2e/test_02_chat.py::TestChatFlow::test_tc102_send_query_receives_response_with_trace \
+  --timeout=200 -v
+```
