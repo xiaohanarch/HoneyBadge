@@ -1,0 +1,126 @@
+# TC-105 seed-and-wire verification
+
+> Date: 2026-05-13
+> Branch: `ralph/tc-105-seed-and-wire-up`
+> Companion to: `docs/1.1.0-upgrade-evidence/tc105-fast-query-diagnosis.log` (PR #62)
+> Test: `tests/e2e/test_02_chat.py::test_tc105_query_results_table`
+
+## What changed
+
+After PR #62 unblocked the Manager → MCP wiring, the fast-query path
+reaches NebulaGraph but returned 0 rows because the `honeybadge` space
+had no PurchaseOrder data. The repo already shipped a complete seed
+script (`deploy/docker/nebula_seed.py`) — it just wasn't wired into the
+bootstrap. This branch:
+
+1. Adds `deploy/docker/seed-nebula.sh` — a docker-based wrapper around
+   the existing Python seed script. Pulls `python:3.11-slim`, mounts the
+   seed script, installs `nebula3-python` from the Aliyun mirror, and
+   runs against the `honeybadge-nebula-graphd` container on the
+   `honeybadge-network`. No host Python or pip required.
+2. Calls it from `scripts/run-e2e-tests.sh --setup-only` right after
+   `init-nebula.sh` (schema) and before `init-workers.sh` (Manager + MCP
+   wiring).
+
+The seed script itself is idempotent (`INSERT VERTEX/EDGE IF NOT
+EXISTS`), so re-running is safe.
+
+## Seed run output
+
+```
+$ bash deploy/docker/seed-nebula.sh
+[seed] Seeding NebulaGraph at honeybadge-nebula-graphd:9669...
+=== HoneyBadge NebulaGraph Seed ===
+Target: honeybadge-nebula-graphd:9669  Space: honeybadge
+Connected to NebulaGraph at honeybadge-nebula-graphd:9669
+Space and schema ready.
+
+--- Master Data ---
+  Organization: 12/12 vertices inserted
+  Supplier: 10/10 vertices inserted
+  Customer: 10/10 vertices inserted
+  Item: 20/20 vertices inserted
+
+--- PurchaseOrders ---
+  PurchaseOrder: 3720/3720 vertices inserted
+  BELONGS_TO_ORG: 3720/3720 edges inserted
+  PLACED_WITH: 3720/3720 edges inserted
+
+--- AP Invoices ---
+  Invoice: 744/744 vertices inserted
+  HAS_INVOICE: 744/744 edges inserted
+
+--- SalesOrders ---
+  SalesOrder: 1200/1200 vertices inserted
+  SOLD_TO: 1200/1200 edges inserted
+
+--- AR Invoices ---
+  ARInvoice: 240/240 vertices inserted
+  HAS_AR_INVOICE: 240/240 edges inserted
+
+--- Verification ---
+  PurchaseOrder total: 3720
+  ...
+=== Seed complete ===
+[seed] Seed complete.
+```
+
+## End-to-end verification
+
+```
+$ docker exec honeybadge-hiclaw-manager bash -c '
+    bash /opt/honeybadge/config/manager/agent/skills/fast-query/fast-query.sh \
+      --question "查询前5个采购订单" --user-id admin --task-id tc105-seeded'
+{
+  "success": true,
+  "columns": [
+    "po.PurchaseOrder.po_number",
+    "po.PurchaseOrder.order_date",
+    "po.PurchaseOrder.total_amount",
+    "po.PurchaseOrder.status"
+  ],
+  "rows": [
+    {"po.PurchaseOrder.po_number": "PO100000102", "po.PurchaseOrder.order_date": 1730505600, "po.PurchaseOrder.total_amount": 765306, "po.PurchaseOrder.status": "APPROVED"},
+    {"po.PurchaseOrder.po_number": "PO100000181", "po.PurchaseOrder.order_date": 1720742400, "po.PurchaseOrder.total_amount": 368543, "po.PurchaseOrder.status": "APPROVED"},
+    {"po.PurchaseOrder.po_number": "PO100000266", "po.PurchaseOrder.order_date": 1712534400, "po.PurchaseOrder.total_amount":  13798, "po.PurchaseOrder.status": "APPROVED"},
+    {"po.PurchaseOrder.po_number": "PO100000273", "po.PurchaseOrder.order_date": 1714348800, "po.PurchaseOrder.total_amount":  62819, "po.PurchaseOrder.status": "APPROVED"},
+    {"po.PurchaseOrder.po_number": "PO100100204", "po.PurchaseOrder.order_date": 1726704000, "po.PurchaseOrder.total_amount": 530612, "po.PurchaseOrder.status": "APPROVED"}
+  ],
+  "row_count": 5,
+  "execution_time_ms": 51,
+  "trace_id": "TRC-20260514-004642-61c23c51",
+  "warnings": []
+}
+EXIT=0
+```
+
+This payload is exactly the shape `forward-to-user.sh --result-json`
+turns into x-honeybadge contract 002, which `useMatrixChat.ts` parses
+into `message.message_type = 'query_result'` + `metadata.raw_data` +
+`metadata.columns`. The frontend's render gate
+(`ChatMessage.vue:26-39`) requires `metadata?.raw_data?.length > 0` —
+satisfied here.
+
+## What pytest run is pending
+
+Full Playwright run (`pytest -c pytest.ini tests/e2e/test_02_chat.py`)
+was not executed on this Windows host: Python 3.14 + asyncio +
+Playwright + `pytest-timeout` deadlock per the pre-existing TC-110
+limitation (see `docs/1.1.0-upgrade-followups.md`). The pipeline is
+healthy at the data-shape level; the remaining work is a CI/Linux
+verification run.
+
+To run on a Linux box / ECS:
+
+```
+./scripts/run-e2e-tests.sh --filter chat
+# (which now seeds Nebula automatically as part of --setup-only)
+```
+
+or just the single test:
+
+```
+pytest -c pytest.ini \
+  tests/e2e/test_02_chat.py::TestQueryResults::test_tc105_query_results_table \
+  --timeout=200 -v
+```

@@ -151,6 +151,10 @@ setup_infrastructure() {
   log_info "Initializing NebulaGraph schema..."
   bash deploy/docker/init-nebula.sh
 
+  # Seed NebulaGraph with ERP fixtures (idempotent — uses IF NOT EXISTS)
+  log_info "Seeding NebulaGraph fixtures..."
+  bash deploy/docker/seed-nebula.sh
+
   # Initialize HiClaw workers
   log_info "Initializing HiClaw workers..."
   bash deploy/hiclaw/init-workers.sh
