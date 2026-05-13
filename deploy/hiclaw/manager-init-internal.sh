@@ -649,15 +649,13 @@ for p in cfg.get('models', {}).get('providers', {}).values():
         if m.pop('reasoning', None) is not None:
             print('Removed reasoning:true from ' + m.get('id', ''))
 
-# Remove memorySearch — template hardcodes model='text-embedding-v4' pointing at the
-# Manager's LLM gateway (aigw-local.hiclaw.io) which only routes chat/completions for
-# MiniMax. Triggering an embedding call produces a Node 'Invalid URL' TypeError that
-# aborts the agent run before any LLM call. Disabling memory search is safe for the
-# HoneyBadge flow: the agent relies on explicit tool calls, not vector recall.
-agents_defaults = cfg.get('agents', {}).get('defaults', {})
-if 'memorySearch' in agents_defaults:
-    agents_defaults.pop('memorySearch', None)
-    print('Removed agents.defaults.memorySearch (incompatible with MiniMax gateway)')
+# Note: the v1.0.x `pop('memorySearch')` workaround was removed in v1.1.0.
+# v1.1.0 only injects agents.defaults.memorySearch when HICLAW_EMBEDDING_MODEL
+# is non-empty (see /opt/hiclaw/scripts/init/start-manager-agent.sh and
+# /opt/hiclaw/scripts/lib/hiclaw-env.sh: `HICLAW_EMBEDDING_MODEL="${HICLAW_EMBEDDING_MODEL-text-embedding-v4}"`).
+# docker-compose.yaml sets HICLAW_EMBEDDING_MODEL="" explicitly so the upstream
+# never injects memorySearch in the first place, making this scrub a no-op.
+# Evidence: docs/1.1.0-upgrade-evidence/bucket1-memorysearch-default-check.log.
 
 # Context pruning — prevents unbounded Manager context growth (mirrors Worker settings)
 mgr_defaults = cfg.setdefault('agents', {}).setdefault('defaults', {})
