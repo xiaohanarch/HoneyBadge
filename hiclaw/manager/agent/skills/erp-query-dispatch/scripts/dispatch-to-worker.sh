@@ -38,7 +38,11 @@ if [ -z "$WORKER_NAME" ] || [ -z "$MESSAGE" ]; then
 fi
 
 REGISTRY="$HOME/workers-registry.json"
-TUWUNEL_URL="http://127.0.0.1:6167"
+# Tuwunel base URL. Honor HICLAW_MATRIX_URL when set (split topology — Tuwunel
+# lives in honeybadge-hiclaw-embedded, not the Manager container). Falls back
+# to the matrix-local.hiclaw.io network alias, which resolves correctly in
+# both embedded and split deployments.
+TUWUNEL_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
 
 # 1. Look up worker room_id from registry
 if [ ! -f "$REGISTRY" ]; then

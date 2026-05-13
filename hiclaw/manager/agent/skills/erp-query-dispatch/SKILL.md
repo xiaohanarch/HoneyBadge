@@ -42,16 +42,21 @@ USER_MXID="@${USER_ID}:matrix-local.hiclaw.io"
 # Resolve the user's DM room via Manager's m.direct account data.
 # This is the anchor that lets Step 6 forward the result back to the correct room.
 export USER_MXID
+# Honor HICLAW_MATRIX_URL (split topology — Tuwunel is in honeybadge-hiclaw-embedded,
+# not the Manager container). Fall back to the matrix-local.hiclaw.io alias which
+# works in both embedded and split deployments.
+export HICLAW_MATRIX_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
 USER_ROOM_ID=$(python3 << 'RESOLVE_EOF'
 import json, urllib.request, urllib.parse, os
 cfg = json.load(open("/root/manager-workspace/openclaw.json"))
 token = cfg["channels"]["matrix"]["accessToken"]
 mgr_uid = "@manager:matrix-local.hiclaw.io"
 user_mxid = os.environ.get("USER_MXID", "")
+tuwunel = os.environ.get("HICLAW_MATRIX_URL", "http://matrix-local.hiclaw.io:6167")
 enc_mgr = urllib.parse.quote(mgr_uid, safe="")
 try:
     req = urllib.request.Request(
-        f"http://127.0.0.1:6167/_matrix/client/v3/user/{enc_mgr}/account_data/m.direct",
+        f"{tuwunel}/_matrix/client/v3/user/{enc_mgr}/account_data/m.direct",
         headers={"Authorization": "Bearer " + token}
     )
     with urllib.request.urlopen(req, timeout=5) as r:

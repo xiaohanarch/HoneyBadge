@@ -38,7 +38,11 @@ if [[ -z "$USER_ID" ]] || [[ -z "$RESULT_JSON" ]]; then
     exit 1
 fi
 
-TUWUNEL_URL="http://127.0.0.1:6167"
+# Tuwunel base URL. Honor HICLAW_MATRIX_URL when set (split topology — Tuwunel
+# lives in honeybadge-hiclaw-embedded, not the Manager container). Falls back
+# to the matrix-local.hiclaw.io network alias, which resolves correctly in
+# both embedded and split deployments.
+TUWUNEL_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
 USER_MXID="@hb-${USER_ID}:matrix-local.hiclaw.io"
 
 # Get Manager's Matrix token
