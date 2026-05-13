@@ -128,7 +128,14 @@ class TestChatFunctionality:
         has_keyword = any(kw in cypher_text.upper() for kw in keywords)
         assert has_keyword, f"Cypher text lacks graph query keywords: {cypher_text[:200]}"
 
-    @pytest.mark.skip(reason="Temporarily disabled — trace_id rendering not the focus right now")
+    @pytest.mark.skipif(
+        platform.system() == "Windows",
+        reason=(
+            "Same Python 3.14 + asyncio + Playwright + pytest-timeout deadlock as TC-110 "
+            "(see docs/1.1.0-upgrade-followups.md Bucket 4). Test infra issue on Windows only; "
+            "runs fine on Linux/ECS now that TC-102 (PR #64) unblocked contract-002 delivery."
+        ),
+    )
     def test_tc107_trace_id_format(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-107: Trace ID has expected format and is displayed as link."""
         page = admin_logged_in
@@ -201,7 +208,15 @@ class TestChatFunctionality:
         if len(trace_ids) >= 2:
             assert len(set(trace_ids)) == len(trace_ids), f"Duplicate trace IDs: {trace_ids}"
 
-    @pytest.mark.skip(reason="Temporarily disabled — execution time display not the focus right now")
+    @pytest.mark.skipif(
+        platform.system() == "Windows",
+        reason=(
+            "Same Python 3.14 + asyncio + Playwright + pytest-timeout deadlock as TC-110 "
+            "(see docs/1.1.0-upgrade-followups.md Bucket 4). Test infra issue on Windows only; "
+            "runs fine on Linux/ECS now that TC-105 (PR #62 + #63) seeded data and TC-102 (PR #64) "
+            "delivers contract-002 with execution_time_ms."
+        ),
+    )
     def test_tc111_execution_time_display(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-111: Execution time is displayed in response."""
         page = admin_logged_in
