@@ -77,6 +77,14 @@ if command -v mc >/dev/null 2>&1; then
         "${HICLAW_ADMIN_USER:-admin}" \
         "${HICLAW_ADMIN_PASSWORD:-admin1234}" \
         --api S3v4 >/dev/null 2>&1 || warn "  mc alias set 'hiclaw' failed (will retry on first use)"
+
+    # Ensure hiclaw-storage bucket exists. v1.1.0 split moved MinIO from the
+    # manager Pod (where the bucket was pre-seeded by the upstream image) to
+    # hiclaw-embedded, which boots with an empty MinIO. Step 1's `mc cp`
+    # silently fails if the bucket is missing; create it idempotently here.
+    mc mb --ignore-existing hiclaw/hiclaw-storage >/dev/null 2>&1 \
+        && log "  hiclaw-storage bucket ready (created or already present)" \
+        || warn "  mc mb hiclaw/hiclaw-storage failed (MinIO may not be ready yet)"
 fi
 
 # =========================================================================
@@ -632,9 +640,20 @@ hb_users = [
     '@honeybadge-gateway:' + domain,
 ]
 
+# Workers must be allowed to send in group rooms so the Manager can receive
+# their completion messages and forward results to the user DM. Without this,
+# worker replies in group rooms are dropped by groupAllowFrom and
+# result-watcher never sees the completion signal.
+# Mirrors deploy/hiclaw/init-workers.sh which sets the same combined list
+# in the docker-compose flow; this keeps k8s parity with compose.
+workers = [
+    '@graph-worker:' + domain,
+    '@analytics-worker:' + domain,
+]
+
 channels = cfg.setdefault('channels', {}).setdefault('matrix', {})
 channels['dm'] = {'policy': 'allowlist', 'allowFrom': hb_users}
-channels['groupAllowFrom'] = hb_users
+channels['groupAllowFrom'] = hb_users + workers
 
 # Fix Manager LLM baseUrl (template generates http://:8080/v1 if HICLAW_AI_GATEWAY_DOMAIN unset)
 for name, p in cfg.get('models', {}).get('providers', {}).items():
