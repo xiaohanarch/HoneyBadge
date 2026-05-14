@@ -1,13 +1,46 @@
 # =============================================================================
-# HiClaw Manager — All-in-one supervisord container
-# Contains: Tuwunel Matrix, MinIO, Higress Gateway, Element Web, Manager Agent
+# HiClaw v1.1.0 — split topology (mirrors deploy/docker/docker-compose.yaml)
 #
-# DNS aliases: aigw-local.hiclaw.io and matrix-local.hiclaw.io are Docker
-# network aliases. In K8s, use the service names below or add CoreDNS rewrites:
+# v1.1.0 ships TWO container images:
+#   hiclaw-embedded:v1.1.0  — infra: Tuwunel Matrix + MinIO + Higress + Element
+#   hiclaw-manager:v1.1.0   — slim Manager Agent (supervisord removed)
+#
+# The legacy v1.0.9 all-in-one Pod is therefore split into two Deployments:
+#   hiclaw-embedded         — provides matrix/gateway/minio/element ports
+#   hiclaw-manager          — slim agent container (HICLAW_RUNTIME=k8s)
+#
+# DNS aliases used by workers / clients (unchanged from v1.0.9):
+#   aigw-local.hiclaw.io    → hiclaw-embedded:8080 (Higress)
+#   matrix-local.hiclaw.io  → hiclaw-embedded:6167 (Tuwunel)
+# The honeybadge namespace already adds CoreDNS rewrites:
 #   rewrite name aigw-local.hiclaw.io aigw-local-hiclaw-io.honeybadge.svc.cluster.local
 #   rewrite name matrix-local.hiclaw.io matrix-local-hiclaw-io.honeybadge.svc.cluster.local
+# Only the Service selectors change (they now select hiclaw-embedded).
 # =============================================================================
 
+# -----------------------------------------------------------------------------
+# Persistent volumes
+#
+# v1.0.9 had a single PVC for everything (MinIO + Tuwunel + manager state).
+# v1.1.0 splits that across the two Pods. The old PVC is kept under its
+# original name (hiclaw-manager-data) but downsized for slim manager state
+# (workers-registry.json + openclaw.json + dataset cache).
+# A new PVC (hiclaw-embedded-data) holds MinIO + Tuwunel persistent data.
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hiclaw-embedded-data
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-embedded
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -20,15 +53,18 @@ spec:
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
-      storage: 10Gi
+      storage: 2Gi
 ---
+# -----------------------------------------------------------------------------
+# HiClaw Embedded — Tuwunel + MinIO + Higress + Element Web
+# -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: hiclaw-manager
+  name: hiclaw-embedded
   namespace: honeybadge
   labels:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
     app.kubernetes.io/part-of: honeybadge
 spec:
   replicas: 1
@@ -36,59 +72,16 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: hiclaw-manager
+      app.kubernetes.io/name: hiclaw-embedded
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: hiclaw-manager
+        app.kubernetes.io/name: hiclaw-embedded
         app.kubernetes.io/part-of: honeybadge
     spec:
-      # ---------------------------------------------------------------------
-      # Layer 1 of the CRLF defense-in-depth strategy.
-      # ConfigMap volume mounts are read-only, so we can't `sed -i` them in
-      # place.  Instead:
-      #   1. Mount the raw ConfigMaps at /src/* in this initContainer.
-      #   2. Copy each file to an emptyDir volume, stripping CR bytes.
-      #   3. Main container mounts the emptyDir where the skills are expected.
-      # Guarantees that even if a developer commits a CRLF-tainted script
-      # (Layers 2+3 should prevent this), the runtime sees clean LF files.
-      # ---------------------------------------------------------------------
-      initContainers:
-        - name: normalize-skill-scripts
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              set -eu
-              normalize() {
-                  local src="$1" dst="$2"
-                  mkdir -p "$dst"
-                  for f in "$src"/*; do
-                      [ -f "$f" ] || continue
-                      local name="$(basename "$f")"
-                      # Strip CR, preserve permissions via chmod
-                      sed 's/\r$//' "$f" > "$dst/$name"
-                      chmod 0755 "$dst/$name"
-                  done
-                  echo "normalized $src -> $dst ($(ls -1 "$dst" | wc -l) files)"
-              }
-              normalize /src/fast-query     /dst/fast-query
-              normalize /src/erp-dispatch   /dst/erp-dispatch
-              echo "CRLF normalization complete."
-          volumeMounts:
-            - name: fast-query-skill-raw
-              mountPath: /src/fast-query
-              readOnly: true
-            - name: erp-dispatch-scripts-raw
-              mountPath: /src/erp-dispatch
-              readOnly: true
-            - name: normalized-scripts
-              mountPath: /dst
       containers:
-        - name: hiclaw-manager
-          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.0.9
-          command: ["/bin/bash", "/opt/honeybadge/init/entrypoint-wrapper.sh"]
+        - name: hiclaw-embedded
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.0
           env:
             - name: HICLAW_ADMIN_USER
               valueFrom:
@@ -100,36 +93,22 @@ spec:
                 secretKeyRef:
                   name: honeybadge-secrets
                   key: HICLAW_ADMIN_PASSWORD
-            - name: HICLAW_MATRIX_DOMAIN
-              value: "matrix-local.hiclaw.io"
             - name: HICLAW_REGISTRATION_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: honeybadge-secrets
                   key: HICLAW_REGISTRATION_TOKEN
-            - name: HICLAW_LLM_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: honeybadge-secrets
-                  key: LLM_API_KEY
-            - name: HICLAW_LLM_PROVIDER
-              value: "openai-compat"
-            - name: HICLAW_OPENAI_BASE_URL
-              value: "https://api.minimaxi.com/v1"
-            - name: HICLAW_AI_GATEWAY_SERVER
-              value: "aigw-local.hiclaw.io"
-            - name: HICLAW_DEFAULT_MODEL
-              value: "MiniMax-M2.7-highspeed"
-            # Disable memory search — MiniMax/DashScope gateway has no embedding
-            # endpoint, so HiClaw's default text-embedding-v4 produces an
-            # "Invalid URL" TypeError that aborts the agent before any LLM call.
-            # hiclaw-env.sh uses ${VAR-default}, so explicit empty string wins.
-            - name: HICLAW_EMBEDDING_MODEL
-              value: ""
+            - name: HICLAW_MATRIX_DOMAIN
+              value: "matrix-local.hiclaw.io"
+            # Bind Higress gateway on LAN (cluster-internal). Workers and the
+            # manager reach it via aigw-local.hiclaw.io ClusterIP Service.
+            - name: HICLAW_GATEWAY_BIND
+              value: "lan"
+            # Auto-join @manager to skill-defined DM rooms.
+            - name: HICLAW_MATRIX_AUTOJOIN
+              value: "always"
             - name: TZ
               value: "Asia/Shanghai"
-            - name: NODE_OPTIONS
-              value: "--max-old-space-size=3072"
           ports:
             - containerPort: 6167
               name: matrix
@@ -152,11 +131,181 @@ spec:
             failureThreshold: 10
           resources:
             requests:
-              memory: "2Gi"
+              memory: "1500Mi"
               cpu: "500m"
             limits:
-              memory: "4Gi"
+              memory: "3Gi"
               cpu: "2"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hiclaw-embedded-data
+---
+# -----------------------------------------------------------------------------
+# HiClaw Manager — slim agent (v1.1.0 drops supervisord)
+#
+# The agent runs as PID 1 (HICLAW_RUNTIME=k8s mode). It connects out to
+# Tuwunel + MinIO + Higress via the hiclaw-embedded Pod. ConfigMap-mounted
+# skill scripts are CRLF-normalized by an initContainer to defend against
+# accidental Windows line endings (Layer 1 of the CRLF defense-in-depth).
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hiclaw-manager
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hiclaw-manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hiclaw-manager
+        app.kubernetes.io/part-of: honeybadge
+    spec:
+      initContainers:
+        # CRLF normalization — see manager.yaml (v1.0.9) for full rationale.
+        - name: normalize-skill-scripts
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              normalize() {
+                  local src="$1" dst="$2"
+                  mkdir -p "$dst"
+                  for f in "$src"/*; do
+                      [ -f "$f" ] || continue
+                      local name="$(basename "$f")"
+                      sed 's/\r$//' "$f" > "$dst/$name"
+                      chmod 0755 "$dst/$name"
+                  done
+                  echo "normalized $src -> $dst ($(ls -1 "$dst" | wc -l) files)"
+              }
+              normalize /src/fast-query     /dst/fast-query
+              normalize /src/erp-dispatch   /dst/erp-dispatch
+              echo "CRLF normalization complete."
+          volumeMounts:
+            - name: fast-query-skill-raw
+              mountPath: /src/fast-query
+              readOnly: true
+            - name: erp-dispatch-scripts-raw
+              mountPath: /src/erp-dispatch
+              readOnly: true
+            - name: normalized-scripts
+              mountPath: /dst
+        # Wait for hiclaw-embedded (MinIO) to come up before starting the
+        # manager agent — entrypoint-wrapper.sh assumes MinIO is reachable.
+        - name: wait-for-embedded
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - 'until wget -q --spider http://hiclaw-embedded:9000/minio/health/live; do echo "Waiting for hiclaw-embedded MinIO..."; sleep 5; done; echo "hiclaw-embedded is ready."'
+      containers:
+        - name: hiclaw-manager
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.0
+          command: ["/bin/bash", "/opt/honeybadge/init/entrypoint-wrapper.sh"]
+          env:
+            # k8s runtime mode: start-manager-agent.sh acts as PID 1. The
+            # entrypoint-wrapper below still runs manager-init-internal.sh to
+            # register @manager / patch DM allowlists / push configs to MinIO.
+            - name: HICLAW_RUNTIME
+              value: "k8s"
+            - name: HICLAW_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_USER
+            - name: HICLAW_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_PASSWORD
+            - name: HICLAW_MATRIX_DOMAIN
+              value: "matrix-local.hiclaw.io"
+            # Full URL to Tuwunel (k8s mode requires this with :? hard check).
+            - name: HICLAW_MATRIX_URL
+              value: "http://matrix-local.hiclaw.io:6167"
+            - name: HICLAW_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_REGISTRATION_TOKEN
+            # @manager login password (k8s mode hard-required, must be >=8 chars).
+            - name: HICLAW_MANAGER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_MANAGER_PASSWORD
+            # Gateway key for openclaw.json + Higress consumer (k8s mode hard-required).
+            - name: HICLAW_MANAGER_GATEWAY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_MANAGER_GATEWAY_KEY
+            # Production k8s ALWAYS uses real Higress (no WSL2 bypass needed).
+            - name: HICLAW_DEV_GATEWAY
+              value: "higress"
+            - name: HICLAW_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: LLM_API_KEY
+            - name: HICLAW_LLM_PROVIDER
+              value: "openai-compat"
+            - name: HICLAW_OPENAI_BASE_URL
+              value: "https://api.minimaxi.com/v1"
+            # v1.1.0 template variables (renamed from HICLAW_AI_GATEWAY_SERVER):
+            #   HICLAW_AI_GATEWAY_DOMAIN — used by manager-openclaw.json.tmpl
+            #   HICLAW_AI_GATEWAY_URL    — k8s mode validation, full URL form
+            - name: HICLAW_AI_GATEWAY_DOMAIN
+              value: "aigw-local.hiclaw.io"
+            - name: HICLAW_AI_GATEWAY_URL
+              value: "http://aigw-local.hiclaw.io:8080"
+            # MinIO endpoint moved from in-Pod localhost to hiclaw-embedded Service.
+            - name: HICLAW_FS_ENDPOINT
+              value: "http://hiclaw-embedded:9000"
+            - name: HICLAW_FS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_USER
+            - name: HICLAW_FS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: HICLAW_ADMIN_PASSWORD
+            - name: HICLAW_DEFAULT_MODEL
+              value: "MiniMax-M2.7-highspeed"
+            # Disable memorySearch (LOAD-BEARING — see docs/1.1.0-upgrade-followups.md
+            # Bucket 1 Q4). hiclaw-env.sh uses ${VAR-default} (single dash), so an
+            # explicit empty string is the only way to opt out of the broken
+            # text-embedding-v4 default that aborts the agent on first chat call.
+            - name: HICLAW_EMBEDDING_MODEL
+              value: ""
+            - name: TZ
+              value: "Asia/Shanghai"
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=3072"
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "300m"
+            limits:
+              memory: "2Gi"
+              cpu: "1500m"
           volumeMounts:
             - name: data
               mountPath: /data
@@ -212,33 +361,37 @@ spec:
         - name: agent-configs
           configMap:
             name: hiclaw-agent-configs
-        # Raw ConfigMaps consumed by the initContainer only.
         - name: fast-query-skill-raw
           configMap:
             name: hiclaw-fast-query-skill
         - name: erp-dispatch-scripts-raw
           configMap:
             name: hiclaw-erp-dispatch-scripts
-        # Writable scratch space for the CRLF-normalized skill scripts.
         - name: normalized-scripts
           emptyDir: {}
         - name: mcporter-config
           configMap:
             name: hiclaw-mcporter-config
 ---
-# Main service — all ports
+# -----------------------------------------------------------------------------
+# Services
+#
+# All infra ports are now backed by the hiclaw-embedded Pod. The legacy
+# hiclaw-manager Service is preserved (no ports) only for label-based
+# observability/queries; nothing in this repo connects to it.
+# -----------------------------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
-  name: hiclaw-manager
+  name: hiclaw-embedded
   namespace: honeybadge
   labels:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
     app.kubernetes.io/part-of: honeybadge
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
   ports:
     - name: matrix
       port: 6167
@@ -259,56 +412,55 @@ spec:
       port: 18888
       targetPort: 18888
 ---
-# DNS alias: aigw-local.hiclaw.io → hiclaw-manager:8080
+# DNS alias: aigw-local.hiclaw.io -> hiclaw-embedded:8080
 apiVersion: v1
 kind: Service
 metadata:
   name: aigw-local-hiclaw-io
   namespace: honeybadge
   labels:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
     app.kubernetes.io/part-of: honeybadge
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
   ports:
     - name: gateway
       port: 8080
       targetPort: 8080
 ---
-# DNS alias: matrix-local.hiclaw.io → hiclaw-manager:6167
+# DNS alias: matrix-local.hiclaw.io -> hiclaw-embedded:6167
 apiVersion: v1
 kind: Service
 metadata:
   name: matrix-local-hiclaw-io
   namespace: honeybadge
   labels:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
     app.kubernetes.io/part-of: honeybadge
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
   ports:
     - name: matrix
       port: 6167
       targetPort: 6167
 ---
 # External access: Matrix (Tuwunel) on NodePort 30167
-# Browser connects to ws://ECS_IP:30167 via matrix-js-sdk
 apiVersion: v1
 kind: Service
 metadata:
   name: hiclaw-matrix-nodeport
   namespace: honeybadge
   labels:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
     app.kubernetes.io/part-of: honeybadge
 spec:
   type: NodePort
   selector:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
   ports:
     - name: matrix
       port: 6167
@@ -322,14 +474,34 @@ metadata:
   name: hiclaw-element-nodeport
   namespace: honeybadge
   labels:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
     app.kubernetes.io/part-of: honeybadge
 spec:
   type: NodePort
   selector:
-    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/name: hiclaw-embedded
   ports:
     - name: element
       port: 18888
       targetPort: 18888
       nodePort: 30888
+---
+# Slim hiclaw-manager Service — kept for label-based observability only.
+# v1.1.0 manager exposes no HTTP ports; clients should not connect here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hiclaw-manager
+  namespace: honeybadge
+  labels:
+    app.kubernetes.io/name: hiclaw-manager
+    app.kubernetes.io/part-of: honeybadge
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: hiclaw-manager
+  ports:
+    - name: placeholder
+      port: 1
+      targetPort: 1

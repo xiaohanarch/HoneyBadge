@@ -23,8 +23,11 @@ spec:
           ports:
             - containerPort: 8091
           env:
+            # v1.1.0 split topology: Tuwunel lives on hiclaw-embedded.
+            # Use the canonical DNS alias Service (matrix-local-hiclaw-io) so this
+            # value is identical across docker compose, k3s, and ECS deployments.
             - name: TUWUNEL_URL
-              value: "http://hiclaw-manager:6167"
+              value: "http://matrix-local.hiclaw.io:6167"
             - name: MATRIX_DOMAIN
               value: "matrix-local.hiclaw.io"
             - name: HICLAW_REGISTRATION_TOKEN

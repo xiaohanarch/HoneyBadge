@@ -25,13 +25,14 @@ spec:
     spec:
       containers:
         - name: graph-worker
-          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.9
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
           command: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
           env:
             - name: HICLAW_WORKER_NAME
               value: "graph-worker"
+            # v1.1.0 split topology: MinIO moved from manager Pod to embedded Pod
             - name: HICLAW_FS_ENDPOINT
-              value: "http://hiclaw-manager:9000"
+              value: "http://hiclaw-embedded:9000"
             - name: HICLAW_FS_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
@@ -94,13 +95,14 @@ spec:
     spec:
       containers:
         - name: analytics-worker
-          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.0.9
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
           command: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
           env:
             - name: HICLAW_WORKER_NAME
               value: "analytics-worker"
+            # v1.1.0 split topology: MinIO moved from manager Pod to embedded Pod
             - name: HICLAW_FS_ENDPOINT
-              value: "http://hiclaw-manager:9000"
+              value: "http://hiclaw-embedded:9000"
             - name: HICLAW_FS_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
