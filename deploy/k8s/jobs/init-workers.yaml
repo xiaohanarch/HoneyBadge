@@ -33,10 +33,43 @@ spec:
               set -e
               echo "Verifying MinIO worker configs..."
               mc alias set hiclaw http://hiclaw-embedded:9000 ${HICLAW_ADMIN_USER} ${HICLAW_ADMIN_PASSWORD}
-              mc ls hiclaw/hiclaw-storage/agents/ || {
-                echo "ERROR: Worker configs not found in MinIO"
+
+              # Bucket must exist (manager-init-internal.sh creates it idempotently,
+              # but verify here in case the manager Pod hasn't completed Step 1 yet).
+              if ! mc ls hiclaw/hiclaw-storage >/dev/null 2>&1; then
+                echo "ERROR: hiclaw-storage bucket not found in embedded MinIO"
+                echo "  hint: manager-init-internal.sh should create it via 'mc mb --ignore-existing'"
                 exit 1
-              }
+              fi
+
+              # Verify each expected agent has its canonical configs uploaded.
+              # manager: openclaw.json + SOUL.md + AGENTS.md + workers-registry.json
+              # workers: openclaw.json + SOUL.md + AGENTS.md
+              missing=0
+              for path in \
+                  agents/manager/openclaw.json \
+                  agents/manager/SOUL.md \
+                  agents/manager/AGENTS.md \
+                  agents/graph-worker/openclaw.json \
+                  agents/graph-worker/SOUL.md \
+                  agents/graph-worker/AGENTS.md \
+                  agents/analytics-worker/openclaw.json \
+                  agents/analytics-worker/SOUL.md \
+                  agents/analytics-worker/AGENTS.md ; do
+                if mc stat "hiclaw/hiclaw-storage/${path}" >/dev/null 2>&1; then
+                  echo "  ok: ${path}"
+                else
+                  echo "  MISSING: ${path}"
+                  missing=$((missing + 1))
+                fi
+              done
+
+              if [ "$missing" -gt 0 ]; then
+                echo "ERROR: ${missing} agent config(s) missing in MinIO"
+                echo "  hint: check hiclaw-manager Pod logs — manager-init-internal.sh"
+                echo "        should populate these on every startup"
+                exit 1
+              fi
               echo "Worker initialization verified successfully"
           env:
             - name: HICLAW_ADMIN_USER
