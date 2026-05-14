@@ -199,7 +199,7 @@ fi
 log "Step 2: Registering workers..."
 
 REG_TOKEN="${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}"
-DEFAULT_MODEL="${HICLAW_DEFAULT_MODEL:-qwen3-coder-plus}"
+DEFAULT_MODEL="${HICLAW_DEFAULT_MODEL:-glm-5}"
 WORKER_CREDS_DIR="/data/worker-creds"
 mkdir -p "$WORKER_CREDS_DIR"
 
@@ -361,7 +361,7 @@ if not os.path.exists(cfg_path):
 with open(cfg_path) as f:
     cfg = json.load(f)
 
-model_name = os.environ.get('HICLAW_DEFAULT_MODEL', 'qwen3-coder-plus')
+model_name = os.environ.get('HICLAW_DEFAULT_MODEL', 'glm-5')
 changed = False
 
 providers = cfg.get('models', {}).get('providers', {})
@@ -449,10 +449,13 @@ else:
 done
 
 # =========================================================================
-# Step 2c: Ensure Higress LLM route for DashScope/MiniMax exists
+# Step 2c: Ensure Higress LLM route for Aliyun Bailian (DashScope) exists
 #
 # setup-higress.sh creates an auto-generated route at / with NO API key.
-# We create a more-specific route at /v1/ that injects the real API key.
+# We create a more-specific route at /v1/ that injects the real API key
+# and rewrites the Host header so the openai-compat.dns upstream
+# (coding.dashscope.aliyuncs.com:443 per the default McpBridge registry)
+# accepts the request with the right vhost.
 #
 # DEV ONLY: skipped when HICLAW_DEV_GATEWAY=nginx-bypass — the bypass
 # nginx (hiclaw-aigw-bypass) handles /v1/* directly. Production k3s
@@ -465,8 +468,10 @@ else
 
     HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
 
-    # Determine the LLM host for the Host header from the base URL
-    LLM_HOST="${HICLAW_OPENAI_BASE_URL:-https://api.minimaxi.com/v1}"
+    # Determine the LLM host for the Host header from the base URL.
+    # Default falls back to Aliyun Bailian (DashScope) coding endpoint,
+    # matching the McpBridge openai-compat upstream registered by Higress.
+    LLM_HOST="${HICLAW_OPENAI_BASE_URL:-https://coding.dashscope.aliyuncs.com/v1}"
     # Extract hostname from URL (strip protocol and path)
     LLM_HOST=$(echo "$LLM_HOST" | sed -E 's|^https?://||; s|/.*||')
 

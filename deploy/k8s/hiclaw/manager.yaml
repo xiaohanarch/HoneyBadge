@@ -265,8 +265,12 @@ spec:
                   key: LLM_API_KEY
             - name: HICLAW_LLM_PROVIDER
               value: "openai-compat"
+            # Aliyun Bailian (DashScope) coding endpoint. manager-init-internal.sh
+            # Step 2c extracts the hostname and rewrites the Higress route's
+            # Host header to match, so the McpBridge openai-compat.dns upstream
+            # (coding.dashscope.aliyuncs.com:443) reaches the right vhost.
             - name: HICLAW_OPENAI_BASE_URL
-              value: "https://api.minimaxi.com/v1"
+              value: "https://coding.dashscope.aliyuncs.com/v1"
             # v1.1.0 template variables (renamed from HICLAW_AI_GATEWAY_SERVER):
             #   HICLAW_AI_GATEWAY_DOMAIN — used by manager-openclaw.json.tmpl
             #   HICLAW_AI_GATEWAY_URL    — k8s mode validation, full URL form
@@ -288,7 +292,7 @@ spec:
                   name: honeybadge-secrets
                   key: HICLAW_ADMIN_PASSWORD
             - name: HICLAW_DEFAULT_MODEL
-              value: "MiniMax-M2.7-highspeed"
+              value: "glm-5"
             # Disable memorySearch (LOAD-BEARING — see docs/1.1.0-upgrade-followups.md
             # Bucket 1 Q4). hiclaw-env.sh uses ${VAR-default} (single dash), so an
             # explicit empty string is the only way to opt out of the broken
