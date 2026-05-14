@@ -251,7 +251,12 @@ for worker in graph-worker analytics-worker; do
     # Fresh registration path
     GEN_PWD=$(openssl rand -base64 24 | tr -d '=+/' | head -c 32)
     REG_BODY="{\"username\":\"${worker}\",\"password\":\"${GEN_PWD}\",\"auth\":{\"type\":\"m.login.registration_token\",\"token\":\"${REG_TOKEN}\"}}"
-    REG_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/register" \
+    # NOTE: use -s (silent), NOT -sf. -f makes curl drop the response body on
+    # HTTP 4xx, which silently swallows Matrix's {"errcode":"M_USER_IN_USE"}
+    # on second boot — so the login fallback below never fires and we end up
+    # provisioning a worker with no Matrix token. -s without -f preserves the
+    # body so the M_USER_IN_USE grep + python json parse below both work.
+    REG_RESULT=$(curl -s -X POST "${MATRIX_URL}/_matrix/client/v3/register" \
         -H 'Content-Type: application/json' -d "$REG_BODY" 2>&1) || true
 
     WORKER_TOKEN=$(echo "$REG_RESULT" | python3 -c '
@@ -272,7 +277,9 @@ except Exception:
             EXISTING_PWD=$(. "${WORKER_CREDS_DIR}/${worker}.env" 2>/dev/null && echo "$WORKER_PASSWORD")
             if [ -n "$EXISTING_PWD" ]; then
                 LOGIN_BODY="{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${worker}\"},\"password\":\"${EXISTING_PWD}\"}"
-                LOGIN_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/login" \
+                # -s (not -sf): keep 4xx body so a wrong-password failure surfaces
+                # in the warn at the bottom of this block instead of being silent.
+                LOGIN_RESULT=$(curl -s -X POST "${MATRIX_URL}/_matrix/client/v3/login" \
                     -H 'Content-Type: application/json' -d "$LOGIN_BODY" 2>&1) || true
                 WORKER_TOKEN=$(echo "$LOGIN_RESULT" | python3 -c '
 import json, sys
@@ -302,7 +309,10 @@ except Exception:
     # Idempotent: skip if we already have a persisted WORKER_ROOM_ID.
     if [ -z "$WORKER_ROOM_ID" ]; then
         ROOM_BODY="{\"preset\":\"trusted_private_chat\",\"invite\":[\"${MANAGER_MXID}\"],\"is_direct\":true,\"name\":\"manager-${worker}\"}"
-        ROOM_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/createRoom" \
+        # -s (not -sf): keep 4xx error body so a permission/rate-limit failure
+        # is logged via the warn at the end of this block instead of silently
+        # leaving the registry without a room_id.
+        ROOM_RESULT=$(curl -s -X POST "${MATRIX_URL}/_matrix/client/v3/createRoom" \
             -H "Authorization: Bearer $WORKER_TOKEN" \
             -H 'Content-Type: application/json' \
             -d "$ROOM_BODY" 2>&1) || ROOM_RESULT=""
@@ -379,7 +389,8 @@ except Exception:
         HEAL_PWD=$(. "${WORKER_CREDS_DIR}/${worker}.env" 2>/dev/null && echo "$WORKER_PASSWORD")
         if [ -n "$HEAL_PWD" ]; then
             HEAL_LOGIN_BODY="{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${worker}\"},\"password\":\"${HEAL_PWD}\"}"
-            HEAL_LOGIN_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/login" \
+            # -s (not -sf): see register-call note above; preserve 4xx body.
+            HEAL_LOGIN_RESULT=$(curl -s -X POST "${MATRIX_URL}/_matrix/client/v3/login" \
                 -H 'Content-Type: application/json' -d "$HEAL_LOGIN_BODY" 2>&1) || HEAL_LOGIN_RESULT=""
             HEAL_TOKEN=$(echo "$HEAL_LOGIN_RESULT" | python3 -c '
 import json, sys
@@ -390,7 +401,8 @@ except Exception:
 ' 2>/dev/null || echo "")
             if [ -n "$HEAL_TOKEN" ]; then
                 ROOM_BODY="{\"preset\":\"trusted_private_chat\",\"invite\":[\"${MANAGER_MXID}\"],\"is_direct\":true,\"name\":\"manager-${worker}\"}"
-                ROOM_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/createRoom" \
+                # -s (not -sf): see register-call note above; preserve 4xx body.
+                ROOM_RESULT=$(curl -s -X POST "${MATRIX_URL}/_matrix/client/v3/createRoom" \
                     -H "Authorization: Bearer $HEAL_TOKEN" \
                     -H 'Content-Type: application/json' \
                     -d "$ROOM_BODY" 2>&1) || ROOM_RESULT=""
