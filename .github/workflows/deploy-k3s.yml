@@ -120,7 +120,60 @@ jobs:
               honeybadge-cache-mcp=${REGISTRY}/${NAMESPACE}/honeybadge-cache-mcp:${TAG} \
               honeybadge-frontend=${REGISTRY}/${NAMESPACE}/honeybadge-frontend:${TAG}
 
-            kustomize build --load-restrictor=LoadRestrictionsNone . | kubectl apply -f -
+            # Build manifest to a temp file so we can apply v1.0.9→v1.1.0
+            # migration shims (immutable-field skips) before kubectl apply.
+            MANIFEST_FILE=$(mktemp /tmp/honeybadge-manifest-XXXXXX.yaml)
+            kustomize build --load-restrictor=LoadRestrictionsNone . > "$MANIFEST_FILE"
+
+            # ── 4a. v1.0.9 → v1.1.0 immutable-field migration shims ─────────
+            # PR #69 split the all-in-one v1.0.9 topology into separate Manager
+            # and Embedded Deployments. Two pre-existing resources end up with
+            # immutable fields whose new value can't be patched in place:
+            #
+            #   1. Service/hiclaw-manager
+            #      v1.0.9: ClusterIP with real ports (forward to Tuwunel + MinIO).
+            #      v1.1.0: headless (clusterIP=None) placeholder; ports moved
+            #              to the new Service/hiclaw-embedded.
+            #      spec.clusterIPs[0] is immutable, so we delete the old Service
+            #      and let apply recreate it. Safe — it's a placeholder with
+            #      port:1/targetPort:1 and no associated state.
+            #
+            #   2. PVC/hiclaw-manager-data
+            #      v1.0.9: large PVC (held MinIO + Tuwunel + manager state).
+            #      v1.1.0: 2 GiB (manager state only; MinIO/Tuwunel moved to
+            #              hiclaw-embedded-data).
+            #      spec.resources.requests.storage cannot decrease, so if the
+            #      PVC already exists we skip applying it (it stays bound to
+            #      its over-provisioned PV — functional, just wasteful). The
+            #      PVC holds /data/hiclaw-secrets.env which the running pod
+            #      relies on; deleting it would regenerate HICLAW_MANAGER_PASSWORD
+            #      and break @manager Matrix login. Skip > delete here.
+            EXISTING_MGR_SVC_IP=$(kubectl -n $NAMESPACE get svc hiclaw-manager \
+              -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
+            if [ -n "$EXISTING_MGR_SVC_IP" ] && [ "$EXISTING_MGR_SVC_IP" != "None" ]; then
+              echo "[migration] Service/hiclaw-manager has v1.0.9 ClusterIP=$EXISTING_MGR_SVC_IP; deleting before apply (will be recreated as headless)"
+              kubectl -n $NAMESPACE delete svc hiclaw-manager
+            fi
+
+            if kubectl -n $NAMESPACE get pvc hiclaw-manager-data >/dev/null 2>&1; then
+              EXISTING_PVC_CAP=$(kubectl -n $NAMESPACE get pvc hiclaw-manager-data \
+                -o jsonpath='{.status.capacity.storage}' 2>/dev/null || echo "?")
+              echo "[migration] PVC/hiclaw-manager-data already bound (capacity=$EXISTING_PVC_CAP); stripping from manifest (storage shrink forbidden)"
+              # kustomize emits YAML stream docs separated by lines of "---".
+              # awk RS splits on the literal "\n---\n" separator between docs;
+              # we drop any record matching both `kind: PersistentVolumeClaim`
+              # and `name: hiclaw-manager-data` and rejoin the kept records.
+              awk 'BEGIN{RS="\n---\n"; first=1}
+                   !(($0 ~ /(^|\n)kind: PersistentVolumeClaim(\n|$)/) && ($0 ~ /name: hiclaw-manager-data/)) {
+                     if (first) { first=0 } else { printf "\n---\n" }
+                     printf "%s", $0
+                   }
+                   END { printf "\n" }' "$MANIFEST_FILE" > "${MANIFEST_FILE}.filtered"
+              mv "${MANIFEST_FILE}.filtered" "$MANIFEST_FILE"
+            fi
+
+            kubectl apply -f "$MANIFEST_FILE"
+            rm -f "$MANIFEST_FILE"
 
             # ── 5. Wait for rollout ───────────────────────────────────────────
             echo "=== Waiting for stateful services ==="
