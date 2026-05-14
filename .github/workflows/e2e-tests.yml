@@ -40,6 +40,48 @@ jobs:
             image=moby/buildkit:buildx-stable-1
             network=host
 
+      - name: Materialize deploy/docker/.env from template + CI secrets
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          set -euo pipefail
+          cd deploy/docker
+          if [ -z "${LLM_API_KEY:-}" ]; then
+            echo "::warning::secrets.LLM_API_KEY is unset - LLM-dependent tests (TC-102 etc.) will fail."
+            LLM_API_KEY="ci-no-llm-key"
+          fi
+          # Start from the committed template, then override only the values
+          # that must differ in CI (real LLM key + randomized internal secrets).
+          cp .env.example .env
+          export LLM_API_KEY
+          export JWT_SECRET="$(openssl rand -hex 32)"
+          export HICLAW_MANAGER_PASSWORD="$(openssl rand -hex 16)"
+          export HICLAW_MANAGER_GATEWAY_KEY="$(openssl rand -hex 16)"
+          python3 <<'PY'
+          import os, pathlib
+          p = pathlib.Path('.env')
+          overrides = {k: os.environ[k] for k in (
+              'LLM_API_KEY', 'JWT_SECRET',
+              'HICLAW_MANAGER_PASSWORD', 'HICLAW_MANAGER_GATEWAY_KEY',
+          )}
+          out, seen = [], set()
+          for line in p.read_text().splitlines():
+              if '=' in line and not line.lstrip().startswith('#'):
+                  key = line.split('=', 1)[0].strip()
+                  if key in overrides:
+                      out.append(f"{key}={overrides[key]}")
+                      seen.add(key)
+                      continue
+              out.append(line)
+          for k, v in overrides.items():
+              if k not in seen:
+                  out.append(f"{k}={v}")
+          p.write_text("\n".join(out) + "\n")
+          PY
+          echo "=== .env keys materialized ==="
+          grep -v '^#' .env | grep -v '^$' | sed 's/=.*/=<redacted>/'
+        timeout-minutes: 1
+
       - name: Start core services
         run: |
           cd deploy/docker
