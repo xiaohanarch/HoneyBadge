@@ -1,0 +1,96 @@
+name: E2E Tests on ECS
+
+# Triggers the live ECS k3s cluster to execute the full pytest e2e suite
+# via SSH + run-e2e-ecs.sh. Use this to validate end-to-end behavior
+# against the actual deployed stack rather than docker-compose on a
+# GitHub-hosted runner (which is what `E2E Tests` does for PR validation).
+#
+# This workflow is dispatch-only — it is never auto-triggered. Run via:
+#   gh workflow run "E2E Tests on ECS" --ref <branch>
+# or the GitHub UI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_target:
+        description: 'pytest target (default: full suite)'
+        required: false
+        default: 'tests/e2e/'
+      ref:
+        description: 'Git ref to sync /root/HoneyBadge to on ECS (default: master)'
+        required: false
+        default: 'master'
+
+jobs:
+  run-e2e-on-ecs:
+    name: Run pytest e2e on ECS k3s
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+
+    steps:
+      - name: SSH to ECS, sync repo, run e2e
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          command_timeout: 90m
+          script: |
+            set -e
+
+            REF="${{ github.event.inputs.ref }}"
+            TARGET="${{ github.event.inputs.test_target }}"
+            REPO_DIR="/root/HoneyBadge"
+
+            echo "=== Syncing $REPO_DIR to $REF ==="
+            if [ -d "$REPO_DIR/.git" ]; then
+              cd "$REPO_DIR"
+              git fetch origin
+              git checkout "$REF"
+              git reset --hard "origin/$REF"
+            else
+              git clone -b "$REF" https://github.com/${{ github.repository }}.git "$REPO_DIR"
+              cd "$REPO_DIR"
+            fi
+            echo "HEAD: $(git log --oneline -1)"
+
+            # Ensure pytest deps are installed on the ECS host. Idempotent —
+            # pip skips already-satisfied packages. Use system pip3 since the
+            # ECS host doesn't run anything in a venv.
+            echo "=== Ensuring pytest deps on ECS host ==="
+            pip3 install --quiet \
+              pytest pytest-timeout pytest-playwright httpx docker redis python-dotenv \
+              || { echo "pip3 install failed"; exit 1; }
+
+            # chromium for playwright (idempotent — playwright check first)
+            python3 -m playwright install chromium --with-deps 2>&1 | tail -5 || true
+
+            # Run the existing ECS test harness. It handles:
+            #   - port-forwarding honeybadge-server/auth to localhost
+            #   - waiting for Traefik frontend on 8.130.95.169
+            #   - pytest with --junitxml=/root/e2e-junit.xml
+            #   - log to /root/e2e-results.log
+            chmod +x run-e2e-ecs.sh
+            echo "=== Launching run-e2e-ecs.sh with target=$TARGET ==="
+            bash run-e2e-ecs.sh "$TARGET" || E2E_EXIT=$?
+            E2E_EXIT="${E2E_EXIT:-0}"
+
+            echo ""
+            echo "=========================================="
+            echo "=== E2E LOG TAIL (last 200 lines) ======="
+            echo "=========================================="
+            tail -200 /root/e2e-results.log || true
+
+            echo ""
+            echo "=========================================="
+            echo "=== pytest summary ======================"
+            echo "=========================================="
+            # Extract pytest's own summary line (e.g. "5 failed, 80 passed in 1234s")
+            grep -E "^=+.*passed|^=+.*failed|^=+.*error" /root/e2e-results.log | tail -5 || true
+
+            echo ""
+            echo "Full log on ECS host: /root/e2e-results.log"
+            echo "JUnit XML on ECS host: /root/e2e-junit.xml"
+            echo "E2E exit code: $E2E_EXIT"
+            exit "$E2E_EXIT"
