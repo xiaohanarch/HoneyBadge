@@ -120,13 +120,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Split tests into parallel chunks
-        chunk: [1, 2, 3]
-        exclude:
-          - chunk: 2
-          - chunk: 3
-          - chunk: 1
-            chunk: 3
+        # Chunk dimension is unused by the steps below; keep a single chunk so
+        # the job runs once. (Previous exclude block had a duplicate-key YAML
+        # error that blocked all dispatches - see PR fix-e2e-workflow-yaml.)
+        chunk: [1]
 
     steps:
       - name: Checkout
