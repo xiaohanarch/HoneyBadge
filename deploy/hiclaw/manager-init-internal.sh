@@ -204,11 +204,18 @@ WORKER_CREDS_DIR="/data/worker-creds"
 mkdir -p "$WORKER_CREDS_DIR"
 
 for worker in graph-worker analytics-worker; do
-    # Idempotency: skip if MinIO already has the worker config
+    # Idempotency: skip fresh Matrix registration + config generation if
+    # MinIO already has the worker config. We deliberately do NOT `continue`
+    # here — the workers-registry.json refresh at the end of this loop must
+    # run on every boot, otherwise the registry stays {"workers": {}} after
+    # the first successful provisioning and Manager forgets its team.
+    NEEDS_FRESH_REGISTRATION=true
     if mc stat "hiclaw/hiclaw-storage/agents/$worker/openclaw.json" >/dev/null 2>&1; then
-        log "  $worker already registered (openclaw.json in MinIO) — skipping"
-        continue
+        log "  $worker openclaw.json already in MinIO — skipping fresh registration"
+        NEEDS_FRESH_REGISTRATION=false
     fi
+
+    if [ "$NEEDS_FRESH_REGISTRATION" = "true" ]; then
 
     log "  Registering $worker on Matrix..."
 
@@ -296,7 +303,13 @@ except Exception:
         && log "  $worker password persisted to MinIO" \
         || warn "  Failed to persist $worker password to MinIO"
 
-    # Update workers-registry.json (Manager reads this to know its team)
+    fi  # end NEEDS_FRESH_REGISTRATION
+
+    # Update workers-registry.json (Manager reads this to know its team).
+    # Runs unconditionally on every boot — the jq merge preserves the
+    # original registered_at timestamp if it already exists, so this is
+    # safe to repeat. Without this, the registry never gets populated when
+    # MinIO already has the worker config (idempotent restart case).
     if [ -f "$REGISTRY_FILE" ]; then
         TMP_REG=$(mktemp)
         if jq --arg name "$worker" \
@@ -309,11 +322,11 @@ except Exception:
                   "deployment": "local",
                   "role": "worker",
                   "skills": ["file-sync", "mcporter"],
-                  "registered_at": $ts
+                  "registered_at": (.workers[$name].registered_at // $ts)
               } | .updated_at = $ts' \
               "$REGISTRY_FILE" > "$TMP_REG"; then
             mv "$TMP_REG" "$REGISTRY_FILE"
-            log "  $worker added to workers-registry.json"
+            log "  $worker present in workers-registry.json"
         else
             rm -f "$TMP_REG"
             warn "  Failed to update workers-registry.json for $worker"
@@ -400,6 +413,23 @@ if hs and ':8080' in hs and 'matrix-local.hiclaw.io' in hs:
     matrix_cfg['homeserver'] = fixed
     print('Fixed Matrix homeserver port: ' + hs + ' -> ' + fixed)
     changed = True
+
+# Allow plain http:// to matrix-local.hiclaw.io. The worker's matrix client
+# (matrix-rust-sdk) rejects http:// unless the homeserver host is in private
+# or loopback space. It checks the hostname STRING, not the resolved IP,
+# so a private ClusterIP behind a .io hostname still fails the check.
+# HiClaw's manager template already sets this flag (see
+# /opt/hiclaw/configs/manager-openclaw.json.tmpl), but generate-worker-config.sh
+# does not propagate it to workers. Mirror manager behavior here.
+if matrix_cfg:
+    network = matrix_cfg.get('network')
+    if not isinstance(network, dict):
+        network = {}
+    if not network.get('dangerouslyAllowPrivateNetwork'):
+        network['dangerouslyAllowPrivateNetwork'] = True
+        matrix_cfg['network'] = network
+        print('Enabled matrix.network.dangerouslyAllowPrivateNetwork=true')
+        changed = True
 
 # Context pruning + concurrent boost (performance optimization)
 if 'agents' not in cfg:
@@ -673,7 +703,7 @@ for p in cfg.get('models', {}).get('providers', {}).values():
         if m.pop('reasoning', None) is not None:
             print('Removed reasoning:true from ' + m.get('id', ''))
 
-# Note: the v1.0.x `pop('memorySearch')` workaround was removed in v1.1.0.
+# Note: the v1.0.x memorySearch pop() workaround was removed in v1.1.0.
 # v1.1.0 only injects agents.defaults.memorySearch when HICLAW_EMBEDDING_MODEL
 # is non-empty (see /opt/hiclaw/scripts/init/start-manager-agent.sh and
 # /opt/hiclaw/scripts/lib/hiclaw-env.sh: `HICLAW_EMBEDDING_MODEL="${HICLAW_EMBEDDING_MODEL-text-embedding-v4}"`).
