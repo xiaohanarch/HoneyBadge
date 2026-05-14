@@ -237,7 +237,7 @@ docker exec "$MANAGER_CONTAINER" bash -c \
 #     IRON RULE: Workers NEVER call any LLM directly. ALL LLM calls MUST route
 #     through Higress AI Gateway at http://aigw-local.hiclaw.io:8080/v1. No exceptions.
 # ---------------------------------------------------------------------------
-log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ MiniMax-M2.7-highspeed)..."
+log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ glm-5)..."
 # baseUrl MUST include /v1: OpenAI JS SDK appends /chat/completions directly
 # Without /v1: path becomes /chat/completions → misses llm-minimax-route → no API key → 404
 for worker in graph-worker analytics-worker; do
@@ -270,19 +270,19 @@ for name, p in providers.items():
         print('Patched ' + name + ' baseUrl: ' + old + ' -> ' + p['baseUrl'])
     for model in p.get('models', []):
         old_id = model.get('id', '')
-        if old_id != 'MiniMax-M2.7-highspeed':
-            model['id'] = 'MiniMax-M2.7-highspeed'
-            model['name'] = 'MiniMax-M2.7-highspeed'
-            print('Updated model: ' + old_id + ' -> MiniMax-M2.7-highspeed')
+        if old_id != 'glm-5':
+            model['id'] = 'glm-5'
+            model['name'] = 'glm-5'
+            print('Updated model: ' + old_id + ' -> glm-5')
         # Always remove reasoning:true — openclaw thinking mode sends Claude-style
         # thinking blocks that DashScope rejects with role-ordering 400 errors.
         model.pop('reasoning', None)
 
 agents = cfg.get('agents', {}).get('defaults', {}).get('model', {})
 old_primary = agents.get('primary', '')
-if 'MiniMax-M2.7-highspeed' not in old_primary:
+if 'glm-5' not in old_primary:
     for name in providers.keys():
-        agents['primary'] = name + '/MiniMax-M2.7-highspeed'
+        agents['primary'] = name + '/glm-5'
         print('Updated primary: ' + old_primary + ' -> ' + agents['primary'])
         break
 
@@ -359,7 +359,7 @@ done
 #     IRON RULE: ALL LLM calls MUST go through Higress. Workers never call any
 #     LLM endpoint directly. This route is the single exit point for all LLM traffic.
 # ---------------------------------------------------------------------------
-log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → Minimax/MiniMax-M2.7-highspeed)..."
+log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → Bailian/glm-5)..."
 HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
 LLM_API_KEY="${LLM_API_KEY:-${HICLAW_LLM_API_KEY:-}}"
 
@@ -379,16 +379,16 @@ done
 RESULT=$(docker exec "$MANAGER_CONTAINER" sh -c \
     "curl -sf -X PUT 'http://hiclaw-embedded:8001/v1/routes/llm-minimax-route' \
       -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
-      -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"api.minimaxi.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1")
+      -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1")
 
 if echo "$RESULT" | grep -q '"name":"llm-minimax-route"'; then
-    log "  → llm-minimax-route updated (openai-compat.dns → api.minimaxi.com)"
+    log "  → llm-minimax-route updated (openai-compat.dns → coding.dashscope.aliyuncs.com)"
 else
     docker exec "$MANAGER_CONTAINER" sh -c \
         "curl -sf -X POST 'http://hiclaw-embedded:8001/v1/routes' \
           -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
-          -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"api.minimaxi.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
-        && log "  → llm-minimax-route created (openai-compat.dns → api.minimaxi.com)" \
+          -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
+        && log "  → llm-minimax-route created (openai-compat.dns → coding.dashscope.aliyuncs.com)" \
         || warn "  Failed to create/update LLM route (Higress not ready?)"
 fi
 

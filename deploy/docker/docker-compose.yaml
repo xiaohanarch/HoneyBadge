@@ -305,7 +305,7 @@ services:
     restart: unless-stopped
     environment:
       LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY required for dev gateway bypass}
-      LLM_UPSTREAM_HOST: ${LLM_UPSTREAM_HOST:-api.minimaxi.com}
+      LLM_UPSTREAM_HOST: ${LLM_UPSTREAM_HOST:-coding.dashscope.aliyuncs.com}
     volumes:
       - ../hiclaw/aigw-bypass.conf.template:/etc/nginx/templates/default.conf.template:ro
     networks:
@@ -386,7 +386,7 @@ services:
       # coding.dashscope.aliyuncs.com (OpenAI-compatible endpoint at /v1/).
       # This is idempotent: setup-higress.sh does PUT on existing service sources.
       - HICLAW_LLM_PROVIDER=openai-compat
-      - HICLAW_OPENAI_BASE_URL=https://api.minimaxi.com/v1
+      - HICLAW_OPENAI_BASE_URL=https://coding.dashscope.aliyuncs.com/v1
       # AI Gateway template variables (v1.1.0 renames):
       #   HICLAW_AI_GATEWAY_SERVER (v1.0.8) → HICLAW_AI_GATEWAY_DOMAIN (template) +
       #   HICLAW_AI_GATEWAY_URL (k8s validation, full URL)
@@ -399,7 +399,7 @@ services:
       # Default model for Manager Agent (Aliyun DashScope coding endpoint).
       # Inherits LLM_MODEL from .env so a single source of truth controls the
       # upstream model name across nginx-bypass and worker openclaw.json.
-      - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-qwen3-coder-plus}
+      - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-glm-5}
       # Disable memorySearch (LOAD-BEARING in v1.1.0).
       # hiclaw-env.sh uses `${HICLAW_EMBEDDING_MODEL-text-embedding-v4}` (single
       # dash), so unset falls back to the broken default — empty string is the
