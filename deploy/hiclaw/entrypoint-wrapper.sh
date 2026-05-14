@@ -70,7 +70,13 @@ echo "[entrypoint] Starting HoneyBadge auto-init in background..." | tee -a "$LO
     else
         REG_BODY="{\"username\":\"manager\",\"password\":\"${MGR_PWD}\",\"auth\":{\"type\":\"m.login.registration_token\",\"token\":\"${REG_TOKEN}\"}}"
         for _attempt in 1 2 3 4 5; do
-            REG_RESULT=$(curl -sf -X POST "$MATRIX_URL/_matrix/client/v3/register" \
+            # NOTE: -s (silent), NOT -sf. With -f, curl drops the response body
+            # on HTTP 4xx, so Matrix's {"errcode":"M_USER_IN_USE"} on second
+            # boot is swallowed, the grep below misses it, and all 5 retries
+            # log "register attempt N failed" before falling through silently.
+            # Dropping -f preserves the body so M_USER_IN_USE is recognised as
+            # the success-equivalent it actually is.
+            REG_RESULT=$(curl -s -X POST "$MATRIX_URL/_matrix/client/v3/register" \
                 -H 'Content-Type: application/json' \
                 -d "$REG_BODY" 2>&1) || true
             if echo "$REG_RESULT" | grep -qE '"access_token"|M_USER_IN_USE'; then
