@@ -369,6 +369,61 @@ except Exception:
 
     fi  # end NEEDS_FRESH_REGISTRATION
 
+    # Self-heal: pre-existing deployments (MinIO already has worker config,
+    # NEEDS_FRESH_REGISTRATION=false) won't have created a DM room above.
+    # If we still have no WORKER_ROOM_ID but a persisted password exists,
+    # do a login → create room → persist room_id. This makes the registry
+    # schema fix retro-active without forcing re-provisioning.
+    if [ -z "$WORKER_ROOM_ID" ] && [ -f "${WORKER_CREDS_DIR}/${worker}.env" ]; then
+        # shellcheck disable=SC1090
+        HEAL_PWD=$(. "${WORKER_CREDS_DIR}/${worker}.env" 2>/dev/null && echo "$WORKER_PASSWORD")
+        if [ -n "$HEAL_PWD" ]; then
+            HEAL_LOGIN_BODY="{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${worker}\"},\"password\":\"${HEAL_PWD}\"}"
+            HEAL_LOGIN_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/login" \
+                -H 'Content-Type: application/json' -d "$HEAL_LOGIN_BODY" 2>&1) || HEAL_LOGIN_RESULT=""
+            HEAL_TOKEN=$(echo "$HEAL_LOGIN_RESULT" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("access_token", ""))
+except Exception:
+    print("")
+' 2>/dev/null || echo "")
+            if [ -n "$HEAL_TOKEN" ]; then
+                ROOM_BODY="{\"preset\":\"trusted_private_chat\",\"invite\":[\"${MANAGER_MXID}\"],\"is_direct\":true,\"name\":\"manager-${worker}\"}"
+                ROOM_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/createRoom" \
+                    -H "Authorization: Bearer $HEAL_TOKEN" \
+                    -H 'Content-Type: application/json' \
+                    -d "$ROOM_BODY" 2>&1) || ROOM_RESULT=""
+                WORKER_ROOM_ID=$(echo "$ROOM_RESULT" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("room_id", ""))
+except Exception:
+    print("")
+' 2>/dev/null || echo "")
+                if [ -n "$WORKER_ROOM_ID" ]; then
+                    log "  $worker self-heal: DM room created: $WORKER_ROOM_ID"
+                    if [ -n "$MANAGER_TOKEN" ]; then
+                        curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/rooms/${WORKER_ROOM_ID}/join" \
+                            -H "Authorization: Bearer $MANAGER_TOKEN" \
+                            -H 'Content-Type: application/json' \
+                            -d '{}' >/dev/null 2>&1 \
+                            && log "  Manager joined $worker DM room (self-heal)" \
+                            || warn "  Manager failed to join $worker DM room (self-heal)"
+                    fi
+                    # Persist room_id alongside existing password line
+                    {
+                        echo "WORKER_PASSWORD=${HEAL_PWD}"
+                        echo "WORKER_ROOM_ID=${WORKER_ROOM_ID}"
+                    } > "${WORKER_CREDS_DIR}/${worker}.env"
+                    chmod 600 "${WORKER_CREDS_DIR}/${worker}.env"
+                fi
+            else
+                warn "  $worker self-heal login failed: $HEAL_LOGIN_RESULT"
+            fi
+        fi
+    fi
+
     # Update workers-registry.json (Manager reads this to know its team).
     # Runs unconditionally on every boot — the jq merge preserves the
     # original registered_at timestamp if it already exists, so this is
