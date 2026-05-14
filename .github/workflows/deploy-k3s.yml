@@ -159,24 +159,17 @@ jobs:
               EXISTING_PVC_CAP=$(kubectl -n $NAMESPACE get pvc hiclaw-manager-data \
                 -o jsonpath='{.status.capacity.storage}' 2>/dev/null || echo "?")
               echo "[migration] PVC/hiclaw-manager-data already bound (capacity=$EXISTING_PVC_CAP); stripping from manifest (storage shrink forbidden)"
-              python3 - "$MANIFEST_FILE" <<'PYEOF'
-import sys
-path = sys.argv[1]
-with open(path) as f:
-    content = f.read()
-# kustomize emits YAML stream docs separated by "\n---\n"
-docs = [d for d in content.split('\n---\n') if d.strip()]
-keep = []
-for d in docs:
-    is_target = (
-        '\nkind: PersistentVolumeClaim' in '\n' + d
-        and 'name: hiclaw-manager-data' in d
-    )
-    if not is_target:
-        keep.append(d)
-with open(path, 'w') as f:
-    f.write('\n---\n'.join(keep) + '\n')
-PYEOF
+              # kustomize emits YAML stream docs separated by lines of "---".
+              # awk RS splits on the literal "\n---\n" separator between docs;
+              # we drop any record matching both `kind: PersistentVolumeClaim`
+              # and `name: hiclaw-manager-data` and rejoin the kept records.
+              awk 'BEGIN{RS="\n---\n"; first=1}
+                   !(($0 ~ /(^|\n)kind: PersistentVolumeClaim(\n|$)/) && ($0 ~ /name: hiclaw-manager-data/)) {
+                     if (first) { first=0 } else { printf "\n---\n" }
+                     printf "%s", $0
+                   }
+                   END { printf "\n" }' "$MANIFEST_FILE" > "${MANIFEST_FILE}.filtered"
+              mv "${MANIFEST_FILE}.filtered" "$MANIFEST_FILE"
             fi
 
             kubectl apply -f "$MANIFEST_FILE"
