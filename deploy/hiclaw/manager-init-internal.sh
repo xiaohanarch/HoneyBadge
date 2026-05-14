@@ -22,6 +22,7 @@ MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
 MATRIX_URL="${HICLAW_MATRIX_URL:-http://${MATRIX_DOMAIN}:6167}"
 LLM_API_KEY="${HICLAW_LLM_API_KEY:-${LLM_API_KEY:-}}"
 REGISTRY_FILE="${MANAGER_WORKSPACE}/workers-registry.json"
+MANAGER_MXID="@manager:${MATRIX_DOMAIN}"
 
 # Dev gateway mode: in compose on WSL2, Higress segfaults so an nginx sidecar
 # (hiclaw-aigw-bypass) handles /v1/* instead. When set to "nginx-bypass" we
@@ -203,7 +204,32 @@ DEFAULT_MODEL="${HICLAW_DEFAULT_MODEL:-glm-5}"
 WORKER_CREDS_DIR="/data/worker-creds"
 mkdir -p "$WORKER_CREDS_DIR"
 
+# Extract Manager Matrix access token from openclaw.json (set by openclaw-gateway
+# after login). Used to auto-join Manager↔Worker DM rooms created below so the
+# Manager can both send dispatches and receive replies.
+MANAGER_TOKEN=""
+if [ -f "$MANAGER_OPENCLAW" ]; then
+    MANAGER_TOKEN=$(python3 -c "
+import json
+try:
+    with open('$MANAGER_OPENCLAW') as f:
+        cfg = json.load(f)
+    print(cfg.get('channels', {}).get('matrix', {}).get('accessToken', ''))
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
+fi
+if [ -z "$MANAGER_TOKEN" ]; then
+    warn "  Manager Matrix accessToken not yet available — DM rooms may not get joined"
+fi
+
 for worker in graph-worker analytics-worker; do
+    # Load any previously persisted state for this worker (room_id etc.)
+    WORKER_ROOM_ID=""
+    if [ -f "${WORKER_CREDS_DIR}/${worker}.env" ]; then
+        # shellcheck disable=SC1090
+        WORKER_ROOM_ID=$(. "${WORKER_CREDS_DIR}/${worker}.env" 2>/dev/null && echo "${WORKER_ROOM_ID:-}")
+    fi
     # Idempotency: skip fresh Matrix registration + config generation if
     # MinIO already has the worker config. We deliberately do NOT `continue`
     # here — the workers-registry.json refresh at the end of this loop must
@@ -270,6 +296,39 @@ except Exception:
         continue
     fi
 
+    # Ensure a Manager↔Worker DM room exists. dispatch-to-worker.sh reads
+    # workers-registry.json and requires `room_id` + `matrix_user_id` to send
+    # tasks; without a real room the dispatcher errors out with KeyError.
+    # Idempotent: skip if we already have a persisted WORKER_ROOM_ID.
+    if [ -z "$WORKER_ROOM_ID" ]; then
+        ROOM_BODY="{\"preset\":\"trusted_private_chat\",\"invite\":[\"${MANAGER_MXID}\"],\"is_direct\":true,\"name\":\"manager-${worker}\"}"
+        ROOM_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/createRoom" \
+            -H "Authorization: Bearer $WORKER_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d "$ROOM_BODY" 2>&1) || ROOM_RESULT=""
+        WORKER_ROOM_ID=$(echo "$ROOM_RESULT" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("room_id", ""))
+except Exception:
+    print("")
+' 2>/dev/null || echo "")
+        if [ -n "$WORKER_ROOM_ID" ]; then
+            log "  $worker DM room created: $WORKER_ROOM_ID"
+            # Make Manager join so dispatch.sh sends + replies both work
+            if [ -n "$MANAGER_TOKEN" ]; then
+                curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/rooms/${WORKER_ROOM_ID}/join" \
+                    -H "Authorization: Bearer $MANAGER_TOKEN" \
+                    -H 'Content-Type: application/json' \
+                    -d '{}' >/dev/null 2>&1 \
+                    && log "  Manager joined $worker DM room" \
+                    || warn "  Manager failed to join $worker DM room (will retry on next boot)"
+            fi
+        else
+            warn "  $worker DM room creation failed: $ROOM_RESULT"
+        fi
+    fi
+
     # Generate gateway key. In nginx-bypass mode this value is stripped &
     # replaced by the bypass nginx; in real Higress mode it must be registered
     # as a key-auth credential on the worker's Higress consumer.
@@ -295,15 +354,75 @@ except Exception:
             || warn "  Failed to upload $worker openclaw.json to MinIO"
     fi
 
-    # Persist password to /data/worker-creds + MinIO (controller-injected
-    # secrets simulation; matches k8s consumer-credential pattern)
-    echo "WORKER_PASSWORD=${WORKER_PWD}" > "${WORKER_CREDS_DIR}/${worker}.env"
+    # Persist password + room_id to /data/worker-creds + MinIO (controller-
+    # injected secrets simulation; matches k8s consumer-credential pattern).
+    # WORKER_ROOM_ID is read back at the top of this loop on subsequent boots
+    # so we don't keep creating new DM rooms.
+    {
+        echo "WORKER_PASSWORD=${WORKER_PWD}"
+        [ -n "$WORKER_ROOM_ID" ] && echo "WORKER_ROOM_ID=${WORKER_ROOM_ID}"
+    } > "${WORKER_CREDS_DIR}/${worker}.env"
     chmod 600 "${WORKER_CREDS_DIR}/${worker}.env"
     echo "${WORKER_PWD}" | mc pipe "hiclaw/hiclaw-storage/agents/$worker/credentials/matrix/password" >/dev/null 2>&1 \
         && log "  $worker password persisted to MinIO" \
         || warn "  Failed to persist $worker password to MinIO"
 
     fi  # end NEEDS_FRESH_REGISTRATION
+
+    # Self-heal: pre-existing deployments (MinIO already has worker config,
+    # NEEDS_FRESH_REGISTRATION=false) won't have created a DM room above.
+    # If we still have no WORKER_ROOM_ID but a persisted password exists,
+    # do a login → create room → persist room_id. This makes the registry
+    # schema fix retro-active without forcing re-provisioning.
+    if [ -z "$WORKER_ROOM_ID" ] && [ -f "${WORKER_CREDS_DIR}/${worker}.env" ]; then
+        # shellcheck disable=SC1090
+        HEAL_PWD=$(. "${WORKER_CREDS_DIR}/${worker}.env" 2>/dev/null && echo "$WORKER_PASSWORD")
+        if [ -n "$HEAL_PWD" ]; then
+            HEAL_LOGIN_BODY="{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${worker}\"},\"password\":\"${HEAL_PWD}\"}"
+            HEAL_LOGIN_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/login" \
+                -H 'Content-Type: application/json' -d "$HEAL_LOGIN_BODY" 2>&1) || HEAL_LOGIN_RESULT=""
+            HEAL_TOKEN=$(echo "$HEAL_LOGIN_RESULT" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("access_token", ""))
+except Exception:
+    print("")
+' 2>/dev/null || echo "")
+            if [ -n "$HEAL_TOKEN" ]; then
+                ROOM_BODY="{\"preset\":\"trusted_private_chat\",\"invite\":[\"${MANAGER_MXID}\"],\"is_direct\":true,\"name\":\"manager-${worker}\"}"
+                ROOM_RESULT=$(curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/createRoom" \
+                    -H "Authorization: Bearer $HEAL_TOKEN" \
+                    -H 'Content-Type: application/json' \
+                    -d "$ROOM_BODY" 2>&1) || ROOM_RESULT=""
+                WORKER_ROOM_ID=$(echo "$ROOM_RESULT" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("room_id", ""))
+except Exception:
+    print("")
+' 2>/dev/null || echo "")
+                if [ -n "$WORKER_ROOM_ID" ]; then
+                    log "  $worker self-heal: DM room created: $WORKER_ROOM_ID"
+                    if [ -n "$MANAGER_TOKEN" ]; then
+                        curl -sf -X POST "${MATRIX_URL}/_matrix/client/v3/rooms/${WORKER_ROOM_ID}/join" \
+                            -H "Authorization: Bearer $MANAGER_TOKEN" \
+                            -H 'Content-Type: application/json' \
+                            -d '{}' >/dev/null 2>&1 \
+                            && log "  Manager joined $worker DM room (self-heal)" \
+                            || warn "  Manager failed to join $worker DM room (self-heal)"
+                    fi
+                    # Persist room_id alongside existing password line
+                    {
+                        echo "WORKER_PASSWORD=${HEAL_PWD}"
+                        echo "WORKER_ROOM_ID=${WORKER_ROOM_ID}"
+                    } > "${WORKER_CREDS_DIR}/${worker}.env"
+                    chmod 600 "${WORKER_CREDS_DIR}/${worker}.env"
+                fi
+            else
+                warn "  $worker self-heal login failed: $HEAL_LOGIN_RESULT"
+            fi
+        fi
+    fi
 
     # Update workers-registry.json (Manager reads this to know its team).
     # Runs unconditionally on every boot — the jq merge preserves the
@@ -312,12 +431,21 @@ except Exception:
     # MinIO already has the worker config (idempotent restart case).
     if [ -f "$REGISTRY_FILE" ]; then
         TMP_REG=$(mktemp)
+        # Schema contract with dispatch-to-worker.sh:
+        #   - `matrix_user_id` (NOT `matrix_id`) is what dispatch reads
+        #   - `room_id` is the Manager↔Worker DM room created above
+        # We keep `matrix_id` too for any older readers, but the canonical
+        # fields are `matrix_user_id` + `room_id`. Preserve existing room_id
+        # if already set so re-runs don't clobber a working room.
         if jq --arg name "$worker" \
               --arg matrix_id "@${worker}:${MATRIX_DOMAIN}" \
+              --arg room "$WORKER_ROOM_ID" \
               --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               '.workers[$name] = {
                   "name": $name,
                   "matrix_id": $matrix_id,
+                  "matrix_user_id": $matrix_id,
+                  "room_id": (.workers[$name].room_id // $room),
                   "runtime": "openclaw",
                   "deployment": "local",
                   "role": "worker",
