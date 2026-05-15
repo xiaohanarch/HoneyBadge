@@ -714,6 +714,56 @@ jobs:
 
             echo ""
             echo "=========================================="
+            echo "5hh. Worker openclaw.json skills array + /root/skills/ inventory"
+            echo "=========================================="
+            # Determine if worker openclaw.json declares 'mcporter' in its skills
+            # array AND whether /root/skills/mcporter/SKILL.md exists. Both are
+            # required for openclaw runtime to resolve the skill at session boot.
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c '
+                  echo "[openclaw.json paths]";
+                  for P in /root/openclaw.json /root/hiclaw-fs/agents/'"$ROLE"'/openclaw.json /opt/openclaw/openclaw.json; do
+                    if [ -f "$P" ]; then echo "  ok: $P ($(stat -c %s "$P") bytes)"; else echo "  missing: $P"; fi
+                  done
+                  echo ""
+                  echo "[primary openclaw.json — skills array]";
+                  CFG="";
+                  for P in /root/openclaw.json /root/hiclaw-fs/agents/'"$ROLE"'/openclaw.json; do
+                    if [ -f "$P" ] && [ -z "$CFG" ]; then CFG="$P"; fi
+                  done
+                  if [ -n "$CFG" ]; then
+                    echo "  source: $CFG";
+                    if command -v jq >/dev/null 2>&1; then
+                      jq -r ".skills // (.agent.skills) // \"(no skills key)\"" "$CFG" 2>&1 | head -10;
+                      echo "[full top-level keys]";
+                      jq -r "keys[]" "$CFG" 2>&1 | head -20;
+                    else
+                      grep -E "\"skills\"|\"name\":" "$CFG" | head -10;
+                    fi
+                  fi
+                  echo ""
+                  echo "[/root/skills/ tree (depth 2)]";
+                  if [ -d /root/skills ]; then
+                    find /root/skills -maxdepth 2 -type f 2>&1 | head -30;
+                    echo "";
+                    echo "[SKILL.md presence per skill dir]";
+                    for D in /root/skills/*/; do
+                      NAME=$(basename "$D");
+                      if [ -f "${D}SKILL.md" ]; then echo "  ok: $NAME"; else echo "  MISSING SKILL.md: $NAME"; fi
+                    done
+                  else
+                    echo "  (/root/skills not present)";
+                  fi
+                ' 2>&1 | sed -E "s/(\"[A-Za-z_]*[Tt]oken\"|\"[A-Za-z_]*[Ss]ecret\"|\"apiKey\"|\"password\"|\"matrixToken\"|\"accessToken\"|\"registrationToken\")\s*:\s*\"[^\"]+\"/\1: \"<REDACTED>\"/g" | head -120
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
             echo "6. Recent deployment events"
             echo "=========================================="
             kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
