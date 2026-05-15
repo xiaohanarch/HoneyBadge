@@ -6,7 +6,9 @@
 LOG=/root/e2e-results.log
 JUNIT=/root/e2e-junit.xml
 
-echo '========================================' >> $LOG
+# Truncate (not append) so each run produces a clean log file.
+# Previous behavior appended forever, making `tail` mix runs together.
+echo '========================================' > $LOG
 echo "E2E Test Run: $(date)" >> $LOG
 echo '========================================' >> $LOG
 
@@ -53,9 +55,15 @@ python3 -m pytest "${@:-tests/e2e/}" \
   --ignore=tests/e2e/test_08_infra.py \
   2>&1 | tee -a $LOG
 
-EXIT=$?
+# Capture pytest's exit code (not tee's). Without this, a failing or
+# crashing pytest is masked by tee's exit 0 and the caller sees success.
+EXIT=${PIPESTATUS[0]}
 echo "========================================" >> $LOG
 echo "Test exit code: $EXIT  Finished: $(date)" >> $LOG
 echo "========================================" >> $LOG
 
 kill $PF1 $PF2 2>/dev/null || true
+
+# Exit with pytest's exit code so callers (e.g. the GitHub workflow's
+# `bash run-e2e-ecs.sh "$TARGET" || E2E_EXIT=$?` clause) see the truth.
+exit $EXIT
