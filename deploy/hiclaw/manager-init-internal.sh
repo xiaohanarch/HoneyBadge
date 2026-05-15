@@ -535,14 +535,27 @@ for name, p in providers.items():
             print('Removed reasoning:true from ' + model.get('id', ''))
             changed = True
 
-agents = cfg.get('agents', {}).get('defaults', {}).get('model', {})
+# Update agents.defaults.model.primary. v1.1.0 worker configs may not have
+# a models.providers dict at all (only the bare primary string), so we need
+# a fallback that derives the provider prefix from the existing primary
+# value when providers is empty. Without this fallback, the for-loop below
+# is a no-op and primary stays at whatever it was first written with
+# (typically hiclaw-gateway/glm-5 from create-worker.sh) — see v13 diagnose
+# run 25930620659 which caught this regression after PR #98.
+agents_defaults = cfg.setdefault('agents', {}).setdefault('defaults', {})
+agents = agents_defaults.setdefault('model', {})
 old_primary = agents.get('primary', '')
 if model_name not in old_primary:
-    for name in providers.keys():
-        agents['primary'] = name + '/' + model_name
-        print('Updated primary: ' + old_primary + ' -> ' + agents['primary'])
-        changed = True
-        break
+    if providers:
+        new_prefix = next(iter(providers.keys()))
+    elif '/' in old_primary:
+        new_prefix = old_primary.rsplit('/', 1)[0]
+    else:
+        new_prefix = 'hiclaw-gateway'
+    new_primary = new_prefix + '/' + model_name
+    agents['primary'] = new_primary
+    print('Updated primary: ' + old_primary + ' -> ' + new_primary)
+    changed = True
 
 # Fix Matrix homeserver port: Tuwunel runs on 6167, NOT Higress gateway port 8080.
 # create-worker.sh may generate the wrong port; always enforce 6167 here.
