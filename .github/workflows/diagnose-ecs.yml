@@ -658,6 +658,85 @@ jobs:
 
             echo ""
             echo "=========================================="
+            echo "5dd. LIVE openclaw daily log tail — last 150 lines per worker"
+            echo "=========================================="
+            # During an E2E run this captures real-time agent execution incl.
+            # mcporter calls, LLM responses, and any tool-chain errors.
+            TODAY=$(date -u +%Y-%m-%d)
+            YESTERDAY=$(date -u -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d 2>/dev/null)
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) — /tmp/openclaw/openclaw-*.log tail ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c "ls -la /tmp/openclaw/ 2>&1 | head -10; echo '---'; for F in /tmp/openclaw/openclaw-${TODAY}.log /tmp/openclaw/openclaw-${YESTERDAY}.log; do if [ -f \"\$F\" ]; then echo \"[tail -150 \$F]\"; tail -150 \"\$F\"; fi; done" 2>&1 | tail -200
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5ee. mcporter list-servers + list-tools per worker"
+            echo "=========================================="
+            # Confirm mcporter CAN reach the configured MCP servers from inside
+            # each worker. If list-tools succeeds → MCP chain works at infra level
+            # and any chat failures are LLM/permission/skill issues, not infra.
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c 'echo "[mcporter list-servers]"; mcporter list-servers 2>&1 | head -20; echo ""; echo "[mcporter list-tools honeybadge-nebula]"; timeout 15 mcporter list-tools honeybadge-nebula 2>&1 | head -30; echo ""; echo "[mcporter list-tools honeybadge-audit]"; timeout 15 mcporter list-tools honeybadge-audit 2>&1 | head -30' 2>&1 | head -100
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5ff. Most recent analytics-worker session activity"
+            echo "=========================================="
+            # Filter sessions.json for entries updated in last 30 min via lastActivity
+            POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-analytics-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -n "$POD" ]; then
+              kubectl -n $NS exec "$POD" -- sh -c 'python3 -c "
+import json, sys
+from datetime import datetime, timezone, timedelta
+try:
+    with open(\"/root/.openclaw/agents/main/sessions/sessions.json\") as f:
+        s = json.load(f)
+except Exception as e:
+    print(f\"err: {e}\"); sys.exit(0)
+cutoff = (datetime.now(timezone.utc) - timedelta(minutes=60)).timestamp() * 1000
+recent = []
+for k, v in s.items():
+    la = v.get(\"lastActivity\", 0)
+    if la > cutoff:
+        recent.append((la, k, v))
+recent.sort(reverse=True)
+print(f\"=== Found {len(recent)} sessions updated in last 60 min ===\")
+for la, k, v in recent[:5]:
+    ts = datetime.fromtimestamp(la/1000, timezone.utc).isoformat()
+    print(f\"\\n--- key={k[:120]} ts={ts} status={v.get(\\\"status\\\")} compactionCount={v.get(\\\"compactionCount\\\",0)} ---\")
+    cc = v.get(\"compactionCheckpoints\", [])
+    if cc:
+        print(\"latest summary:\")
+        print(cc[-1].get(\"summary\",\"\")[:800])
+    sk = v.get(\"skillsSnapshot\",{}).get(\"resolvedSkills\",[])
+    print(f\"resolvedSkills: {sk}\")
+"' 2>&1 | head -200
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5gg. Direct MCP server probe from graph-worker pod"
+            echo "=========================================="
+            # Bypass mcporter; hit MCP server SSE endpoint directly to confirm
+            # network + server health.
+            POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-graph-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -n "$POD" ]; then
+              kubectl -n $NS exec "$POD" -- sh -c 'for SVC in honeybadge-nebula-mcp honeybadge-audit-mcp honeybadge-cache-mcp; do echo "[curl -sI http://$SVC:8000/sse]"; timeout 5 curl -sI http://$SVC:8000/sse 2>&1 | head -8; echo ""; done' 2>&1 | head -50
+            fi
+
+            echo ""
+            echo "=========================================="
             echo "6. Recent deployment events"
             echo "=========================================="
             kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
