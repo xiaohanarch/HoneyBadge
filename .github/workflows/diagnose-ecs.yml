@@ -886,6 +886,69 @@ jobs:
 
             echo ""
             echo "=========================================="
+            echo "5nn. POST-FIX VERIFY — qwen3-coder-plus rollout (PR #98 / c00f5c0)"
+            echo "=========================================="
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c '
+                  CFG="/root/hiclaw-fs/agents/$HICLAW_WORKER_NAME/openclaw.json"
+                  if [ ! -f "$CFG" ]; then CFG=$(ls -1 /root/hiclaw-fs/agents/*/openclaw.json 2>/dev/null | head -1); fi
+                  echo "[cfg path: $CFG]"
+                  if [ -f "$CFG" ]; then
+                    echo "[primary model]";
+                    jq -r ".agents.defaults.model.primary // .agents[].model.primary // \"(not set)\"" "$CFG" 2>/dev/null
+                    echo "[all model ids]";
+                    jq -r ".models[]?.id // empty" "$CFG" 2>/dev/null | sort -u
+                    echo "[contextPruning block]";
+                    jq -r ".agents.defaults.contextPruning // \"(none)\"" "$CFG" 2>/dev/null
+                  fi
+                ' 2>&1 | head -30
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5oo. POST-FIX VERIFY — openclaw log overflow events post-deploy"
+            echo "=========================================="
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c '
+                  LOG=$(ls -1t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -1)
+                  if [ -z "$LOG" ]; then echo "(no openclaw log)"; exit 0; fi
+                  echo "[log path: $LOG]"
+                  echo "[total Context overflow events in current log]";
+                  grep -c "Context overflow" "$LOG" 2>/dev/null || echo 0
+                  echo "[total already_compacted_recently events in current log]";
+                  grep -c "already_compacted_recently" "$LOG" 2>/dev/null || echo 0
+                  echo "[last 5 model mentions]";
+                  grep -E "model=|primary=|hiclaw-gateway/" "$LOG" 2>/dev/null | tail -5
+                  echo "[last 10 ERROR lines]";
+                  grep -E "ERROR|error" "$LOG" 2>/dev/null | tail -10
+                ' 2>&1 | head -60
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5pp. POST-FIX VERIFY — manager env + deploy SHA"
+            echo "=========================================="
+            POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-manager -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -n "$POD" ]; then
+              echo "[HICLAW_DEFAULT_MODEL on manager]";
+              kubectl -n $NS exec "$POD" -- sh -c 'echo "$HICLAW_DEFAULT_MODEL"' 2>&1
+              echo "[LLM_MODEL on honeybadge-server]";
+              SPOD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=honeybadge-server -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              [ -n "$SPOD" ] && kubectl -n $NS exec "$SPOD" -- sh -c 'echo "$LLM_MODEL"' 2>&1
+            fi
+
+            echo ""
+            echo "=========================================="
             echo "6. Recent deployment events"
             echo "=========================================="
             kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
