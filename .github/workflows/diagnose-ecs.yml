@@ -45,13 +45,20 @@ jobs:
             echo "=========================================="
             echo "3. Deployment image + last rollout"
             echo "=========================================="
-            for dep in hiclaw-manager hiclaw-graph-worker hiclaw-analytics-worker honeybadge-hiclaw-embedded honeybadge-server honeybadge-auth honeybadge-nebula-mcp honeybadge-audit-mcp honeybadge-cache-mcp; do
+            # NOTE: hiclaw-embedded is the actual deploy name (not honeybadge-hiclaw-embedded).
+            for dep in hiclaw-manager hiclaw-graph-worker hiclaw-analytics-worker hiclaw-embedded honeybadge-server honeybadge-auth honeybadge-nebula-mcp honeybadge-audit-mcp honeybadge-cache-mcp; do
               echo ""
               echo "--- $dep ---"
               kubectl -n $NS get deploy "$dep" -o jsonpath='{.spec.template.spec.containers[*].image}{"\n"}' 2>/dev/null || echo "(not found)"
               kubectl -n $NS rollout history deploy "$dep" 2>/dev/null | tail -5 || true
               kubectl -n $NS get deploy "$dep" -o jsonpath='Last update: {.status.conditions[?(@.type=="Progressing")].lastUpdateTime}{"\n"}' 2>/dev/null || true
             done
+
+            echo ""
+            echo "=========================================="
+            echo "3b. PVC inventory + age (detect hiclaw-embedded data reset)"
+            echo "=========================================="
+            kubectl -n $NS get pvc -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,CAPACITY:.status.capacity.storage,CREATED:.metadata.creationTimestamp,AGE:.metadata.creationTimestamp 2>/dev/null
 
             echo ""
             echo "=========================================="
@@ -66,7 +73,11 @@ jobs:
             # The fix replaced hardcoded TUWUNEL_URL=127.0.0.1:6167 with
             # HICLAW_MATRIX_URL across 4 sites. If these grep results show
             # the env var, the configmap/image has the fix.
-            MGR_POD=$(kubectl -n $NS get pods -l app=hiclaw-manager -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            # Kustomize uses app.kubernetes.io/name=hiclaw-manager (not app=hiclaw-manager).
+            MGR_POD=$(kubectl -n $NS get pods -l app.kubernetes.io/name=hiclaw-manager -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -z "$MGR_POD" ]; then
+              MGR_POD=$(kubectl -n $NS get pods --no-headers 2>/dev/null | awk '/^hiclaw-manager-/ {print $1; exit}')
+            fi
             if [ -n "$MGR_POD" ]; then
               echo "Manager pod: $MGR_POD"
               echo ""
@@ -87,6 +98,54 @@ jobs:
             else
               echo "(no hiclaw-manager pod found)"
             fi
+
+            echo ""
+            echo "=========================================="
+            echo "5b. Manager pod log tail (last 200 lines — look for dispatch decisions)"
+            echo "=========================================="
+            if [ -n "$MGR_POD" ]; then
+              kubectl -n $NS logs "$MGR_POD" -c hiclaw-manager --tail=200 2>&1 | tail -200
+            else
+              echo "(no manager pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5c. hiclaw-embedded (Tuwunel/Matrix) pod log tail"
+            echo "=========================================="
+            EMB_POD=$(kubectl -n $NS get pods -l app.kubernetes.io/name=hiclaw-embedded -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -z "$EMB_POD" ]; then
+              EMB_POD=$(kubectl -n $NS get pods --no-headers 2>/dev/null | awk '/^hiclaw-embedded-/ {print $1; exit}')
+            fi
+            if [ -n "$EMB_POD" ]; then
+              echo "Embedded pod: $EMB_POD"
+              kubectl -n $NS logs "$EMB_POD" --tail=100 2>&1 | tail -100
+            else
+              echo "(no hiclaw-embedded pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5d. honeybadge-auth pod log tail (Matrix account provisioning)"
+            echo "=========================================="
+            AUTH_POD=$(kubectl -n $NS get pods -l app=honeybadge-auth -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -z "$AUTH_POD" ]; then
+              AUTH_POD=$(kubectl -n $NS get pods --no-headers 2>/dev/null | awk '/^honeybadge-auth-/ {print $1; exit}')
+            fi
+            if [ -n "$AUTH_POD" ]; then
+              echo "Auth pod: $AUTH_POD"
+              kubectl -n $NS logs "$AUTH_POD" --tail=100 2>&1 | tail -100
+            else
+              echo "(no auth pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5e. ConfigMap content sanity — fast-forward.sh key + size"
+            echo "=========================================="
+            kubectl -n $NS get configmap hiclaw-fast-query-skill -o jsonpath='{.data}' 2>/dev/null | tr ',' '\n' | grep -oE '"[a-zA-Z_.-]+\.sh"' | sort -u
+            echo "Total keys in hiclaw-fast-query-skill:"
+            kubectl -n $NS get configmap hiclaw-fast-query-skill -o jsonpath='{.data}' 2>/dev/null | grep -oE '\.sh' | wc -l
 
             echo ""
             echo "=========================================="
