@@ -521,11 +521,11 @@ jobs:
             echo "--- embedded pod: $EMB ---"
             if [ -n "$EMB" ]; then
               echo "MinIO bucket layout (agents/):"
-              kubectl -n $NS exec "$EMB" -c minio -- sh -c 'mc ls --recursive local/hiclaw 2>&1 | grep -E "agents/(graph-worker|analytics-worker)/" | head -20' 2>&1 | head -25
+              kubectl -n $NS exec "$EMB" -- sh -c 'mc ls --recursive local/hiclaw 2>&1 | grep -E "agents/(graph-worker|analytics-worker)/" | head -20' 2>&1 | head -25
               echo ""
               for ROLE in graph-worker analytics-worker; do
                 echo "[minio] agents/$ROLE/openclaw.json key fields:"
-                kubectl -n $NS exec "$EMB" -c minio -- sh -c "mc cat local/hiclaw/agents/$ROLE/openclaw.json 2>&1 | grep -E '\"(providers|matrix|homeserver|userId|baseUrl|model|primary|provider|domain)\"' | head -40" 2>&1 | head -45
+                kubectl -n $NS exec "$EMB" -- sh -c "mc cat local/hiclaw/agents/$ROLE/openclaw.json 2>&1 | grep -E '\"(providers|matrix|homeserver|userId|baseUrl|model|primary|provider|domain)\"' | head -40" 2>&1 | head -45
                 echo ""
               done
             else
@@ -555,6 +555,58 @@ jobs:
               fi
               echo ""
             done
+
+            echo ""
+            echo "=========================================="
+            echo "5x. Worker openclaw.json full content — agents/context/bootstrap blocks"
+            echo "=========================================="
+            # v6 5s grep only showed top-level keys. Need full context/bootstrap blocks
+            # to test the hypothesis that analytics-worker is stuck in context-loading
+            # due to a context/bootstrap config difference vs graph-worker.
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) — full openclaw.json (with API key redacted) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c 'cat /root/.openclaw/openclaw.json 2>&1 | sed -E "s/(apiKey|password|token|secret)\":\s*\"[^\"]+\"/\1\": \"<REDACTED>\"/g"' 2>&1 | head -250
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5y. Worker SOUL.md + AGENTS.md sizes + first 40 lines"
+            echo "=========================================="
+            # Large SOUL.md or AGENTS.md gets injected into bootstrap context.
+            # If analytics-worker has bloated prompt files, that explains
+            # bootstrapTruncation + nearLimitFiles seen in v6 5u sessions.json.
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c "echo '[SOUL.md]'; ls -la /root/hiclaw-fs/agents/$ROLE/SOUL.md 2>&1; wc -l /root/hiclaw-fs/agents/$ROLE/SOUL.md 2>&1; echo '--- head:'; head -40 /root/hiclaw-fs/agents/$ROLE/SOUL.md 2>&1; echo ''; echo '[AGENTS.md]'; ls -la /root/hiclaw-fs/agents/$ROLE/AGENTS.md 2>&1; wc -l /root/hiclaw-fs/agents/$ROLE/AGENTS.md 2>&1; echo '--- head:'; head -40 /root/hiclaw-fs/agents/$ROLE/AGENTS.md 2>&1" 2>&1 | head -100
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5z. analytics-worker sessions.json FULL dump (17 KB, with secrets redacted)"
+            echo "=========================================="
+            # v6 5u showed only top-level key names. To see where the session
+            # actually got stuck (bootstrap?  skill resolution?  LLM call?) we
+            # need the full structure. Limited to analytics-worker because
+            # graph-worker is known-working.
+            POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-analytics-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            echo "--- analytics-worker ($POD) ---"
+            if [ -n "$POD" ]; then
+              kubectl -n $NS exec "$POD" -- sh -c 'cat /root/.openclaw/agents/main/sessions/sessions.json 2>&1 | sed -E "s/(apiKey|password|token|secret|accessToken|matrixToken)\":\s*\"[^\"]+\"/\1\": \"<REDACTED>\"/g"' 2>&1 | head -500
+            else
+              echo "(no analytics-worker pod)"
+            fi
 
             echo ""
             echo "=========================================="
