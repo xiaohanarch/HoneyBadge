@@ -814,6 +814,78 @@ jobs:
 
             echo ""
             echo "=========================================="
+            echo "5kk. Full /opt/openclaw/skills/ inventory + look for mcporter/file-sync"
+            echo "=========================================="
+            POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-graph-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -n "$POD" ]; then
+              kubectl -n $NS exec "$POD" -- sh -c '
+                echo "[ls /opt/openclaw/skills (ALL entries)]";
+                ls /opt/openclaw/skills 2>&1 | sort | column -c 120 || ls /opt/openclaw/skills | sort
+                echo ""
+                echo "[grep -F mcporter file-sync in skill dirs]";
+                for D in /opt/openclaw/skills/*; do
+                  if [ -d "$D" ]; then
+                    n=$(basename "$D")
+                    case "$n" in
+                      *mcporter*|*mcp*|*file-sync*|*filesync*|*claw*|*honeybadge*)
+                        echo "MATCH: $D"; ls -la "$D" | head -10 ;;
+                    esac
+                  fi
+                done
+                echo ""
+                echo "[any /opt skill named mcporter or file-sync?]";
+                find /opt -maxdepth 5 -type d \( -name mcporter -o -name file-sync \) 2>/dev/null | head -20
+                echo ""
+                echo "[sample SKILL.md from coding-agent for schema]";
+                find /opt/openclaw/skills/coding-agent -maxdepth 3 -type f \( -name SKILL.md -o -name "*.yaml" -o -name "*.json" \) 2>/dev/null | head -10
+              ' 2>&1 | head -120
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5ll. MinIO contents — workers-registry.json + SOUL.md/AGENTS.md"
+            echo "=========================================="
+            POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-manager -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -n "$POD" ]; then
+              kubectl -n $NS exec "$POD" -- sh -c '
+                mc alias set local http://hiclaw-embedded:9000 "$HICLAW_ADMIN_USER" "$HICLAW_ADMIN_PASSWORD" 2>/dev/null >/dev/null
+                echo "[mc ls hiclaw-storage]";
+                mc ls --recursive local/hiclaw-storage 2>&1 | head -40
+                echo ""
+                echo "[workers-registry.json]";
+                mc cat local/hiclaw-storage/config/workers-registry.json 2>&1 | head -80
+                echo ""
+                echo "[agents/graph-worker/SOUL.md head -40]";
+                mc cat local/hiclaw-storage/agents/graph-worker/SOUL.md 2>&1 | head -40
+                echo ""
+                echo "[agents/graph-worker/AGENTS.md head -40]";
+                mc cat local/hiclaw-storage/agents/graph-worker/AGENTS.md 2>&1 | head -40
+              ' 2>&1 | sed -E "s/(\"[A-Za-z_]*[Tt]oken\"|\"[A-Za-z_]*[Ss]ecret\"|\"apiKey\"|\"password\"|\"matrixToken\"|\"accessToken\"|\"registrationToken\")\s*:\s*\"[^\"]+\"/\1: \"<REDACTED>\"/g" | head -250
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5mm. openclaw log — search for skill/extension/plugin lines"
+            echo "=========================================="
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c '
+                  LOG=$(ls -1t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -1)
+                  if [ -z "$LOG" ]; then echo "(no openclaw log)"; exit 0; fi
+                  echo "[log path: $LOG]"
+                  grep -E "skill|extension|plugin|mcporter|file-sync|SOUL|AGENTS|resolved" "$LOG" 2>/dev/null | head -30
+                  echo ""
+                  echo "[grep ERROR/WARN last 20]"
+                  grep -E "ERROR|WARN|error|warn" "$LOG" 2>/dev/null | tail -20
+                ' 2>&1 | head -80
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
             echo "6. Recent deployment events"
             echo "=========================================="
             kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
