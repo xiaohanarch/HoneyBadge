@@ -292,7 +292,15 @@ spec:
                   name: honeybadge-secrets
                   key: HICLAW_ADMIN_PASSWORD
             - name: HICLAW_DEFAULT_MODEL
-              value: "glm-5"
+              # qwen3-coder-plus: 256K context, Alibaba-native, well-supported on
+              # coding.dashscope.aliyuncs.com. Replaced glm-5 (16K context limit
+              # registered in openclaw's tokenizer DB) which caused repeated
+              # "Context overflow: prompt too large for the model (precheck)"
+              # failures after only 30-50 tool-loop messages, with auto-compaction
+              # tripping "already_compacted_recently" circuit breaker. See v12
+              # diagnose run 25929873679 — section 5mm logs from both workers
+              # showed >10 overflow events / hour on glm-5.
+              value: "qwen3-coder-plus"
             # Disable memorySearch (LOAD-BEARING — see docs/1.1.0-upgrade-followups.md
             # Bucket 1 Q4). hiclaw-env.sh uses ${VAR-default} (single dash), so an
             # explicit empty string is the only way to opt out of the broken
