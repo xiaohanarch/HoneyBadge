@@ -243,6 +243,107 @@ jobs:
 
             echo ""
             echo "=========================================="
+            echo "5j. Worker pod logs (graph-worker + analytics-worker, last 200 lines)"
+            echo "=========================================="
+            # Manager-side allowlist is already verified (5g/5h). E2E failures show
+            # the Manager dispatches tasks (erp-* IDs in 'helper' msg) but worker
+            # results never come back. Capture worker stdout to see if LLM call hangs,
+            # Matrix send fails, or skill never fires.
+            for ROLE in graph-worker analytics-worker; do
+              echo "--- hiclaw-$ROLE ---"
+              W_POD=$(kubectl -n $NS get pod -l "app.kubernetes.io/name=hiclaw-$ROLE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              if [ -n "$W_POD" ]; then
+                kubectl -n $NS logs "$W_POD" --tail=200 2>&1 | tail -200
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5k. Worker openclaw.json — LLM baseUrl + Matrix creds"
+            echo "=========================================="
+            # Workers reach Higress via aigw-local.hiclaw.io:8080 (NOT hiclaw-manager:8080).
+            # baseUrl MUST end in /v1 or OpenAI SDK request shape is wrong.
+            # matrix.homeserver must be reachable from worker pod; userId must match
+            # a registered Matrix account.
+            for ROLE in graph-worker analytics-worker; do
+              echo "--- $ROLE openclaw.json ---"
+              W_POD=$(kubectl -n $NS get pod -l "app.kubernetes.io/name=hiclaw-$ROLE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              if [ -n "$W_POD" ]; then
+                kubectl -n $NS exec "$W_POD" -- sh -c '
+                  for F in /root/openclaw.json /root/worker-workspace/openclaw.json; do
+                    [ -f "$F" ] && echo "FOUND: $F" && python3 -c "
+import json,sys
+d=json.load(open(\"$F\"))
+llm=d.get(\"llm\",{}) or d.get(\"providers\",{}).get(\"default\",{})
+print(\"  llm.baseUrl :\", llm.get(\"baseUrl\"))
+print(\"  llm.model   :\", llm.get(\"model\"))
+print(\"  llm.provider:\", llm.get(\"provider\"))
+ch=d.get(\"channels\",{}).get(\"matrix\",{})
+print(\"  matrix.homeserver:\", ch.get(\"homeserver\"))
+print(\"  matrix.userId    :\", ch.get(\"userId\"))
+print(\"  matrix.allowFrom :\", (ch.get(\"dm\",{}) or {}).get(\"allowFrom\"))
+" 2>&1
+                  done
+                ' 2>&1 | head -40
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5l. Manager erp-* task state (last 30 min) — did Manager record dispatches?"
+            echo "=========================================="
+            # If E2E sent queries in the last 30 min, Manager should have written
+            # erp-task state files. Empty result here means dispatch was never
+            # recorded; populated means worker callback is the missing link.
+            if [ -n "$MGR_POD" ]; then
+              kubectl -n $NS exec "$MGR_POD" -- sh -c '
+                echo "--- /root/manager-workspace tree (depth=2) ---"
+                find /root/manager-workspace -maxdepth 2 2>/dev/null | head -40
+                echo ""
+                echo "--- erp-* artifacts modified in last 30 min ---"
+                find /root/manager-workspace /root /tmp -maxdepth 4 -name "erp-*" -mmin -30 2>/dev/null | head -20
+                echo ""
+                echo "--- last 5 task files (any name) modified in last 30 min ---"
+                find /root/manager-workspace -maxdepth 3 -type f -mmin -30 2>/dev/null | head -10
+              ' 2>&1 | head -80
+            else
+              echo "(no manager pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5m. Worker process tree + Matrix homeserver connectivity"
+            echo "=========================================="
+            # Worker must (a) have a live openclaw process polling Matrix, and
+            # (b) be able to TCP-reach the Tuwunel homeserver. If openclaw isn't
+            # polling /sync, worker never sees the Manager dispatch DM.
+            for ROLE in graph-worker analytics-worker; do
+              echo "--- $ROLE ---"
+              W_POD=$(kubectl -n $NS get pod -l "app.kubernetes.io/name=hiclaw-$ROLE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              if [ -n "$W_POD" ]; then
+                kubectl -n $NS exec "$W_POD" -- sh -c '
+                  echo "ps:"
+                  ps -ef 2>&1 | grep -E "openclaw|claude|agent|start-" | grep -v grep | head -10
+                  echo ""
+                  echo "tcp -> matrix-local.hiclaw.io:6167:"
+                  (timeout 3 bash -c "</dev/tcp/matrix-local.hiclaw.io/6167" && echo "  OK") 2>&1 | head -3
+                  echo "tcp -> aigw-local.hiclaw.io:8080:"
+                  (timeout 3 bash -c "</dev/tcp/aigw-local.hiclaw.io/8080" && echo "  OK") 2>&1 | head -3
+                ' 2>&1 | head -25
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
             echo "6. Recent deployment events"
             echo "=========================================="
             kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
