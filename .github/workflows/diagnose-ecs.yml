@@ -333,6 +333,126 @@ jobs:
 
             echo ""
             echo "=========================================="
+            echo "5n. Worker PID 1 cmdline + entrypoint scripts"
+            echo "=========================================="
+            # v4 5m showed worker pod ONLY has 'openclaw-gateway' as PID 1 —
+            # no claude/agent process. Need to know what PID 1's real argv is
+            # and what entrypoint scripts exist in the image, to find the
+            # missing agent startup step.
+            for ROLE in graph-worker analytics-worker; do
+              echo "--- $ROLE ---"
+              W_POD=$(kubectl -n $NS get pod -l "app.kubernetes.io/name=hiclaw-$ROLE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              if [ -n "$W_POD" ]; then
+                kubectl -n $NS exec "$W_POD" -- sh -c '
+                  echo "PID 1 cmdline:"
+                  tr "\0" " " < /proc/1/cmdline 2>/dev/null; echo
+                  echo ""
+                  echo "PID 1 environ (HICLAW/MATRIX/AIGW/OPENCLAW only):"
+                  tr "\0" "\n" < /proc/1/environ 2>/dev/null | grep -iE "HICLAW|MATRIX|AIGW|OPENCLAW|TUWUNEL|HOMESERVER" | sort
+                  echo ""
+                  echo "Entrypoint candidates:"
+                  ls -la /entrypoint* /start-* /root/start-* /usr/local/bin/start-* /usr/local/bin/entrypoint* 2>/dev/null
+                ' 2>&1 | head -50
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5o. Worker filesystem layout (find openclaw.json + workspace dirs)"
+            echo "=========================================="
+            # v4 5k failed grep on /root/openclaw.json and /root/worker-workspace/openclaw.json.
+            # Find where openclaw.json actually lives.
+            for ROLE in graph-worker analytics-worker; do
+              echo "--- $ROLE ---"
+              W_POD=$(kubectl -n $NS get pod -l "app.kubernetes.io/name=hiclaw-$ROLE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              if [ -n "$W_POD" ]; then
+                kubectl -n $NS exec "$W_POD" -- sh -c '
+                  echo "find openclaw.json (max 5 hits):"
+                  find / -name "openclaw.json" -not -path "/proc/*" -not -path "/sys/*" 2>/dev/null | head -5
+                  echo ""
+                  echo "/root listing:"
+                  ls -la /root/ 2>/dev/null
+                  echo ""
+                  echo "workspace dir candidates:"
+                  ls -la /root/worker-workspace /root/.openclaw /workspace /opt/openclaw /opt/hiclaw 2>/dev/null
+                ' 2>&1 | head -40
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5p. Worker — has agent ever started? (history / logs / lockfiles)"
+            echo "=========================================="
+            # If worker agent was ever supposed to start, we should find log files
+            # or lock/pid files. Absence => entrypoint never invoked agent.
+            for ROLE in graph-worker analytics-worker; do
+              echo "--- $ROLE ---"
+              W_POD=$(kubectl -n $NS get pod -l "app.kubernetes.io/name=hiclaw-$ROLE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              if [ -n "$W_POD" ]; then
+                kubectl -n $NS exec "$W_POD" -- sh -c '
+                  echo "all processes (ps or /proc fallback):"
+                  ps -ef 2>/dev/null | head -20 || ls /proc/[0-9]*/comm 2>/dev/null | head -20
+                  echo ""
+                  echo "/tmp listing:"
+                  ls -la /tmp/ 2>/dev/null | head -20
+                  echo ""
+                  echo "/var/log listing:"
+                  ls -la /var/log/ 2>/dev/null | head -20
+                  echo ""
+                  echo "log/pid/lock files (top 20):"
+                  find / -maxdepth 5 \( -name "*.log" -o -name "*.pid" -o -name "*.lock" \) -not -path "/proc/*" -not -path "/sys/*" 2>/dev/null | head -20
+                ' 2>&1 | head -80
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5q. Worker Matrix session + credentials state"
+            echo "=========================================="
+            # If worker never logged into Matrix, it cannot /sync to see Manager DMs.
+            for ROLE in graph-worker analytics-worker; do
+              echo "--- $ROLE ---"
+              W_POD=$(kubectl -n $NS get pod -l "app.kubernetes.io/name=hiclaw-$ROLE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              if [ -n "$W_POD" ]; then
+                kubectl -n $NS exec "$W_POD" -- sh -c '
+                  echo "matrix-related files:"
+                  find / -maxdepth 6 \( -iname "*matrix*" -o -iname "*tuwunel*" -o -iname "*credential*" -o -iname "*session*" \) -not -path "/proc/*" -not -path "/sys/*" -not -path "*/node_modules/*" 2>/dev/null | head -15
+                  echo ""
+                  echo "env (Matrix/homeserver related):"
+                  env 2>/dev/null | grep -iE "MATRIX|TUWUNEL|HOMESERVER|HICLAW_MATRIX" | sort
+                ' 2>&1 | head -30
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5r. Worker Deployment manifest — command/args/env from k8s"
+            echo "=========================================="
+            # Compare with Manager Deployment. If Manager has a start-manager-agent.sh
+            # in command/args but workers don't, that's the missing piece.
+            for DEP in hiclaw-graph-worker hiclaw-analytics-worker hiclaw-manager; do
+              echo "--- $DEP command/args/env ---"
+              kubectl -n $NS get deploy "$DEP" -o jsonpath='{range .spec.template.spec.containers[*]}name={.name}{"\n"}command={.command}{"\n"}args={.args}{"\n"}{end}' 2>&1
+              echo ""
+              echo "--- $DEP env names ---"
+              kubectl -n $NS get deploy "$DEP" -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}{"\n"}{end}' 2>&1 | sort | head -30
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
             echo "6. Recent deployment events"
             echo "=========================================="
             kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
