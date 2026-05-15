@@ -764,6 +764,56 @@ jobs:
 
             echo ""
             echo "=========================================="
+            echo "5ii. Worker openclaw.json FULL content (redacted) — agents/tools/plugins"
+            echo "=========================================="
+            # v10 showed top-level keys are agents, channels, gateway, models,
+            # plugins, session, tools — NO 'skills' key. v1.1.0 likely registers
+            # MCP via tools or plugins. Dump those sections to know what to patch.
+            POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-graph-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -n "$POD" ]; then
+              kubectl -n $NS exec "$POD" -- sh -c '
+                CFG=/root/hiclaw-fs/agents/graph-worker/openclaw.json;
+                if [ ! -f "$CFG" ]; then echo "(missing $CFG)"; exit 0; fi
+                if ! command -v jq >/dev/null 2>&1; then echo "(no jq)"; head -200 "$CFG"; exit 0; fi
+                echo "[agents section]"; jq -r ".agents" "$CFG" | head -40
+                echo ""
+                echo "[tools section]"; jq -r ".tools" "$CFG" | head -60
+                echo ""
+                echo "[plugins section]"; jq -r ".plugins" "$CFG" | head -60
+                echo ""
+                echo "[session section]"; jq -r ".session" "$CFG" | head -40
+              ' 2>&1 | sed -E "s/(\"[A-Za-z_]*[Tt]oken\"|\"[A-Za-z_]*[Ss]ecret\"|\"apiKey\"|\"password\"|\"matrixToken\"|\"accessToken\"|\"registrationToken\")\s*:\s*\"[^\"]+\"/\1: \"<REDACTED>\"/g" | head -250
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5jj. Worker /root/skills/ FULL recursive listing + look for SKILL.md anywhere"
+            echo "=========================================="
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c '
+                  echo "[ls -laR /root/skills (truncated)]";
+                  ls -laR /root/skills 2>&1 | head -60
+                  echo ""
+                  echo "[locate SKILL.md anywhere readable]";
+                  find / -name SKILL.md -type f 2>/dev/null | head -20
+                  echo ""
+                  echo "[/opt/openclaw + /opt/hiclaw skill scaffolding]";
+                  for D in /opt/openclaw/skills /opt/hiclaw/skills /opt/hiclaw/agent/skills /usr/share/openclaw/skills; do
+                    if [ -d "$D" ]; then echo "  found: $D"; ls -la "$D" | head -15; fi
+                  done
+                  echo ""
+                  echo "[mcporter related binaries/files]";
+                  which mcporter 2>&1; ls -la "$(which mcporter 2>/dev/null)" 2>&1 || true
+                ' 2>&1 | head -150
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
             echo "6. Recent deployment events"
             echo "=========================================="
             kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
