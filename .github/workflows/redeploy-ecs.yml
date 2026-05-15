@@ -65,8 +65,18 @@ jobs:
             # apply -k regenerates ConfigMaps in-place (kustomization.yaml
             # sets disableNameSuffixHash: true so names are stable). New
             # resources like hiclaw-embedded get created if missing.
+            #
+            # Must use kustomize build with --load-restrictor=LoadRestrictionsNone
+            # because configMapGenerator entries reference files outside the
+            # kustomization root (../hiclaw/, ../../hiclaw/). Plain
+            # `kubectl apply -k` runs kustomize in restricted mode and fails
+            # with "file sources: '...' is not in or below 'deploy/k8s'".
+            # This matches what deploy-k3s.yml does.
             cd "$REPO/deploy/k8s"
-            kubectl apply -k . 2>&1 | tee /tmp/redeploy-apply.log
+            MANIFEST_FILE=$(mktemp /tmp/redeploy-manifest-XXXXXX.yaml)
+            kustomize build --load-restrictor=LoadRestrictionsNone . > "$MANIFEST_FILE"
+            kubectl apply -f "$MANIFEST_FILE" 2>&1 | tee /tmp/redeploy-apply.log
+            rm -f "$MANIFEST_FILE"
 
             echo ""
             echo "=========================================="
