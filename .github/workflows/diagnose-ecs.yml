@@ -453,6 +453,111 @@ jobs:
 
             echo ""
             echo "=========================================="
+            echo "5s. Worker openclaw.json — live vs MinIO-synced source"
+            echo "=========================================="
+            # Active config: /root/.openclaw/openclaw.json (what openclaw-gateway actually reads)
+            # MinIO-synced:  /root/hiclaw-fs/agents/<role>/openclaw.json (source of truth from embedded MinIO)
+            # Need both to verify (a) sync happened (b) provider/baseUrl/model are correct
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                echo "[active] /root/.openclaw/openclaw.json size + key fields:"
+                kubectl -n $NS exec "$POD" -- sh -c 'ls -la /root/.openclaw/openclaw.json 2>&1; echo "---"; grep -E "\"(providers|matrix|homeserver|userId|baseUrl|model|primary|provider|domain)\"" /root/.openclaw/openclaw.json 2>&1 | head -40' 2>&1 | head -50
+                echo ""
+                echo "[source] /root/hiclaw-fs/agents/'"$ROLE"'/openclaw.json size + key fields:"
+                kubectl -n $NS exec "$POD" -- sh -c "ls -la /root/hiclaw-fs/agents/$ROLE/openclaw.json 2>&1; echo '---'; grep -E '\"(providers|matrix|homeserver|userId|baseUrl|model|primary|provider|domain)\"' /root/hiclaw-fs/agents/$ROLE/openclaw.json 2>&1 | head -40" 2>&1 | head -50
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5t. openclaw-gateway daily log tail"
+            echo "=========================================="
+            # /tmp/openclaw/openclaw-YYYY-MM-DD.log is the gateway's own log file
+            # (separate from container stdout, which is only the heartbeat).
+            # This is where LLM calls, /sync errors, and Matrix delivery failures live.
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) — last 200 lines of latest /tmp/openclaw/*.log ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c 'ls -la /tmp/openclaw/ 2>&1; echo "---"; LATEST=$(ls -t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -1); if [ -n "$LATEST" ]; then echo "[file=$LATEST]"; tail -200 "$LATEST"; else echo "(no openclaw-*.log files)"; fi' 2>&1 | head -250
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5u. Matrix sessions.json — keys + room/channel inventory"
+            echo "=========================================="
+            # Wake-up logic in worker-init-wrapper.sh depends on this file existing
+            # with matrix:channel entries. Workers are ephemeral (no PVC), so on a
+            # fresh pod this may be empty → workers appear online but ignore DMs.
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c 'find /root/.openclaw -name "sessions.json" -o -name "sessions" 2>/dev/null; echo "---"; for f in /root/.openclaw/agents/main/sessions/sessions.json /root/.openclaw/sessions.json; do if [ -f "$f" ]; then echo "[file=$f size=$(wc -c <$f)]"; echo "top-level keys:"; grep -oE "\"[a-zA-Z0-9_:-]+\":" "$f" 2>/dev/null | sort -u | head -40; echo "matrix:channel entries:"; grep -oE "\"matrix:[^\"]+\"" "$f" 2>/dev/null | sort -u | head -20; fi; done' 2>&1 | head -80
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5v. MinIO authoritative copy of worker openclaw.json"
+            echo "=========================================="
+            # Source of truth lives in MinIO bucket on the embedded pod.
+            # If the live pod was patched but MinIO wasn't, the next pod restart
+            # will pull stale config. If MinIO is patched but live is stale,
+            # init-wrapper sync failed.
+            EMB=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-embedded -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            echo "--- embedded pod: $EMB ---"
+            if [ -n "$EMB" ]; then
+              echo "MinIO bucket layout (agents/):"
+              kubectl -n $NS exec "$EMB" -c minio -- sh -c 'mc ls --recursive local/hiclaw 2>&1 | grep -E "agents/(graph-worker|analytics-worker)/" | head -20' 2>&1 | head -25
+              echo ""
+              for ROLE in graph-worker analytics-worker; do
+                echo "[minio] agents/$ROLE/openclaw.json key fields:"
+                kubectl -n $NS exec "$EMB" -c minio -- sh -c "mc cat local/hiclaw/agents/$ROLE/openclaw.json 2>&1 | grep -E '\"(providers|matrix|homeserver|userId|baseUrl|model|primary|provider|domain)\"' | head -40" 2>&1 | head -45
+                echo ""
+              done
+            else
+              echo "(no embedded pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5w. Worker pod startup logs — init-wrapper + entrypoint output"
+            echo "=========================================="
+            # Container stdout from current + previous pods. Captures
+            # worker-init-wrapper.sh prints, sync exit codes, wake-up nudge
+            # attempts, and the openclaw-gateway boot banner.
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) — current pod logs (first 200 lines = init phase) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS logs "$POD" --tail=100000 2>&1 | head -200
+                echo ""
+                echo "--- $ROLE — current pod logs (last 80 lines = recent activity) ---"
+                kubectl -n $NS logs "$POD" --tail=80 2>&1
+                echo ""
+                echo "--- $ROLE — previous pod logs init phase (if any) ---"
+                kubectl -n $NS logs "$POD" --previous --tail=200 2>&1 | head -80 || echo "(no previous pod)"
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
             echo "6. Recent deployment events"
             echo "=========================================="
             kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
