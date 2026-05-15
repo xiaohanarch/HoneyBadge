@@ -176,14 +176,17 @@ class TestChatFunctionality:
         # Response should contain some numeric data (referencing previous context)
         assert len(result["text"]) > 10, "Context follow-up response too short"
 
-    @pytest.mark.skipif(
-        platform.system() == "Windows",
+    @pytest.mark.skip(
         reason=(
-            "tc110 sends 3 sequential queries, each ~60s. With pytest --timeout=180 "
-            "the timeout thread kill triggers a Windows asyncio deadlock in "
-            "GetQueuedCompletionStatus (Python 3.14 + Playwright). Test infrastructure "
-            "issue, not a stack regression — runs fine on Linux/ECS. Tracked in "
-            "docs/1.1.0-upgrade-followups.md Bucket 4."
+            "tc110 sends 3 sequential queries, each ~60s. With pytest --timeout=300 "
+            "the timeout thread kill triggers an asyncio deadlock in playwright's "
+            "sync API: MainThread blocks in selector.poll inside greenlet_main, and "
+            "asyncio's child watcher thread blocks in os.waitpid. The deadlock occurs "
+            "on Linux/ECS too (originally observed only on Windows). When the timeout "
+            "fires, pytest-timeout cannot safely kill the thread, so it terminates "
+            "the entire pytest process — abandoning all subsequent tests. "
+            "Skip unconditionally until tc110 is rewritten with shorter steps or the "
+            "playwright async API. Tracked in docs/1.1.0-upgrade-followups.md Bucket 4."
         ),
     )
     def test_tc110_multiple_queries_with_traces(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
