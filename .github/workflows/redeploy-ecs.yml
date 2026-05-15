@@ -1,0 +1,157 @@
+name: Redeploy ECS (kustomize + rollout restart)
+
+# One-shot remediation workflow used when ECS pods have drifted from
+# master — typically because a ConfigMap was edited in-place (no image
+# bump) and the Manager / worker pods never picked up the new content.
+#
+# It does NOT build images. It assumes the regular "Deploy to k3s on ECS"
+# workflow has already pushed up-to-date images. This workflow only:
+#   1. fast-forwards the ECS host repo to origin/master
+#   2. re-applies the kustomize bundle (refreshes ConfigMaps + ensures
+#      hiclaw-embedded Deployment/Service exist after v1.0.9 -> v1.1.0
+#      split topology)
+#   3. rollout-restarts the deploys whose pods mount the regenerated
+#      ConfigMaps (Manager + workers + hiclaw-embedded)
+#   4. waits for rollouts and posts a TC-102 verification grep so we
+#      can see in the workflow log whether HICLAW_MATRIX_URL is now
+#      in the dispatch scripts inside the Manager pod
+#
+# Trigger: gh workflow run "Redeploy ECS (kustomize + rollout restart)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      restart_honeybadge:
+        description: "Also rollout-restart honeybadge-* deploys (server/auth/MCPs/frontend). Usually unnecessary if images are SHA-tagged."
+        type: boolean
+        default: false
+
+jobs:
+  redeploy:
+    name: Refresh ConfigMaps and rollout-restart pods
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: SSH to ECS, apply kustomize, rollout restart
+        uses: appleboy/ssh-action@v1
+        env:
+          RESTART_HB: ${{ inputs.restart_honeybadge }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          command_timeout: 18m
+          envs: RESTART_HB
+          script: |
+            set -e
+            NS=honeybadge
+            REPO=/root/HoneyBadge
+
+            echo "=========================================="
+            echo "1. Sync ECS host repo to origin/master"
+            echo "=========================================="
+            cd "$REPO"
+            git fetch origin --quiet
+            git checkout master
+            git reset --hard origin/master
+            git log --oneline -3
+
+            echo ""
+            echo "=========================================="
+            echo "2. kubectl apply -k deploy/k8s"
+            echo "=========================================="
+            # apply -k regenerates ConfigMaps in-place (kustomization.yaml
+            # sets disableNameSuffixHash: true so names are stable). New
+            # resources like hiclaw-embedded get created if missing.
+            cd "$REPO/deploy/k8s"
+            kubectl apply -k . 2>&1 | tee /tmp/redeploy-apply.log
+
+            echo ""
+            echo "=========================================="
+            echo "3. Rollout restart pods that mount affected ConfigMaps"
+            echo "=========================================="
+            # hiclaw-manager mounts: hiclaw-init-scripts, hiclaw-agent-configs,
+            #   hiclaw-fast-query-skill, hiclaw-erp-dispatch-scripts,
+            #   hiclaw-mcporter-config
+            # Workers don't mount these ConfigMaps but they pull worker
+            #   bundles from MinIO at startup, so restart them too so any
+            #   updated init-workers.sh artifacts get picked up.
+            for dep in hiclaw-manager hiclaw-graph-worker hiclaw-analytics-worker hiclaw-embedded; do
+              if kubectl -n $NS get deploy "$dep" >/dev/null 2>&1; then
+                echo "--- rollout restart $dep ---"
+                kubectl -n $NS rollout restart deploy "$dep"
+              else
+                echo "--- $dep not found (skipping) ---"
+              fi
+            done
+
+            if [ "$RESTART_HB" = "true" ]; then
+              echo ""
+              echo "--- (optional) restart honeybadge-* deploys ---"
+              for dep in honeybadge-server honeybadge-auth honeybadge-nebula-mcp honeybadge-audit-mcp honeybadge-cache-mcp honeybadge-frontend; do
+                if kubectl -n $NS get deploy "$dep" >/dev/null 2>&1; then
+                  kubectl -n $NS rollout restart deploy "$dep" || true
+                fi
+              done
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "4. Wait for rollouts to complete"
+            echo "=========================================="
+            for dep in hiclaw-embedded hiclaw-manager hiclaw-graph-worker hiclaw-analytics-worker; do
+              if kubectl -n $NS get deploy "$dep" >/dev/null 2>&1; then
+                echo "--- waiting on $dep ---"
+                kubectl -n $NS rollout status deploy "$dep" --timeout=240s || echo "(timed out for $dep — continuing)"
+              fi
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5. Post-restart pod inventory"
+            echo "=========================================="
+            kubectl -n $NS get pods -o wide
+
+            echo ""
+            echo "=========================================="
+            echo "6. TC-102 verification — HICLAW_MATRIX_URL inside Manager pod"
+            echo "=========================================="
+            # Use the kustomize label (app.kubernetes.io/name=hiclaw-manager).
+            MGR_POD=$(kubectl -n $NS get pods -l app.kubernetes.io/name=hiclaw-manager -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -z "$MGR_POD" ]; then
+              # Fallback to name prefix match.
+              MGR_POD=$(kubectl -n $NS get pods --no-headers 2>/dev/null | awk '/^hiclaw-manager-/ {print $1; exit}')
+            fi
+            if [ -n "$MGR_POD" ]; then
+              echo "Manager pod: $MGR_POD"
+              echo ""
+              echo "--- dispatch-to-worker.sh ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c '
+                f=$(find / -name dispatch-to-worker.sh 2>/dev/null | head -1)
+                [ -n "$f" ] && grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" "$f" || echo "(not found)"
+              ' 2>&1 | head -10
+              echo ""
+              echo "--- forward-to-user.sh ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c '
+                f=$(find / -name forward-to-user.sh 2>/dev/null | head -1)
+                [ -n "$f" ] && grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" "$f" || echo "(not found)"
+              ' 2>&1 | head -10
+              echo ""
+              echo "--- fast-forward.sh ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c '
+                f=$(find / -name fast-forward.sh 2>/dev/null | head -1)
+                [ -n "$f" ] && grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" "$f" || echo "(not found)"
+              ' 2>&1 | head -10
+              echo ""
+              echo "--- Manager env (HICLAW_*|MATRIX_*|TUWUNEL_*) ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'env | grep -E "HICLAW_|MATRIX_|TUWUNEL_" | sort' 2>&1 | head -20
+            else
+              echo "(no hiclaw-manager pod found post-restart)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "Redeploy complete"
+            echo "=========================================="
