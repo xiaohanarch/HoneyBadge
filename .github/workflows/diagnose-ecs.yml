@@ -567,7 +567,7 @@ jobs:
               POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
               echo "--- $ROLE ($POD) — full openclaw.json (with API key redacted) ---"
               if [ -n "$POD" ]; then
-                kubectl -n $NS exec "$POD" -- sh -c 'cat /root/.openclaw/openclaw.json 2>&1 | sed -E "s/(apiKey|password|token|secret)\":\s*\"[^\"]+\"/\1\": \"<REDACTED>\"/g"' 2>&1 | head -250
+                kubectl -n $NS exec "$POD" -- sh -c 'cat /root/.openclaw/openclaw.json 2>&1 | sed -E "s/(\"[A-Za-z_]*[Tt]oken\"|\"[A-Za-z_]*[Ss]ecret\"|\"apiKey\"|\"password\"|\"matrixToken\"|\"accessToken\"|\"registrationToken\")\s*:\s*\"[^\"]+\"/\1: \"<REDACTED>\"/g"' 2>&1 | head -400
               else
                 echo "(no $ROLE pod)"
               fi
@@ -603,9 +603,57 @@ jobs:
             POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-analytics-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
             echo "--- analytics-worker ($POD) ---"
             if [ -n "$POD" ]; then
-              kubectl -n $NS exec "$POD" -- sh -c 'cat /root/.openclaw/agents/main/sessions/sessions.json 2>&1 | sed -E "s/(apiKey|password|token|secret|accessToken|matrixToken)\":\s*\"[^\"]+\"/\1\": \"<REDACTED>\"/g"' 2>&1 | head -500
+              kubectl -n $NS exec "$POD" -- sh -c 'cat /root/.openclaw/agents/main/sessions/sessions.json 2>&1 | sed -E "s/(\"[A-Za-z_]*[Tt]oken\"|\"[A-Za-z_]*[Ss]ecret\"|\"apiKey\"|\"password\"|\"matrixToken\"|\"accessToken\"|\"registrationToken\")\s*:\s*\"[^\"]+\"/\1: \"<REDACTED>\"/g"' 2>&1 | head -500
             else
               echo "(no analytics-worker pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5aa. mcporter.json location search — both workers + embedded pod"
+            echo "=========================================="
+            # v7 5z revealed analytics-worker is BLOCKED with
+            #   "MCP config file missing at /root/hiclaw-fs/agents/analytics-worker/config/mcporter.json"
+            # graph-worker is known-working, so its mcporter.json must live somewhere.
+            # Find where (baked in image? mounted? MinIO-synced under a different key?).
+            for ROLE in graph-worker analytics-worker; do
+              POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-$ROLE -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              echo "--- $ROLE ($POD) ---"
+              if [ -n "$POD" ]; then
+                kubectl -n $NS exec "$POD" -- sh -c 'echo "[find / -name mcporter.json]"; find / -name "mcporter.json" 2>/dev/null; echo ""; echo "[find / -name mcporter*]"; find / -name "mcporter*" 2>/dev/null | head -20; echo ""; echo "[which mcporter]"; which mcporter 2>&1; echo ""; echo "[mcporter --version]"; mcporter --version 2>&1 | head -5; echo ""; echo "[ls /root/hiclaw-fs/agents/$(hostname | sed s/hiclaw-//g | sed s/-[0-9a-f]*//g)/config/ 2>&1]"; ls -la /root/hiclaw-fs/agents/*/config/ 2>&1 | head -40; echo ""; echo "[env | grep -i mcp]"; env | grep -i mcp 2>&1' 2>&1 | head -80
+              else
+                echo "(no $ROLE pod)"
+              fi
+              echo ""
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "5bb. MinIO bucket layout — what is synced to each worker"
+            echo "=========================================="
+            # If mcporter.json lives in MinIO under a specific role's config/ dir,
+            # we'll see the asymmetry here.
+            EMB=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-embedded -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            echo "--- hiclaw-embedded ($EMB) — MinIO data layout ---"
+            if [ -n "$EMB" ]; then
+              kubectl -n $NS exec "$EMB" -- sh -c 'find /data -type f \( -name "*.json" -o -name "*.md" \) 2>/dev/null | head -60; echo ""; echo "[All directories under /data]"; find /data -type d 2>/dev/null | head -60' 2>&1 | head -130
+            else
+              echo "(no embedded pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5cc. MCP servers reachability + endpoints from worker"
+            echo "=========================================="
+            # Confirm MCP servers exist as Services and are reachable from worker
+            # pod network. If mcporter is missing config, the worker won't even
+            # try, but we want to confirm the infra is up so the fix is unblocking.
+            kubectl -n $NS get svc 2>&1 | grep -i -E 'mcp|nebula|audit|cache' | head -20
+            echo ""
+            POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-graph-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            echo "--- graph-worker DNS resolve mcp servers ---"
+            if [ -n "$POD" ]; then
+              kubectl -n $NS exec "$POD" -- sh -c 'for SVC in honeybadge-nebula-mcp honeybadge-audit-mcp honeybadge-cache-mcp; do echo "[$SVC]"; getent hosts $SVC 2>&1 || nslookup $SVC 2>&1 | head -5; done' 2>&1 | head -50
             fi
 
             echo ""
