@@ -1,0 +1,107 @@
+name: Diagnose ECS deployment state
+
+# One-shot diagnostic to verify what's actually deployed on the ECS k3s
+# cluster. Use to confirm whether a recent fix (e.g. TC-102 HICLAW_MATRIX_URL)
+# has been rolled into pods, or whether the cluster is running stale images
+# while master already has the fix.
+#
+# Run via: gh workflow run "Diagnose ECS deployment state"
+# Pure read-only (kubectl get/describe/exec grep).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    name: Snapshot ECS k3s pod versions and config state
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: SSH to ECS and gather diagnostics
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          command_timeout: 8m
+          script: |
+            set +e  # don't bail on individual kubectl misses
+            NS=honeybadge
+
+            echo "=========================================="
+            echo "1. Pod inventory ($NS namespace)"
+            echo "=========================================="
+            kubectl -n $NS get pods -o wide
+
+            echo ""
+            echo "=========================================="
+            echo "2. Container images per pod"
+            echo "=========================================="
+            kubectl -n $NS get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'
+
+            echo ""
+            echo "=========================================="
+            echo "3. Deployment image + last rollout"
+            echo "=========================================="
+            for dep in hiclaw-manager hiclaw-graph-worker hiclaw-analytics-worker honeybadge-hiclaw-embedded honeybadge-server honeybadge-auth honeybadge-nebula-mcp honeybadge-audit-mcp honeybadge-cache-mcp; do
+              echo ""
+              echo "--- $dep ---"
+              kubectl -n $NS get deploy "$dep" -o jsonpath='{.spec.template.spec.containers[*].image}{"\n"}' 2>/dev/null || echo "(not found)"
+              kubectl -n $NS rollout history deploy "$dep" 2>/dev/null | tail -5 || true
+              kubectl -n $NS get deploy "$dep" -o jsonpath='Last update: {.status.conditions[?(@.type=="Progressing")].lastUpdateTime}{"\n"}' 2>/dev/null || true
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "4. ConfigMap names + latest annotation timestamps"
+            echo "=========================================="
+            kubectl -n $NS get configmap -o custom-columns=NAME:.metadata.name,CREATED:.metadata.creationTimestamp 2>/dev/null
+
+            echo ""
+            echo "=========================================="
+            echo "5. Verify TC-102 fix: HICLAW_MATRIX_URL in Manager scripts"
+            echo "=========================================="
+            # The fix replaced hardcoded TUWUNEL_URL=127.0.0.1:6167 with
+            # HICLAW_MATRIX_URL across 4 sites. If these grep results show
+            # the env var, the configmap/image has the fix.
+            MGR_POD=$(kubectl -n $NS get pods -l app=hiclaw-manager -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            if [ -n "$MGR_POD" ]; then
+              echo "Manager pod: $MGR_POD"
+              echo ""
+              echo "--- forward-to-user.sh ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'grep -nE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" /usr/local/bin/forward-to-user.sh 2>/dev/null || find / -name forward-to-user.sh 2>/dev/null | head -3 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" {} 2>/dev/null' 2>&1 | head -20
+              echo ""
+              echo "--- dispatch-to-worker.sh ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'find / -name dispatch-to-worker.sh 2>/dev/null | head -3 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" {} 2>/dev/null' 2>&1 | head -20
+              echo ""
+              echo "--- fast-forward.sh ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'find / -name fast-forward.sh 2>/dev/null | head -3 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" {} 2>/dev/null' 2>&1 | head -20
+              echo ""
+              echo "--- SKILL.md inline python ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'find / -path "*erp-query-dispatch/SKILL.md" 2>/dev/null | head -1 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|127\.0\.0\.1:6167" {} 2>/dev/null' 2>&1 | head -20
+              echo ""
+              echo "--- Manager env vars (HICLAW_* + MATRIX_*) ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'env | grep -E "HICLAW_|MATRIX_|TUWUNEL_" | sort' 2>&1 | head -20
+            else
+              echo "(no hiclaw-manager pod found)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "6. Recent deployment events"
+            echo "=========================================="
+            kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
+
+            echo ""
+            echo "=========================================="
+            echo "7. Master HEAD on ECS host repo for reference"
+            echo "=========================================="
+            cd /root/HoneyBadge 2>/dev/null && git log --oneline -5 || echo "(no repo)"
+
+            echo ""
+            echo "=========================================="
+            echo "Diagnostics complete"
+            echo "=========================================="
+            exit 0
