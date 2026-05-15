@@ -149,6 +149,100 @@ jobs:
 
             echo ""
             echo "=========================================="
+            echo "5f. honeybadge-init.log tail (entrypoint-wrapper.sh background init)"
+            echo "=========================================="
+            # entrypoint-wrapper.sh writes ALL init progress to a file inside
+            # the Manager pod — kubectl logs only shows the native agent's
+            # stdout, not Step 4 (allowlist patch). This is the ONLY way to
+            # confirm whether manager-init-internal.sh actually ran.
+            if [ -n "$MGR_POD" ]; then
+              echo "--- /var/log/hiclaw/honeybadge-init.log (last 300 lines) ---"
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'tail -300 /var/log/hiclaw/honeybadge-init.log 2>&1 || echo "(log file missing — wrapper never wrote it)"' 2>&1 | tail -300
+            else
+              echo "(no manager pod — cannot read init log)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5g. Manager DM allowlist — LIVE value in /root/manager-workspace/openclaw.json"
+            echo "=========================================="
+            # Step 4 of manager-init-internal.sh is supposed to patch this
+            # to include @hb-* users. If it shows only [@admin], the patch
+            # never ran (or was overwritten by start-manager-agent.sh).
+            if [ -n "$MGR_POD" ]; then
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'python3 -c "
+            import json
+            try:
+                with open(\"/root/manager-workspace/openclaw.json\") as f:
+                    cfg = json.load(f)
+                ch = cfg.get(\"channels\", {}).get(\"matrix\", {})
+                print(\"dm.policy:\", ch.get(\"dm\", {}).get(\"policy\"))
+                print(\"dm.allowFrom:\")
+                for u in ch.get(\"dm\", {}).get(\"allowFrom\", []):
+                    print(\"  -\", u)
+                print(\"groupAllowFrom:\")
+                for u in ch.get(\"groupAllowFrom\", []):
+                    print(\"  -\", u)
+            except Exception as e:
+                print(\"ERROR:\", e)
+            "' 2>&1 | head -40
+            else
+              echo "(no manager pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5h. MinIO copy of manager openclaw.json — does it match the live pod copy?"
+            echo "=========================================="
+            # If init Step 4 ran successfully, it also synced openclaw.json
+            # to hiclaw/hiclaw-storage/agents/manager/openclaw.json. Compare
+            # the MinIO copy's allowlist to detect a divergence (e.g. pod
+            # was patched but native agent overwrote it after, or sync to
+            # MinIO failed while local patch succeeded).
+            if [ -n "$MGR_POD" ]; then
+              kubectl -n $NS exec "$MGR_POD" -- sh -c '
+                mc cp hiclaw/hiclaw-storage/agents/manager/openclaw.json /tmp/minio-manager-openclaw.json 2>&1 | tail -3
+                python3 -c "
+            import json
+            try:
+                with open(\"/tmp/minio-manager-openclaw.json\") as f:
+                    cfg = json.load(f)
+                ch = cfg.get(\"channels\", {}).get(\"matrix\", {})
+                print(\"[MinIO] dm.policy:\", ch.get(\"dm\", {}).get(\"policy\"))
+                print(\"[MinIO] dm.allowFrom:\")
+                for u in ch.get(\"dm\", {}).get(\"allowFrom\", []):
+                    print(\"  -\", u)
+            except Exception as e:
+                print(\"ERROR:\", e)
+            "
+              ' 2>&1 | head -40
+            else
+              echo "(no manager pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "5i. Manager openclaw.json file mtime + parent process tree (overwrite detector)"
+            echo "=========================================="
+            # If file mtime is newer than the [init] Step 4 timestamp in 5f,
+            # the native agent rewrote it AFTER the patch ran.
+            if [ -n "$MGR_POD" ]; then
+              kubectl -n $NS exec "$MGR_POD" -- sh -c '
+                echo "--- file mtime ---"
+                stat -c "%y %n" /root/manager-workspace/openclaw.json 2>/dev/null || ls -la /root/manager-workspace/openclaw.json 2>&1
+                echo ""
+                echo "--- container start time ---"
+                stat -c "%y %n" /proc/1 2>/dev/null
+                echo ""
+                echo "--- entrypoint process tree (any background init still alive?) ---"
+                ps -ef 2>&1 | grep -E "entrypoint-wrapper|manager-init|start-manager-agent" | grep -v grep
+              ' 2>&1 | head -30
+            else
+              echo "(no manager pod)"
+            fi
+
+            echo ""
+            echo "=========================================="
             echo "6. Recent deployment events"
             echo "=========================================="
             kubectl -n $NS get events --sort-by='.lastTimestamp' 2>/dev/null | tail -20
