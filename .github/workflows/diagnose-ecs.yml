@@ -272,22 +272,11 @@ jobs:
               echo "--- $ROLE openclaw.json ---"
               W_POD=$(kubectl -n $NS get pod -l "app.kubernetes.io/name=hiclaw-$ROLE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
               if [ -n "$W_POD" ]; then
-                kubectl -n $NS exec "$W_POD" -- sh -c '
-                  for F in /root/openclaw.json /root/worker-workspace/openclaw.json; do
-                    [ -f "$F" ] && echo "FOUND: $F" && python3 -c "
-import json,sys
-d=json.load(open(\"$F\"))
-llm=d.get(\"llm\",{}) or d.get(\"providers\",{}).get(\"default\",{})
-print(\"  llm.baseUrl :\", llm.get(\"baseUrl\"))
-print(\"  llm.model   :\", llm.get(\"model\"))
-print(\"  llm.provider:\", llm.get(\"provider\"))
-ch=d.get(\"channels\",{}).get(\"matrix\",{})
-print(\"  matrix.homeserver:\", ch.get(\"homeserver\"))
-print(\"  matrix.userId    :\", ch.get(\"userId\"))
-print(\"  matrix.allowFrom :\", (ch.get(\"dm\",{}) or {}).get(\"allowFrom\"))
-" 2>&1
-                  done
-                ' 2>&1 | head -40
+                # Use grep on the raw JSON instead of a python heredoc to avoid
+                # YAML block-scalar indent issues that broke run 25924088402.
+                # Field list mirrors the CLAUDE.md gotchas: baseUrl ends in /v1,
+                # model+provider not overwritten by qwen default, matrix creds set.
+                kubectl -n $NS exec "$W_POD" -- sh -c 'for F in /root/openclaw.json /root/worker-workspace/openclaw.json; do [ -f "$F" ] && echo "FOUND: $F" && grep -E "\"(baseUrl|model|provider|homeserver|userId|allowFrom)\"" "$F" | head -20; done' 2>&1 | head -40
               else
                 echo "(no $ROLE pod)"
               fi
