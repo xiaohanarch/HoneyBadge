@@ -691,37 +691,14 @@ jobs:
 
             echo ""
             echo "=========================================="
-            echo "5ff. Most recent analytics-worker session activity"
+            echo "5ff. Most recent analytics-worker session activity (jq)"
             echo "=========================================="
-            # Filter sessions.json for entries updated in last 30 min via lastActivity
+            # Filter sessions.json for top 5 most recently updated sessions.
+            # Uses jq (single-line, no embedded multi-line Python — avoids YAML
+            # block scalar termination caused by col-0 heredoc content).
             POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=hiclaw-analytics-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
             if [ -n "$POD" ]; then
-              kubectl -n $NS exec "$POD" -- sh -c 'python3 -c "
-import json, sys
-from datetime import datetime, timezone, timedelta
-try:
-    with open(\"/root/.openclaw/agents/main/sessions/sessions.json\") as f:
-        s = json.load(f)
-except Exception as e:
-    print(f\"err: {e}\"); sys.exit(0)
-cutoff = (datetime.now(timezone.utc) - timedelta(minutes=60)).timestamp() * 1000
-recent = []
-for k, v in s.items():
-    la = v.get(\"lastActivity\", 0)
-    if la > cutoff:
-        recent.append((la, k, v))
-recent.sort(reverse=True)
-print(f\"=== Found {len(recent)} sessions updated in last 60 min ===\")
-for la, k, v in recent[:5]:
-    ts = datetime.fromtimestamp(la/1000, timezone.utc).isoformat()
-    print(f\"\\n--- key={k[:120]} ts={ts} status={v.get(\\\"status\\\")} compactionCount={v.get(\\\"compactionCount\\\",0)} ---\")
-    cc = v.get(\"compactionCheckpoints\", [])
-    if cc:
-        print(\"latest summary:\")
-        print(cc[-1].get(\"summary\",\"\")[:800])
-    sk = v.get(\"skillsSnapshot\",{}).get(\"resolvedSkills\",[])
-    print(f\"resolvedSkills: {sk}\")
-"' 2>&1 | head -200
+              kubectl -n $NS exec "$POD" -- sh -c 'F=/root/.openclaw/agents/main/sessions/sessions.json; if [ ! -f "$F" ]; then echo "(sessions.json not found at $F)"; exit 0; fi; if ! command -v jq >/dev/null 2>&1; then echo "(jq not installed; falling back to raw head)"; head -300 "$F"; exit 0; fi; echo "[top 5 sessions by lastActivity]"; jq -r "to_entries | map({key, la: (.value.lastActivity // 0), status: .value.status, cc: (.value.compactionCount // 0), skills: (.value.skillsSnapshot.resolvedSkills // [])}) | sort_by(-.la) | .[0:5] | .[] | \"---\nkey=\\(.key[0:120])\nlastActivity=\\(.la)\nstatus=\\(.status)\ncompactionCount=\\(.cc)\nresolvedSkills=\\(.skills)\"" "$F" 2>&1; echo ""; echo "[latest compaction summary, if any]"; jq -r "to_entries | sort_by(-(.value.lastActivity // 0)) | .[0].value.compactionCheckpoints // [] | if length > 0 then .[-1].summary[0:800] else \"(no compaction checkpoints)\" end" "$F" 2>&1' 2>&1 | head -200
             fi
 
             echo ""
