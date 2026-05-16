@@ -49,8 +49,72 @@ def _wait_for_current_session(page_obj, timeout=30000):
     )
 
 
-def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000):
-    """Wait for a NEW assistant message to appear with meaningful content (>10 chars)."""
+def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 15000):
+    """Stage-2 wait: settle on the actual response, not Manager's dispatch ack/preamble.
+
+    Waits up to `timeout_ms` for ANY of:
+      1. Structured worker reply (cypher-collapse or data-collapse header in a new message)
+      2. Denial marker text (权限不足/permission denied/无权/Forbidden/access denied)
+      3. Last new-message body length stable for 2000ms (streaming finished naturally)
+
+    Exits silently on timeout — callers must let the test assertion fail naturally.
+
+    Why 15s (not 60s+): the suite has ~49 call sites; stacked long timeouts blew
+    past CI's 90-min wall and caused PR #105's -24 regression. 15s × 49 = ~12 min
+    worst case; healthy case is 2-3s via the text-stability signal.
+    """
+    page_obj.evaluate("() => { window.__hbStability = null; }")
+    try:
+        page_obj.wait_for_function(
+            f"""() => {{
+                const msgs = document.querySelectorAll('.chat-message.message-assistant');
+                if (msgs.length <= {existing_count}) return false;
+
+                // 1: structured worker contract-002 (cypher/data collapse)
+                for (let i = {existing_count}; i < msgs.length; i++) {{
+                    const m = msgs[i];
+                    if (m.querySelector('.data-collapse .el-collapse-item__header') ||
+                        m.querySelector('.cypher-collapse .el-collapse-item__header')) {{
+                        return true;
+                    }}
+                }}
+
+                // 2: denial markers (permission tests fail fast)
+                const denial = /权限不足|permission denied|无权|forbidden|access denied/i;
+                for (let i = {existing_count}; i < msgs.length; i++) {{
+                    const body = msgs[i].querySelector('.message-body') || msgs[i];
+                    if (denial.test(body.textContent)) return true;
+                }}
+
+                // 3: streaming stable — last new-message text length unchanged for 2s
+                const last = msgs[msgs.length - 1];
+                const body = last.querySelector('.message-body') || last;
+                const len = body ? body.textContent.trim().length : 0;
+                const now = Date.now();
+                if (!window.__hbStability || window.__hbStability.len !== len) {{
+                    window.__hbStability = {{ len: len, ts: now }};
+                    return false;
+                }}
+                return (now - window.__hbStability.ts) >= 2000;
+            }}""",
+            timeout=timeout_ms,
+            polling=200,
+        )
+    except Exception:
+        pass  # silent — let downstream assertion produce a meaningful error
+
+
+def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000,
+                            settle_timeout_ms: int = 15000):
+    """Wait for the assistant's actual response (not the Manager dispatch ack/preamble).
+
+    Two-stage wait:
+      Stage 1: any NEW assistant message with body text >10 chars (existing semantics)
+      Stage 2: response settled — Worker contract-002, denial marker, or text stable
+
+    Stage 2 is capped at 15s by default; pass `settle_timeout_ms=0` to skip it
+    (legacy callers that only need the first-message signal).
+    """
     page_obj.wait_for_function(
         f"""() => {{
             const msgs = document.querySelectorAll('.chat-message.message-assistant');
@@ -61,6 +125,8 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000):
         }}""",
         timeout=timeout,
     )
+    if settle_timeout_ms > 0:
+        _wait_for_response_settled(page_obj, existing_count, timeout_ms=settle_timeout_ms)
     page_obj.wait_for_timeout(200)
 
 
@@ -303,33 +369,10 @@ def send_query_and_get_response(page: Page):
         existing_count = page.locator(MSG_ASSISTANT).count()
         textarea.fill(query)
         textarea.press("Enter")
+        # _wait_for_new_response now waits past the Manager dispatch ack: it returns
+        # only after the response has settled (structured worker reply, denial marker,
+        # or stable text length). No separate 120s wait needed here.
         _wait_for_new_response(page, existing_count, timeout=timeout)
-
-        # The first response is typically a plain-text dispatch acknowledgement from the
-        # Manager ("已转发给 graph-worker, 任务 ID：..."). Wait for contract 002 (the
-        # Worker's structured result) to arrive as a subsequent message carrying a
-        # data-collapse or cypher-collapse block. Scan ALL new messages (not just the
-        # last one) because the dispatch ack can appear AFTER the data message if
-        # Matrix delivery reorders them.
-        extra_ms = 120000
-        try:
-            page.wait_for_function(
-                f"""() => {{
-                    const msgs = document.querySelectorAll('.chat-message.message-assistant');
-                    for (let i = {existing_count}; i < msgs.length; i++) {{
-                        const m = msgs[i];
-                        if (m.querySelector('.data-collapse .el-collapse-item__header') ||
-                            m.querySelector('.cypher-collapse .el-collapse-item__header')) {{
-                            return true;
-                        }}
-                    }}
-                    return false;
-                }}""",
-                timeout=extra_ms,
-            )
-            page.wait_for_timeout(300)
-        except Exception:
-            pass  # fallback: use whatever is in the last message
 
         all_msgs = page.locator(MSG_ASSISTANT)
         total = all_msgs.count()
