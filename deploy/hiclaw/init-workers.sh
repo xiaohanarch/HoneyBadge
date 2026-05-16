@@ -363,33 +363,47 @@ log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → Bailian/glm-5)...
 HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
 LLM_API_KEY="${LLM_API_KEY:-${HICLAW_LLM_API_KEY:-}}"
 
-# Wait for openai-compat.dns service source to exist (created by setup-higress.sh)
+# Wait for openai-compat.dns service source to exist (created by setup-higress.sh).
+# This is OPTIONAL — if setup-higress.sh skipped (e.g., placeholder LLM_API_KEY in CI),
+# we still want the rest of init-workers.sh to run. Mirror the soft-fail pattern
+# from manager-init-internal.sh:661-690.
 log "  Waiting for openai-compat.dns service source..."
+SVC_READY=0
 for i in $(seq 1 20); do
     SVC=$(docker exec "$MANAGER_CONTAINER" sh -c \
         "curl -sf 'http://hiclaw-embedded:8001/v1/service-sources/openai-compat' 2>/dev/null" || true)
     if echo "$SVC" | grep -q '"name":"openai-compat"'; then
         log "  → openai-compat.dns ready"
+        SVC_READY=1
         break
+    fi
+    if [ "$i" -eq 20 ]; then
+        warn "  openai-compat.dns not found after 60s — LLM route may not work (set LLM_API_KEY?)"
     fi
     sleep 3
 done
 
-# PUT to update if exists, POST to create if not
-RESULT=$(docker exec "$MANAGER_CONTAINER" sh -c \
-    "curl -sf -X PUT 'http://hiclaw-embedded:8001/v1/routes/llm-minimax-route' \
-      -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
-      -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1")
-
-if echo "$RESULT" | grep -q '"name":"llm-minimax-route"'; then
-    log "  → llm-minimax-route updated (openai-compat.dns → coding.dashscope.aliyuncs.com)"
-else
-    docker exec "$MANAGER_CONTAINER" sh -c \
-        "curl -sf -X POST 'http://hiclaw-embedded:8001/v1/routes' \
+# PUT to update if exists, POST to create if not. Wrap in `|| true` so a failure
+# here (e.g., missing service-source backend) does not abort the whole script
+# under set -euo pipefail.
+if [ "$SVC_READY" -eq 1 ]; then
+    RESULT=$(docker exec "$MANAGER_CONTAINER" sh -c \
+        "curl -sf -X PUT 'http://hiclaw-embedded:8001/v1/routes/llm-minimax-route' \
           -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
-          -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
-        && log "  → llm-minimax-route created (openai-compat.dns → coding.dashscope.aliyuncs.com)" \
-        || warn "  Failed to create/update LLM route (Higress not ready?)"
+          -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" || true)
+
+    if echo "$RESULT" | grep -q '"name":"llm-minimax-route"'; then
+        log "  → llm-minimax-route updated (openai-compat.dns → coding.dashscope.aliyuncs.com)"
+    else
+        docker exec "$MANAGER_CONTAINER" sh -c \
+            "curl -sf -X POST 'http://hiclaw-embedded:8001/v1/routes' \
+              -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
+              -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
+            && log "  → llm-minimax-route created (openai-compat.dns → coding.dashscope.aliyuncs.com)" \
+            || warn "  Failed to create/update LLM route (Higress not ready?)"
+    fi
+else
+    warn "  Skipping llm-minimax-route — openai-compat.dns backend not registered"
 fi
 
 # ---------------------------------------------------------------------------
