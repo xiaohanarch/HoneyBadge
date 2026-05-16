@@ -241,8 +241,10 @@ class TestUserIsolation:
         analyst_page = create_user_page("analyst", "analyst123")
 
         # Get Matrix room identifiers from localStorage or page context
-        admin_room_id = admin_page.evaluate("() => localStorage.getItem('matrix_room_id')")
-        analyst_room_id = analyst_page.evaluate("() => localStorage.getItem('matrix_room_id')")
+        # Frontend stores the per-user DM room ID under 'matrix_dm_room_id'
+        # (see frontend/src/composables/useAuth.ts and stores/auth.ts).
+        admin_room_id = admin_page.evaluate("() => localStorage.getItem('matrix_dm_room_id')")
+        analyst_room_id = analyst_page.evaluate("() => localStorage.getItem('matrix_dm_room_id')")
 
         assert admin_room_id, "Admin should have a Matrix room ID"
         assert analyst_room_id, "Analyst should have a Matrix room ID"
