@@ -60,7 +60,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install pytest pytest-playwright httpx docker redis python-dotenv
+          pip install pytest pytest-playwright pytest-timeout httpx docker redis python-dotenv
           playwright install chromium --with-deps
 
       - name: Materialize deploy/docker/.env from template + CI secrets
