@@ -114,9 +114,11 @@ class TestMCPServices:
             send_chat_query(query, timeout=20000)
             page.wait_for_timeout(1000)
 
-        # All should have responses
+        # Each query produces at least one assistant message (Manager dispatch ack);
+        # most also produce a second message from the Worker carrying structured data.
+        # Assert >=3 messages (one per query, minimum) rather than exact count.
         messages = page.locator(MSG_ASSISTANT)
-        expect(messages).to_have_count(3, timeout=20000)
+        assert messages.count() >= 3, f"Expected >=3 assistant messages for 3 queries, got {messages.count()}"
 
     def test_tc609_nebula_mcp_functional(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-609: NebulaGraph MCP returns actual graph data."""

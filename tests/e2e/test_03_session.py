@@ -137,9 +137,12 @@ class TestSessionManagement:
         send_chat_query("查询物料", timeout=20000)
         page.wait_for_timeout(1000)
 
-        # Reload page
+        # Reload page. Do NOT wait for "networkidle" — Matrix SDK keeps a long-poll
+        # /sync connection open indefinitely, so networkidle never resolves and
+        # times out at the default 30s. wait_for_chat_ready() polls the Pinia
+        # chat store which is the actual readiness signal we care about.
         page.reload()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         wait_for_chat_ready()
 
         # Verify session and messages still exist
