@@ -64,14 +64,56 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000):
     page_obj.wait_for_timeout(200)
 
 
+def _wait_for_worker_data_response(page_obj, existing_count: int, timeout: int = 120000):
+    """Wait for a NEW assistant message that carries Worker structured data.
+
+    The Manager replies first with a plain-text dispatch ack ("已转发给 graph-worker,
+    任务 ID:..."). The Worker's actual structured result arrives as a separate
+    assistant message containing a `.data-collapse` or `.cypher-collapse` block.
+    Tests that need the data (count extraction, isolation assertions, etc.) MUST
+    wait for the Worker message, not the Manager ack.
+    """
+    page_obj.wait_for_function(
+        f"""() => {{
+            const msgs = document.querySelectorAll('.chat-message.message-assistant');
+            for (let i = {existing_count}; i < msgs.length; i++) {{
+                const m = msgs[i];
+                if (m.querySelector('.data-collapse .el-collapse-item__header') ||
+                    m.querySelector('.cypher-collapse .el-collapse-item__header')) {{
+                    return true;
+                }}
+            }}
+            return false;
+        }}""",
+        timeout=timeout,
+    )
+    page_obj.wait_for_timeout(300)
+
+
 def send_query_on_page(page_obj, query: str, timeout: int = 60000):
-    """Send a chat query on any page object (standalone helper, not fixture-bound)."""
+    """Send a chat query on any page object (standalone helper, not fixture-bound).
+
+    Waits for the Worker's structured data response (not just the Manager's
+    dispatch ack), so callers can read the response body and extract counts /
+    trace_ids / cypher blocks. Falls back to the simpler text-arrival wait if
+    no data-collapse appears in time (so error / permission-denied messages,
+    which never carry a data block, still let the test proceed).
+    """
     _wait_for_textarea_enabled(page_obj, timeout=timeout)
     textarea = page_obj.locator(CHAT_TEXTAREA).first
     existing_count = page_obj.locator(MSG_ASSISTANT).count()
     textarea.fill(query)
     textarea.press("Enter")
+    # First, ensure SOMETHING new appears (Manager dispatch ack at minimum).
     _wait_for_new_response(page_obj, existing_count, timeout=timeout)
+    # Then upgrade the wait to the Worker's structured response when possible.
+    # Use a generous secondary budget; tests that don't expect a data block
+    # (e.g. permission-denied paths) will simply pass through after the
+    # fallback timeout.
+    try:
+        _wait_for_worker_data_response(page_obj, existing_count, timeout=max(timeout, 60000))
+    except Exception:
+        pass  # fallback: caller will read whatever last message is present
 
 
 # Configuration
