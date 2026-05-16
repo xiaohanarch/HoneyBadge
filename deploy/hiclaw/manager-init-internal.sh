@@ -590,9 +590,9 @@ if 'agents' not in cfg:
 if 'defaults' not in cfg['agents']:
     cfg['agents']['defaults'] = {}
 defaults = cfg['agents']['defaults']
-if defaults.get('maxConcurrent') != 8:
-    defaults['maxConcurrent'] = 8
-    print('Set maxConcurrent: 8')
+if defaults.get('maxConcurrent') != 4:
+    defaults['maxConcurrent'] = 4
+    print('Set maxConcurrent: 4')
     changed = True
 if defaults.get('contextTokens') != 40000:
     defaults['contextTokens'] = 40000
@@ -611,9 +611,9 @@ if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     }
     print('Set contextPruning')
     changed = True
-if defaults.get('subagents', {}).get('maxConcurrent') != 8:
-    defaults['subagents'] = {'maxConcurrent': 8}
-    print('Set subagents.maxConcurrent: 8')
+if defaults.get('subagents', {}).get('maxConcurrent') != 4:
+    defaults['subagents'] = {'maxConcurrent': 4}
+    print('Set subagents.maxConcurrent: 4')
     changed = True
 
 if changed:
