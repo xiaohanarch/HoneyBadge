@@ -71,8 +71,10 @@ class TestAuthentication:
         """TC-005: Logout redirects to login and blocks /chat access."""
         page = admin_logged_in
 
-        # Click user avatar to open the Element Plus dropdown
-        page.locator(USER_AVATAR).click(force=True)
+        # ChatView.vue uses <el-dropdown> without an explicit trigger prop, so it
+        # defaults to "hover" — clicking the avatar does NOT open the menu.
+        # Hover first to reveal the teleported dropdown menu, then click logout.
+        page.locator(USER_AVATAR).hover()
 
         # Element Plus v2 teleports the dropdown menu to <body> with position:fixed,
         # so offsetParent is always null — must wait with Playwright state check.

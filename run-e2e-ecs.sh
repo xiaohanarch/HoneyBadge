@@ -21,8 +21,11 @@ kubectl port-forward -n honeybadge svc/honeybadge-server 8090:8090 >> /root/pf-s
 PF1=$!
 kubectl port-forward -n honeybadge svc/honeybadge-auth 8091:8091 >> /root/pf-auth.log 2>&1 &
 PF2=$!
+# Redis: required by tests/e2e/test_07_mcp.py::test_tc603_cache_mcp_healthy
+kubectl port-forward -n honeybadge svc/redis 6379:6379 >> /root/pf-redis.log 2>&1 &
+PF3=$!
 
-echo "Port-forwards started (PIDs: $PF1 $PF2)" >> $LOG
+echo "Port-forwards started (PIDs: $PF1 $PF2 $PF3)" >> $LOG
 sleep 5
 
 # Wait for auth service ready (direct port-forward)
@@ -62,7 +65,7 @@ echo "========================================" >> $LOG
 echo "Test exit code: $EXIT  Finished: $(date)" >> $LOG
 echo "========================================" >> $LOG
 
-kill $PF1 $PF2 2>/dev/null || true
+kill $PF1 $PF2 $PF3 2>/dev/null || true
 
 # Exit with pytest's exit code so callers (e.g. the GitHub workflow's
 # `bash run-e2e-ecs.sh "$TARGET" || E2E_EXIT=$?` clause) see the truth.
