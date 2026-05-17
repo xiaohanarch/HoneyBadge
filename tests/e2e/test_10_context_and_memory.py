@@ -45,7 +45,7 @@ class TestContextAndMemory:
         wait_for_chat_ready()
 
         # First query - 询问基本信息
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
         page.wait_for_timeout(2000)
         first_response_count = page.locator('.chat-message').count()
 
@@ -81,7 +81,7 @@ class TestContextAndMemory:
         wait_for_chat_ready(admin_page)
 
         # 发送查询创建内容
-        send_query_on_page(admin_page, "查询采购订单", timeout=20000)
+        send_query_on_page(admin_page, "查询采购订单", timeout=60000)
         admin_page.wait_for_timeout(2000)
 
         # 获取当前会话 ID (从 URL 或 localStorage)
@@ -119,7 +119,7 @@ class TestContextAndMemory:
         wait_for_chat_ready()
 
         # First query - 设置上下文/关注点
-        send_chat_query("我主要关注采购订单的数据", timeout=20000)
+        send_chat_query("我主要关注采购订单的数据", timeout=60000)
         page.wait_for_timeout(2000)
 
         # Second query - 利用之前的上下文
@@ -141,7 +141,7 @@ class TestContextAndMemory:
         # Admin 创建会话并设置私密上下文
         admin_page = create_user_page("admin", "admin123")
         wait_for_chat_ready(admin_page)
-        send_query_on_page(admin_page, "我正在分析ORG1000的采购数据，这是公司最关键的部门", timeout=20000)
+        send_query_on_page(admin_page, "我正在分析ORG1000的采购数据，这是公司最关键的部门", timeout=60000)
         admin_page.wait_for_timeout(2000)
 
         # 获取 admin 的消息
@@ -174,14 +174,14 @@ class TestContextAndMemory:
         # Admin 创建会话
         admin_page = create_user_page("admin", "admin123")
         wait_for_chat_ready(admin_page)
-        send_query_on_page(admin_page, "这是admin的会话，查询所有采购订单", timeout=20000)
+        send_query_on_page(admin_page, "这是admin的会话，查询所有采购订单", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
 
         # Subsidiary 创建会话
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         wait_for_chat_ready(subsidiary_page)
-        send_query_on_page(subsidiary_page, "这是subsidiary的会话，只看本公司的订单", timeout=20000)
+        send_query_on_page(subsidiary_page, "这是subsidiary的会话，只看本公司的订单", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
 
@@ -199,7 +199,7 @@ class TestContextAndMemory:
         # Admin 创建第一个会话
         admin_page1 = create_user_page("admin", "admin123")
         wait_for_chat_ready(admin_page1)
-        send_query_on_page(admin_page1, "会话1: 查询采购订单", timeout=20000)
+        send_query_on_page(admin_page1, "会话1: 查询采购订单", timeout=60000)
         admin_page1.wait_for_timeout(2000)
         session1_messages = admin_page1.locator('.chat-message').count()
 
@@ -209,7 +209,7 @@ class TestContextAndMemory:
             pytest.skip("New session button not available")
         new_session_btn.first.click()
         admin_page1.wait_for_timeout(1000)
-        send_query_on_page(admin_page1, "会话2: 查询销售订单", timeout=20000)
+        send_query_on_page(admin_page1, "会话2: 查询销售订单", timeout=60000)
         admin_page1.wait_for_timeout(2000)
         session2_messages = admin_page1.locator('.chat-message').count()
 
@@ -275,7 +275,7 @@ class TestContextAndMemory:
         # Admin 创建私密会话
         admin_page = create_user_page("admin", "admin123")
         wait_for_chat_ready(admin_page)
-        send_query_on_page(admin_page, "这是admin的私密分析，只存在于admin账号中", timeout=20000)
+        send_query_on_page(admin_page, "这是admin的私密分析，只存在于admin账号中", timeout=60000)
         admin_page.wait_for_timeout(2000)
 
         # Analyst 登录 (独立浏览器上下文, 天然隔离, 无需先 logout admin)
@@ -300,7 +300,7 @@ class TestContextAndMemory:
         # subsidiary_lead 创建会话
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         wait_for_chat_ready(subsidiary_page)
-        send_query_on_page(subsidiary_page, "这是ORG1021的数据，别的子公司看不到", timeout=20000)
+        send_query_on_page(subsidiary_page, "这是ORG1021的数据，别的子公司看不到", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
 
         # 用 analyst(org=1000) 登录 (独立浏览器上下文, 天然隔离)
@@ -333,7 +333,7 @@ class TestContextAndMemory:
         ]
 
         for query in queries:
-            send_chat_query(query, timeout=20000)
+            send_chat_query(query, timeout=60000)
             page.wait_for_timeout(2000)
 
         # 检查最后的响应是否总结了之前的对话

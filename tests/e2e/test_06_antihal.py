@@ -73,7 +73,7 @@ class TestAntiHallucination:
         page = analyst_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher block is empty"
@@ -102,7 +102,7 @@ class TestAntiHallucination:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         # Trace ID link MUST be visible (not optional)
         trace_link = page.locator(MSG_ASSISTANT).last.locator(TRACE_ID_LINK)
@@ -173,7 +173,7 @@ class TestAntiHallucination:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         exec_time = page.locator(MSG_ASSISTANT).last.locator(EXECUTION_TIME)
         expect(exec_time).to_be_visible(timeout=5000)

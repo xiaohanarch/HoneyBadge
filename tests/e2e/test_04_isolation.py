@@ -39,7 +39,7 @@ class TestUserIsolation:
         # Admin creates a session with unique name
         admin_page = admin_logged_in
         wait_for_chat_ready()
-        send_chat_query("查询供应商", timeout=20000)
+        send_chat_query("查询供应商", timeout=60000)
         admin_page.wait_for_timeout(1000)
 
         # Now login as analyst
@@ -64,7 +64,7 @@ class TestUserIsolation:
         # Analyst creates a session
         analyst_page = analyst_logged_in
         wait_for_chat_ready()
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
         analyst_page.wait_for_timeout(1000)
 
         # Now login as admin
@@ -90,14 +90,14 @@ class TestUserIsolation:
         """
         # Admin query
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(admin_page, "统计采购订单数量", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         # Analyst query (org_id=1000)
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(analyst_page, "统计采购订单数量", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count(analyst_text)
@@ -120,7 +120,7 @@ class TestUserIsolation:
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
 
         # Query采购订单 - should return ONLY org 1021's data
-        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
@@ -148,7 +148,7 @@ class TestUserIsolation:
         # Login as admin
         login_as("admin", "admin123")
         wait_for_chat_ready()
-        send_chat_query("管理员查询", timeout=20000)
+        send_chat_query("管理员查询", timeout=60000)
         page.wait_for_timeout(1000)
 
         # Store admin's local storage
@@ -177,11 +177,11 @@ class TestUserIsolation:
         analyst_page = analyst_logged_in
 
         # Admin queries specific supplier
-        send_chat_query("查询供应商SYR001", timeout=20000)
+        send_chat_query("查询供应商SYR001", timeout=60000)
         admin_page.wait_for_timeout(1000)
 
         # Analyst queries same thing - should get their own result (filtered by org)
-        send_chat_query("查询供应商SYR001", timeout=20000)
+        send_chat_query("查询供应商SYR001", timeout=60000)
         analyst_page.wait_for_timeout(1000)
 
         # Both should have received responses (isolation verified by separate queries working)
@@ -199,21 +199,21 @@ class TestUserIsolation:
         """
         # Admin query - baseline (all data)
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(admin_page, "统计采购订单数量", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         # Analyst query (org_id=1000)
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(analyst_page, "统计采购订单数量", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count(analyst_text)
 
         # Subsidiary query (org_id=1021)
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
@@ -266,13 +266,13 @@ class TestUserIsolation:
 
         # Analyst (org=1000) queries for PO00000001
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=20000)
+        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
 
         # Subsidiary (org=1021) queries for PO00000002
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询采购订单PO00000002", timeout=20000)
+        send_query_on_page(subsidiary_page, "查询采购订单PO00000002", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
 
@@ -325,13 +325,13 @@ class TestUserIsolation:
         - subsidiary: org1021大额PO
         """
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "查询金额超过100万的采购订单", timeout=20000)
+        send_query_on_page(admin_page, "查询金额超过100万的采购订单", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询金额超过100万的采购订单", timeout=20000)
+        send_query_on_page(subsidiary_page, "查询金额超过100万的采购订单", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)

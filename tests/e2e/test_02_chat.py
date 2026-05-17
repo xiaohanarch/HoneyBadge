@@ -118,7 +118,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询供应商", timeout=20000)
+        send_chat_query("查询供应商", timeout=60000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher code block is empty"
@@ -159,7 +159,7 @@ class TestChatFunctionality:
         wait_for_chat_ready()
 
         # First query establishes context
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
         page.wait_for_timeout(2000)
 
         # Second query references context
@@ -230,7 +230,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         row_count = expand_data_table()
         assert row_count > 0, f"Data table should have rows, got {row_count}"

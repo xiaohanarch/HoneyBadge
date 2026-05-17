@@ -80,11 +80,14 @@ jobs:
           export JWT_SECRET="$(openssl rand -hex 32)"
           export HICLAW_MANAGER_PASSWORD="$(openssl rand -hex 16)"
           export HICLAW_MANAGER_GATEWAY_KEY="$(openssl rand -hex 16)"
+          # Use Bailian's fastest coding-tuned model in CI to keep per-query
+          # Manager latency under the test budget (glm-5 ~40s, qwen3-coder-flash ~5-10s).
+          export LLM_MODEL="qwen3-coder-flash"
           python3 <<'PY'
           import os, pathlib
           p = pathlib.Path('.env')
           overrides = {k: os.environ[k] for k in (
-              'LLM_API_KEY', 'JWT_SECRET',
+              'LLM_API_KEY', 'LLM_MODEL', 'JWT_SECRET',
               'HICLAW_MANAGER_PASSWORD', 'HICLAW_MANAGER_GATEWAY_KEY',
           )}
           out, seen = [], set()
