@@ -80,9 +80,14 @@ jobs:
           export JWT_SECRET="$(openssl rand -hex 32)"
           export HICLAW_MANAGER_PASSWORD="$(openssl rand -hex 16)"
           export HICLAW_MANAGER_GATEWAY_KEY="$(openssl rand -hex 16)"
-          # Use Bailian's fastest coding-tuned model in CI to keep per-query
-          # Manager latency under the test budget (glm-5 ~40s, qwen3-coder-flash ~5-10s).
-          export LLM_MODEL="qwen3-coder-flash"
+          # Use Bailian's coding-tuned non-reasoning model in CI to keep per-query
+          # Manager latency under the test budget. glm-5 has heavy reasoning_tokens
+          # overhead (~40s/query with context bloat); qwen3-coder-plus is a pure
+          # forward-pass coding model that responds an order of magnitude faster.
+          # NOTE: coding.dashscope.aliyuncs.com/v1 does NOT serve "qwen3-coder-flash"
+          # (returns 400 invalid_parameter_error). Verified supported names against
+          # the live endpoint: glm-5, qwen3-coder-plus.
+          export LLM_MODEL="qwen3-coder-plus"
           python3 <<'PY'
           import os, pathlib
           p = pathlib.Path('.env')
