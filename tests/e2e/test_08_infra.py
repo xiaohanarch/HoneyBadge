@@ -86,13 +86,13 @@ class TestInfrastructure:
     def test_tc706_tuwunel_matrix_healthy(self):
         """TC-706: Tuwunel (Matrix server) is healthy."""
         try:
-            # Matrix server versions endpoint
-            response = httpx.get("http://localhost:6167/_matrix/client/versions", timeout=10)
+            # Matrix server versions endpoint. Tuwunel host-maps :7167 -> internal :6167.
+            response = httpx.get("http://localhost:7167/_matrix/client/versions", timeout=10)
             assert response.status_code == 200
             data = response.json()
             assert "versions" in data
         except httpx.ConnectError:
-            pytest.fail("Cannot connect to Tuwunel Matrix at localhost:6167")
+            pytest.fail("Cannot connect to Tuwunel Matrix at localhost:7167")
 
     def test_tc707_honeybadge_server_healthy(self, api_client):
         """TC-707: honeybadge-server is healthy."""
@@ -112,12 +112,11 @@ class TestInfrastructure:
     def test_tc709_hiclaw_manager_healthy(self):
         """TC-709: HiClaw Manager is healthy."""
         try:
-            # HiClaw Manager has multiple ports, check one
-            response = httpx.get("http://localhost:6167/_matrix/client/versions", timeout=10)
-            # Manager houses Matrix, so this endpoint works
+            # HiClaw Manager houses Tuwunel which is host-mapped to :7167 (internal :6167).
+            response = httpx.get("http://localhost:7167/_matrix/client/versions", timeout=10)
             assert response.status_code == 200
         except httpx.ConnectError:
-            pytest.fail("Cannot connect to HiClaw Manager at localhost:6167")
+            pytest.fail("Cannot connect to HiClaw Manager at localhost:7167")
 
     def test_tc710_worker_containers_running(self):
         """TC-710: Worker containers are running."""

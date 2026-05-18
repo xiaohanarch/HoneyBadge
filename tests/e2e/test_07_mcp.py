@@ -85,7 +85,7 @@ class TestMCPServices:
         wait_for_chat_ready()
 
         # Send a query that exercises multiple MCP tools
-        send_chat_query("查询供应商", timeout=20000)
+        send_chat_query("查询供应商", timeout=60000)
 
         # Verify response came through (MCP chain worked)
         response = page.locator(MSG_ASSISTANT)
@@ -96,7 +96,7 @@ class TestMCPServices:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         # Verify response structure is valid
         response = page.locator(MSG_ASSISTANT)
@@ -110,7 +110,7 @@ class TestMCPServices:
         wait_for_chat_ready()
 
         # Normal query should work without crashing
-        send_chat_query("查询供应商", timeout=20000)
+        send_chat_query("查询供应商", timeout=60000)
 
         # Chat should still be functional after query
         expect(page.locator(CHAT_TEXTAREA).first).to_be_visible()
@@ -125,7 +125,7 @@ class TestMCPServices:
         queries = ["查询供应商", "查询采购订单", "查询物料"]
 
         for query in queries:
-            send_chat_query(query, timeout=20000)
+            send_chat_query(query, timeout=60000)
             page.wait_for_timeout(1000)
 
         # Each query produces at least one assistant message (Manager dispatch ack);

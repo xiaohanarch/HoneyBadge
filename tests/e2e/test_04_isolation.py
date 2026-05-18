@@ -39,7 +39,7 @@ class TestUserIsolation:
         # Admin creates a session with unique name
         admin_page = admin_logged_in
         wait_for_chat_ready()
-        send_chat_query("查询供应商", timeout=20000)
+        send_chat_query("查询供应商", timeout=60000)
         admin_page.wait_for_timeout(1000)
 
         # Now login as analyst
@@ -64,7 +64,7 @@ class TestUserIsolation:
         # Analyst creates a session
         analyst_page = analyst_logged_in
         wait_for_chat_ready()
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
         analyst_page.wait_for_timeout(1000)
 
         # Now login as admin
@@ -76,12 +76,6 @@ class TestUserIsolation:
         assert analyst_session_indicator.count() == 0, \
             "Admin should not see analyst's private session"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category A (mid-stream LLM preamble read). "
-        "send_query_on_page captures the LLM 'thinking out loud' preamble before "
-        "Worker contract-002 arrives, so _extract_count gets 0. Needs smart-wait "
-        "helper. See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc303_cross_org_data_isolation(self, create_user_page):
         """TC-303: Data is isolated between organizations.
 
@@ -96,14 +90,14 @@ class TestUserIsolation:
         """
         # Admin query
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(admin_page, "统计采购订单数量", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         # Analyst query (org_id=1000)
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(analyst_page, "统计采购订单数量", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count(analyst_text)
@@ -117,10 +111,6 @@ class TestUserIsolation:
             f"Admin ({admin_count}) should see >10x data than analyst ({analyst_count}). " \
             f"Isolation working: admin sees ALL orgs, analyst sees only org 1000."
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category A (mid-stream LLM preamble read). "
-        "Same root cause as TC-303. See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc304_subsidiary_cannot_see_parent_org(self, create_user_page):
         """TC-304: Subsidiary user cannot see parent org (other orgs) data.
 
@@ -130,7 +120,7 @@ class TestUserIsolation:
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
 
         # Query采购订单 - should return ONLY org 1021's data
-        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
@@ -158,7 +148,7 @@ class TestUserIsolation:
         # Login as admin
         login_as("admin", "admin123")
         wait_for_chat_ready()
-        send_chat_query("管理员查询", timeout=20000)
+        send_chat_query("管理员查询", timeout=60000)
         page.wait_for_timeout(1000)
 
         # Store admin's local storage
@@ -187,11 +177,11 @@ class TestUserIsolation:
         analyst_page = analyst_logged_in
 
         # Admin queries specific supplier
-        send_chat_query("查询供应商SYR001", timeout=20000)
+        send_chat_query("查询供应商SYR001", timeout=60000)
         admin_page.wait_for_timeout(1000)
 
         # Analyst queries same thing - should get their own result (filtered by org)
-        send_chat_query("查询供应商SYR001", timeout=20000)
+        send_chat_query("查询供应商SYR001", timeout=60000)
         analyst_page.wait_for_timeout(1000)
 
         # Both should have received responses (isolation verified by separate queries working)
@@ -201,10 +191,6 @@ class TestUserIsolation:
         assert admin_has_response, "Admin should get response"
         assert analyst_has_response, "Analyst should get response"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category A (mid-stream LLM preamble read). "
-        "Same root cause as TC-303. See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc307_query_results_filtered_by_org_id(self, create_user_page):
         """TC-307: Query results respect org_id filtering.
 
@@ -213,21 +199,21 @@ class TestUserIsolation:
         """
         # Admin query - baseline (all data)
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(admin_page, "统计采购订单数量", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         # Analyst query (org_id=1000)
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(analyst_page, "统计采购订单数量", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count(analyst_text)
 
         # Subsidiary query (org_id=1021)
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
@@ -280,13 +266,13 @@ class TestUserIsolation:
 
         # Analyst (org=1000) queries for PO00000001
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=20000)
+        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
 
         # Subsidiary (org=1021) queries for PO00000002
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询采购订单PO00000002", timeout=20000)
+        send_query_on_page(subsidiary_page, "查询采购订单PO00000002", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
 
@@ -302,11 +288,6 @@ class TestUserIsolation:
     # 大领导(admin)权限大，可以看到全公司问题(万级数据)
     # 小领导(subsidiary/analyst)权限小，只能看到本组织问题(百级数据)
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category A (mid-stream LLM preamble read). "
-        "Permission-scope data-volume comparison tests all share the same "
-        "send_query_on_page race. See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc310_high_risk_po_data_volume_isolation(self, create_user_page):
         """TC-310: 高风险采购订单数据量差异 - 体现权限视野差异
 
@@ -337,7 +318,6 @@ class TestUserIsolation:
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"权限差距: admin看全公司，subsidiary只看org1021。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-310.")
     def test_tc311_large_amount_po_isolation(self, create_user_page):
         """TC-311: 大额采购订单数据量差异
 
@@ -345,13 +325,13 @@ class TestUserIsolation:
         - subsidiary: org1021大额PO
         """
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "查询金额超过100万的采购订单", timeout=20000)
+        send_query_on_page(admin_page, "查询金额超过100万的采购订单", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询金额超过100万的采购订单", timeout=20000)
+        send_query_on_page(subsidiary_page, "查询金额超过100万的采购订单", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count(subsidiary_text)
@@ -362,7 +342,6 @@ class TestUserIsolation:
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"大领导能看到全公司大额PO，小领导只能看本org。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-310.")
     def test_tc312_abnormal_po_isolation(self, create_user_page):
         """TC-312: 异常采购订单数据量差异
 
@@ -386,7 +365,6 @@ class TestUserIsolation:
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"admin可发现全公司异常，subsidiary只能发现本org异常。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-310.")
     def test_tc313_supplier_issues_isolation(self, create_user_page):
         """TC-313: 供应商问题数据量差异
 
@@ -410,7 +388,6 @@ class TestUserIsolation:
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"RBP权限差异体现在数据可见量上。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-310.")
     def test_tc314_payment_issues_isolation(self, create_user_page):
         """TC-314: 付款异常数据量差异
 
@@ -434,7 +411,6 @@ class TestUserIsolation:
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"体现权限层级决定数据视野。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-310.")
     def test_tc315_cross_org_fraud_detection_ability(self, create_user_page):
         """TC-315: 跨org欺诈检测能力差异
 

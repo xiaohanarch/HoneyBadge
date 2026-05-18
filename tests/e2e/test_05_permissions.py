@@ -43,20 +43,15 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query PTP process - should succeed
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Admin should access PTP (PurchaseOrder)"
 
         # Query OTC process - should succeed
-        send_chat_query("查询销售订单", timeout=20000)
+        send_chat_query("查询销售订单", timeout=60000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Admin should access OTC (SalesOrder)"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category A/C (mid-stream read + permission denial). "
-        "send_chat_query captures LLM preamble before permission verdict streams in. "
-        "See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc402_analyst_limited_to_ptp_blocked_from_otc(self, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-402: Analyst can access PTP (PurchaseOrder) but blocked from OTC (SalesOrder).
 
@@ -69,7 +64,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query PTP - should succeed with data (analyst org_id=1000 has ~320 PO)
-        send_chat_query("统计采购订单数量", timeout=20000)
+        send_chat_query("统计采购订单数量", timeout=60000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Analyst should access PTP (PurchaseOrder)"
 
@@ -81,7 +76,6 @@ class TestPermissions:
         has_data_indicator = any(kw in response_text for kw in ["条", "记录", "count", "COUNT", "共", "total"])
         assert has_data_indicator, f"Analyst should see PO data from org 1000. Response: {response_text[:200]}"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A/C. Same as TC-402.")
     def test_tc402b_analyst_cannot_access_otc(self, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-402b: Analyst blocked from OTC process (SalesOrder).
 
@@ -91,7 +85,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query OTC - SalesOrder is NOT in analyst's allowed_processes
-        send_chat_query("查询销售订单", timeout=20000)
+        send_chat_query("查询销售订单", timeout=60000)
         page.wait_for_timeout(2000)
 
         # Look for permission denied or error message
@@ -122,9 +116,9 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query should work
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
         response = page.locator(MSG_ASSISTANT)
-        expect(response.last).to_be_visible(timeout=20000)
+        expect(response.last).to_be_visible(timeout=60000)
 
         # Verify write buttons are not present
         write_buttons = page.locator(
@@ -137,7 +131,6 @@ class TestPermissions:
         # Note: This assumes UI properly hides write features for auditor role
         assert write_button_count == 0, f"Auditor should not see write buttons, found {write_button_count}"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A/C. Same as TC-402.")
     def test_tc404_blocked_process_permission_error(self, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-404: Accessing blocked OTC process shows permission error.
 
@@ -148,7 +141,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Try to query SalesOrder (OTC process - blocked for analyst)
-        send_chat_query("查询销售订单", timeout=20000)
+        send_chat_query("查询销售订单", timeout=60000)
         page.wait_for_timeout(2000)
 
         response = page.locator(MSG_ASSISTANT)
@@ -181,7 +174,6 @@ class TestPermissions:
         # This test verifies UI element presence/absence
         # Actual assertions depend on UI implementation
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A/C. Same as TC-402.")
     def test_tc406_permission_denied_error_display(self, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-406: Permission denied shows appropriate error message.
 
@@ -192,7 +184,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Attempt restricted query (SalesOrder/OTC)
-        send_chat_query("查询销售订单", timeout=20000)
+        send_chat_query("查询销售订单", timeout=60000)
         page.wait_for_timeout(2000)
 
         response = page.locator(MSG_ASSISTANT)
@@ -237,12 +229,6 @@ class TestPermissions:
                 assert admin_response.status_code in (401, 403), \
                     f"Analyst accessing /api/admin/users should get 401/403, got {admin_response.status_code}"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category A (mid-stream LLM preamble read). "
-        "send_query_on_page captures preamble before Worker contract-002 "
-        "delivers the count, so _extract_count_from_response returns 0. "
-        "See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc408_org_id_filter_verification(self, create_user_page):
         """TC-408: Verify org_id filter is correctly applied to queries.
 
@@ -255,7 +241,7 @@ class TestPermissions:
         """
         # Admin query - separate context
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(admin_page, "统计采购订单数量", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_messages = admin_page.locator(MSG_ASSISTANT)
         admin_text = admin_messages.last.inner_text() if admin_messages.count() > 0 else ""
@@ -265,7 +251,7 @@ class TestPermissions:
 
         # Analyst query - separate context
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(analyst_page, "统计采购订单数量", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_messages = analyst_page.locator(MSG_ASSISTANT)
         analyst_text = analyst_messages.last.inner_text() if analyst_messages.count() > 0 else ""
@@ -275,7 +261,7 @@ class TestPermissions:
 
         # Subsidiary query - separate context
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=20000)
+        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_messages = subsidiary_page.locator(MSG_ASSISTANT)
         subsidiary_text = subsidiary_messages.last.inner_text() if subsidiary_messages.count() > 0 else ""
@@ -315,14 +301,14 @@ class TestPermissions:
         """
         # Analyst (org_id=1000) query
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=20000)
+        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_messages = analyst_page.locator(MSG_ASSISTANT)
         analyst_text = analyst_messages.last.inner_text() if analyst_messages.count() > 0 else ""
 
         # Subsidiary (org_id=1021) query same PO
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询采购订单PO00000001", timeout=20000)
+        send_query_on_page(subsidiary_page, "查询采购订单PO00000001", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_messages = subsidiary_page.locator(MSG_ASSISTANT)
         subsidiary_text = subsidiary_messages.last.inner_text() if subsidiary_messages.count() > 0 else ""
@@ -343,7 +329,6 @@ class TestPermissions:
     # subsidiary_lead/analyst因权限小只能看到本org数据(百级)
     # 差异可达30-40倍
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-408.")
     def test_tc409_high_risk_procurement_admin_vs_subsidiary(self, create_user_page):
         """TC-409: 采购订单org过滤验证 - admin看全量，subsidiary只能看本org
 
@@ -355,14 +340,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计所有采购订单的数量", timeout=20000)
+        send_query_on_page(admin_page, "统计所有采购订单的数量", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计所有采购订单的数量", timeout=20000)
+        send_query_on_page(subsidiary_page, "统计所有采购订单的数量", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
@@ -376,7 +361,6 @@ class TestPermissions:
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
             f"admin有全部org权限，subsidiary只有org1021权限。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-408.")
     def test_tc410_large_amount_po_admin_vs_analyst(self, create_user_page):
         """TC-410: 采购订单org过滤验证 - admin看全量，analyst只能看本org
 
@@ -388,14 +372,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "一共有多少条采购订单", timeout=20000)
+        send_query_on_page(admin_page, "一共有多少条采购订单", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst查询
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "一共有多少条采购订单", timeout=20000)
+        send_query_on_page(analyst_page, "一共有多少条采购订单", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count_from_response(analyst_text)
@@ -409,7 +393,6 @@ class TestPermissions:
             f"Admin({admin_count})应看到>analyst({analyst_count})。" \
             f"admin无org限制，analyst只有org1000权限。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-408.")
     def test_tc411_abnormal_transactions_admin_vs_subsidiary(self, create_user_page):
         """TC-411: 采购订单org过滤独立验证 - admin vs subsidiary再次确认
 
@@ -417,14 +400,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "采购订单总共有多少条", timeout=20000)
+        send_query_on_page(admin_page, "采购订单总共有多少条", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "采购订单总共有多少条", timeout=20000)
+        send_query_on_page(subsidiary_page, "采购订单总共有多少条", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
@@ -438,7 +421,6 @@ class TestPermissions:
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
             f"admin看全公司，subsidiary只看org1021。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-408.")
     def test_tc412_recent_po_admin_vs_analyst(self, create_user_page):
         """TC-412: 采购订单org过滤独立验证 - admin vs analyst再次确认
 
@@ -446,14 +428,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "报告采购订单的总记录数", timeout=20000)
+        send_query_on_page(admin_page, "报告采购订单的总记录数", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst查询
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "报告采购订单的总记录数", timeout=20000)
+        send_query_on_page(analyst_page, "报告采购订单的总记录数", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count_from_response(analyst_text)
@@ -467,7 +449,6 @@ class TestPermissions:
             f"Admin({admin_count})应>analyst({analyst_count})。" \
             f"admin无org过滤，analyst只有org1000。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-408.")
     def test_tc413_pending_approval_po_admin_vs_subsidiary(self, create_user_page):
         """TC-413: 采购订单org过滤稳定性验证 - admin vs subsidiary
 
@@ -475,14 +456,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单总数", timeout=20000)
+        send_query_on_page(admin_page, "统计采购订单总数", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计采购订单总数", timeout=20000)
+        send_query_on_page(subsidiary_page, "统计采购订单总数", timeout=60000)
         subsidiary_page.wait_for_timeout(2000)
         subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
@@ -495,7 +476,6 @@ class TestPermissions:
             f"Admin({admin_count})应>subsidiary({subsidiary_count})。" \
             f"admin无org限制，subsidiary只有org1021。"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-408.")
     def test_tc414_supplier_qualifications_admin_vs_analyst(self, create_user_page):
         """TC-414: 采购订单org过滤并发验证 - admin vs analyst
 
@@ -503,14 +483,14 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单记录数", timeout=20000)
+        send_query_on_page(admin_page, "统计采购订单记录数", timeout=60000)
         admin_page.wait_for_timeout(2000)
         admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst查询
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单记录数", timeout=20000)
+        send_query_on_page(analyst_page, "统计采购订单记录数", timeout=60000)
         analyst_page.wait_for_timeout(2000)
         analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
         analyst_count = self._extract_count_from_response(analyst_text)
@@ -523,17 +503,12 @@ class TestPermissions:
             f"Admin({admin_count})应>analyst({analyst_count})。" \
             f"analyst虽有PTP权限但org受限，admin无org限制。"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category A (mid-stream read). expand_cypher_block "
-        "may return empty before Worker cypher block is rendered. "
-        "See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc415_cypher_where_clause_present(self, analyst_logged_in, wait_for_chat_ready, send_chat_query, expand_cypher_block):
         """TC-415: NEW - All user queries have WHERE clause in generated Cypher."""
         page = analyst_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher block is empty"

@@ -68,17 +68,12 @@ class TestAntiHallucination:
         assert result["data_row_count"] == 0 or "不存在" in result["text"] or "无" in result["text"] or "没有" in result["text"] or "错误" in result["text"], \
             f"Expected no data or error indication for non-existent schema, got {result['data_row_count']} rows: {result['text'][:100]}"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category A (mid-stream read). expand_cypher_block "
-        "captures empty/preamble before Worker emits cypher. "
-        "See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc503_l3_permission_filters_in_cypher(self, analyst_logged_in, wait_for_chat_ready, send_chat_query, expand_cypher_block):
         """TC-503: L3 - Generated Cypher includes permission/org filters for non-admin user."""
         page = analyst_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher block is empty"
@@ -88,7 +83,6 @@ class TestAntiHallucination:
         has_filter = any(indicator.lower() in cypher_text.lower() for indicator in filter_indicators)
         assert has_filter, f"Cypher lacks permission filters. Got:\n{cypher_text}"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A (mid-stream read). Same as TC-503.")
     def test_tc504_l4_raw_data_displayed(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-504: L4 - Raw data table is displayed alongside LLM summary."""
         page = admin_logged_in
@@ -103,17 +97,12 @@ class TestAntiHallucination:
         # Must also have text summary
         assert len(result["text"]) > 20, "Summary text too short"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category B (trace ID mid-stream). trace_link "
-        "selector waits only 5s, often expires before Worker contract-002 renders. "
-        "See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc505_l5_trace_id_displayed(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-505: L5 - Every query response includes a trace ID."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         # Trace ID link MUST be visible (not optional)
         trace_link = page.locator(MSG_ASSISTANT).last.locator(TRACE_ID_LINK)
@@ -136,7 +125,6 @@ class TestAntiHallucination:
         response_text = response.inner_text()
         assert len(response_text) > 10, "Response too short"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category B (trace ID mid-stream). Same as TC-505.")
     def test_tc507_l5_trace_id_audit_api(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-507: L5 - Trace ID can retrieve audit record via API."""
         page = admin_logged_in
@@ -180,13 +168,12 @@ class TestAntiHallucination:
             assert len(numbers_in_text) > 0, \
                 f"Summary contains no numeric values despite {result['data_row_count']} data rows"
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category B (execution time mid-stream). Same as TC-505.")
     def test_tc509_execution_time_displayed(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-509: Execution time is displayed in response metadata."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         exec_time = page.locator(MSG_ASSISTANT).last.locator(EXECUTION_TIME)
         expect(exec_time).to_be_visible(timeout=5000)
@@ -208,7 +195,6 @@ class TestAntiHallucination:
         expect(textarea).to_be_visible()
         expect(textarea).to_be_enabled()
 
-    @pytest.mark.skip(reason="Deferred to 1.1.1 — Category A/B (mid-stream read). Same as TC-503/505.")
     def test_tc511_cypher_retry_produces_valid_response(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-511: NEW - Ambiguous query triggers retry mechanism, still produces response."""
         page = admin_logged_in

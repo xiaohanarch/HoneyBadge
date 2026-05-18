@@ -21,19 +21,6 @@ from tests.e2e.selectors import (
 )
 
 
-# Deferred to 1.1.1 — Category A/B (mid-stream LLM preamble read).
-# Run 25957263480: ALL routing tests failed (TC-1101..TC-1106 incl. parametrized
-# variants of TC-1104/1105). Baseline had TC-1103, TC-1106 passing — both
-# regressed under DashScope quota pressure.
-# All tests share the same root cause: send_query_and_get_response /
-# send_query_on_page capturing Manager's dispatch ack ("preamble") rather than
-# Worker's contract-002 response, so trace_id and cypher block assertions fail.
-# See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md
-pytestmark = pytest.mark.skip(
-    reason="Deferred to 1.1.1 — Category A/B (mid-stream read). "
-    "See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-)
-
 
 def _get_worker_logs_since(container_name: str, since: datetime) -> str:
     """Fetch Docker container logs since a given UTC timestamp.
@@ -132,7 +119,7 @@ class TestWorkerRouting:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("你好，请做个自我介绍", timeout=20000)
+        send_chat_query("你好，请做个自我介绍", timeout=60000)
 
         last_msg = page.locator(MSG_ASSISTANT).last
         response_text = last_msg.inner_text()
@@ -167,7 +154,7 @@ class TestWorkerRouting:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        result = send_query_and_get_response(query, timeout=20000)
+        result = send_query_and_get_response(query, timeout=60000)
 
         assert result["trace_id"], \
             f"'{query}' should produce trace_id (routed to worker)"
@@ -206,7 +193,7 @@ class TestWorkerRouting:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("Python的列表推导式怎么写", timeout=20000)
+        send_chat_query("Python的列表推导式怎么写", timeout=60000)
 
         last_msg = page.locator(MSG_ASSISTANT).last
         response_text = last_msg.inner_text()

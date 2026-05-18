@@ -50,12 +50,6 @@ class TestChatFunctionality:
         expect(page.locator(MESSAGES_CONTAINER)).to_be_visible()
         expect(page.locator(CHAT_TEXTAREA)).to_be_visible()
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category B (trace ID missing on mid-stream read). "
-        "send_query_and_get_response sometimes captures the LLM preamble before "
-        "trace_id is rendered. Needs smart-wait helper. See "
-        "docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc102_send_query_receives_response_with_trace(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-102: Query returns response with meaningful text and trace ID."""
         page = admin_logged_in
@@ -109,11 +103,6 @@ class TestChatFunctionality:
         page.wait_for_selector(MSG_ASSISTANT, timeout=60000)
         expect(page.locator(MSG_ASSISTANT).last).to_be_visible()
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category A (mid-stream LLM preamble read). "
-        "Worker contract-002 data-collapse not consistently reached within timeout. "
-        "Needs smart-wait helper. See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc105_query_results_table(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-105: Query results displayed in data table with actual rows."""
         page = admin_logged_in
@@ -129,7 +118,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询供应商", timeout=20000)
+        send_chat_query("查询供应商", timeout=60000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher code block is empty"
@@ -139,12 +128,6 @@ class TestChatFunctionality:
         has_keyword = any(kw in cypher_text.upper() for kw in keywords)
         assert has_keyword, f"Cypher text lacks graph query keywords: {cypher_text[:200]}"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category B (trace ID missing on mid-stream read). "
-        "Originally Windows-only deadlock, now also fails on ECS because trace-id link "
-        "not yet rendered when assertion runs. Needs smart-wait helper. See "
-        "docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc107_trace_id_format(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-107: Trace ID has expected format and is displayed as link."""
         page = admin_logged_in
@@ -176,7 +159,7 @@ class TestChatFunctionality:
         wait_for_chat_ready()
 
         # First query establishes context
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
         page.wait_for_timeout(2000)
 
         # Second query references context
@@ -247,7 +230,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=20000)
+        send_chat_query("查询采购订单", timeout=60000)
 
         row_count = expand_data_table()
         assert row_count > 0, f"Data table should have rows, got {row_count}"
