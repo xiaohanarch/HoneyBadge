@@ -304,9 +304,9 @@ defaults = cfg['agents']['defaults']
 if defaults.get('maxConcurrent') != 8:
     defaults['maxConcurrent'] = 8
     print('Set maxConcurrent: 8')
-if defaults.get('contextTokens') != 40000:
-    defaults['contextTokens'] = 40000
-    print('Set contextTokens: 40000')
+if defaults.get('contextTokens') != 200000:
+    defaults['contextTokens'] = 200000
+    print('Set contextTokens: 200000')
 if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     defaults['contextPruning'] = {
         'mode': 'cache-ttl',
@@ -455,9 +455,9 @@ if 'agents' not in cfg:
 if 'defaults' not in cfg['agents']:
     cfg['agents']['defaults'] = {}
 mgr_defaults = cfg['agents']['defaults']
-if mgr_defaults.get('contextTokens') != 40000:
-    mgr_defaults['contextTokens'] = 40000
-    print('Set Manager contextTokens: 40000')
+if mgr_defaults.get('contextTokens') != 200000:
+    mgr_defaults['contextTokens'] = 200000
+    print('Set Manager contextTokens: 200000')
 if mgr_defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     mgr_defaults['contextPruning'] = {
         'mode': 'cache-ttl',

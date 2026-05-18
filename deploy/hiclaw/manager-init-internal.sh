@@ -594,9 +594,9 @@ if defaults.get('maxConcurrent') != 4:
     defaults['maxConcurrent'] = 4
     print('Set maxConcurrent: 4')
     changed = True
-if defaults.get('contextTokens') != 40000:
-    defaults['contextTokens'] = 40000
-    print('Set contextTokens: 40000')
+if defaults.get('contextTokens') != 200000:
+    defaults['contextTokens'] = 200000
+    print('Set contextTokens: 200000')
     changed = True
 if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     defaults['contextPruning'] = {
@@ -866,9 +866,9 @@ for p in cfg.get('models', {}).get('providers', {}).values():
 
 # Context pruning — prevents unbounded Manager context growth (mirrors Worker settings)
 mgr_defaults = cfg.setdefault('agents', {}).setdefault('defaults', {})
-if mgr_defaults.get('contextTokens') != 40000:
-    mgr_defaults['contextTokens'] = 40000
-    print('Set Manager contextTokens: 40000')
+if mgr_defaults.get('contextTokens') != 200000:
+    mgr_defaults['contextTokens'] = 200000
+    print('Set Manager contextTokens: 200000')
 if mgr_defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     mgr_defaults['contextPruning'] = {
         'mode': 'cache-ttl',
