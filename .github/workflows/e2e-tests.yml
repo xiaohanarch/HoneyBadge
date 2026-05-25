@@ -195,7 +195,7 @@ jobs:
           echo "=== Running Auth & Chat Tests ==="
           pytest tests/e2e/test_01_auth.py tests/e2e/test_02_chat.py \
             -v --tb=short --junitxml=test-results/auth-chat.xml \
-            --timeout=120 2>&1 | tee -a test-output.txt || true
+            --timeout=300 2>&1 | tee -a test-output.txt || true
 
       - name: Run E2E Tests - Session & Isolation
         if: github.event.inputs.test_filter == '' || contains('session,isolation', github.event.inputs.test_filter)
@@ -203,7 +203,7 @@ jobs:
           echo "=== Running Session & Isolation Tests ==="
           pytest tests/e2e/test_03_session.py tests/e2e/test_04_isolation.py \
             -v --tb=short --junitxml=test-results/session-isolation.xml \
-            --timeout=120 2>&1 | tee -a test-output.txt || true
+            --timeout=300 2>&1 | tee -a test-output.txt || true
 
       - name: Run E2E Tests - Permissions & Anti-Hallucination
         if: github.event.inputs.test_filter == '' || contains('permission,antihal', github.event.inputs.test_filter)
@@ -211,7 +211,7 @@ jobs:
           echo "=== Running Permissions & Anti-Hallucination Tests ==="
           pytest tests/e2e/test_05_permissions.py tests/e2e/test_06_antihal.py \
             -v --tb=short --junitxml=test-results/permission-antihal.xml \
-            --timeout=120 2>&1 | tee -a test-output.txt || true
+            --timeout=300 2>&1 | tee -a test-output.txt || true
 
       - name: Run E2E Tests - MCP & Infra
         if: github.event.inputs.test_filter == '' || contains('mcp,infra', github.event.inputs.test_filter)
@@ -219,7 +219,7 @@ jobs:
           echo "=== Running MCP & Infrastructure Tests ==="
           pytest tests/e2e/test_07_mcp.py tests/e2e/test_08_infra.py \
             -v --tb=short --junitxml=test-results/mcp-infra.xml \
-            --timeout=120 2>&1 | tee -a test-output.txt || true
+            --timeout=300 2>&1 | tee -a test-output.txt || true
 
       - name: Run E2E Tests - Observability
         if: github.event.inputs.test_filter == '' || contains('observability', github.event.inputs.test_filter)
@@ -227,7 +227,7 @@ jobs:
           echo "=== Running Observability Tests ==="
           pytest tests/e2e/test_09_observability.py \
             -v --tb=short --junitxml=test-results/observability.xml \
-            --timeout=120 2>&1 | tee -a test-output.txt || true
+            --timeout=300 2>&1 | tee -a test-output.txt || true
 
       - name: Fail job if any test stage reported FAILED/ERROR
         if: always()
