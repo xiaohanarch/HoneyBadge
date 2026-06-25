@@ -4,12 +4,12 @@
 
 ## 环境信息
 
-- 升级日期：（待填）
-- 操作人：（待填）
-- 起始版本：HiClaw v1.1.0（image tag `hiclaw-{embedded,manager,worker}:v1.1.0`）
+- 升级日期：2026-06-25
+- 操作人：Claude Code（Phase 1 验证）
+- 起始版本：HiClaw v1.1.0（image tag `hiclaw-{embedded,manager,worker}:v1.1.0`，运行中 2 天）
 - 目标版本：HiClaw v1.1.2
-- 部署形态：☐ 本地 docker-compose  ☐ K8s/k3s  ☐ ECS
-- Baseline 快照：`docs/baselines/v1.1.0/`（见该目录 README 获取方法）
+- 部署形态：☑ 本地 docker-compose  ☐ K8s/k3s  ☐ ECS
+- Baseline 快照：`docs/baselines/v1.1.0/`（已导出；含敏感信息的 openclaw.json / workers-registry.json 未提交，仅保留模板和 mcporter.json）
 
 ---
 
@@ -22,31 +22,42 @@
 docker images | grep hiclaw
 ```
 
-- `hiclaw-embedded:v1.1.2` digest：（待填）
-- `hiclaw-manager:v1.1.2` digest：（待填）
-- `hiclaw-worker:v1.1.2` digest：（待填）
-- 多架构支持确认：☐ amd64  ☐ arm64
+- `hiclaw-manager:v1.1.2` digest：`sha256:488a919fb5cbdb76958d0301adaf3105b899b3c54d1597617f68cc58005b4666`
+- `hiclaw-worker:v1.1.2`：已拉取
+- `hiclaw-embedded:v1.1.2`：未拉取（阶段 1 模板对比不需要，仅 manager + worker 镜像）
+- 多架构支持确认：☑ amd64  ☐ arm64（未验证 arm64）
 
-### 1.2 mcpServers CRD schema diff（**硬 blocker**）
+### 1.2 mcpServers CRD schema diff（**硬 blocker — 已清除**）
 
-对比方法：在 v1.1.0 和 v1.1.2 下分别导出 worker `openclaw.json`，diff `mcpServers` 字段结构。
+**验证方法**：对比 v1.1.0 运行中容器和 v1.1.2 镜像内的模板文件、MCP 配置源码、编译后 JS 文件。
 
-```bash
-# v1.1.0 baseline（已存于 docs/baselines/v1.1.0/）
-# v1.1.2 导出
-docker exec honeybadge-graph-worker cat /root/hiclaw-fs/agents/graph-worker/openclaw.json > /tmp/openclaw-v1.1.2.json
-jq '.mcpServers' docs/baselines/v1.1.0/graph-worker-openclaw.json > /tmp/mcp-v1.1.0.json
-jq '.mcpServers' /tmp/openclaw-v1.1.2.json > /tmp/mcp-v1.1.2.json
-diff /tmp/mcp-v1.1.0.json /tmp/mcp-v1.1.2.json
-```
+**实际对比结果**：
+
+| 对比项 | 方法 | 结果 |
+|--------|------|------|
+| `generate-worker-config.sh` | `diff` v1.1.0 vs v1.1.2 manager 镜像 | **IDENTICAL** |
+| `worker-openclaw.json.tmpl` | `diff` v1.1.0 vs v1.1.2 manager 镜像 | **IDENTICAL** |
+| `manager-openclaw.json.tmpl` | `diff` v1.1.0 vs v1.1.2 manager 镜像 | **IDENTICAL** |
+| `mcp-config.ts`（配置源码） | `diff` v1.1.0 运行中容器 vs v1.1.2 镜像 | **IDENTICAL** |
+| `types.mcp.ts`（类型定义） | `diff` v1.1.0 运行中容器 vs v1.1.2 镜像 | **IDENTICAL** |
+| `mcp-config-BXbuLA0x.js`（编译后） | `md5sum` 对比 | **相同**（`a7dd6ae7c4ba61a37f5169bd1d64ad9d`） |
+| MCP/mcporter 文件列表 | `find` 对比 | **逐行完全相同** |
+
+**关键发现**：
+
+1. v1.1.0 worker `openclaw.json` **本身不含 `mcpServers` 字段** —— MCP 配置完全通过独立的 `mcporter.json` 文件管理（HoneyBadge WS-19/WS-20 的做法）
+2. v1.1.2 的模板文件、MCP 配置源码、编译后 JS 与 v1.1.0 **完全相同**
+3. v1.1.1 release notes 的 "Restructure mcpServers on Worker/Manager/Team CRDs" **只影响 K8s CRD 控制面**，不影响 docker-compose 模式下的 openclaw runtime / mcporter.json
 
 **Schema 变化记录**：
 
-- 变化摘要：（待填）
-- 对 WS-19（Manager mcporter.json 直接写入）的影响：（待填）
-- 对 WS-20（Worker mcporter.json 注册）的影响：（待填）
-- 需要修改的文件：（待填）
-- `pytest -c pytest.ini -m mcp` 结果：☐ 通过  ☐ 失败
+- 变化摘要：**无变化**（docker-compose 模式下）
+- 对 WS-19（Manager mcporter.json 直接写入）的影响：**无影响** —— v1.1.2 仍读取相同 schema 的 mcporter.json
+- 对 WS-20（Worker mcporter.json 注册）的影响：**无影响** —— v1.1.2 的 mcporter 行为与 v1.1.0 相同
+- 需要修改的文件：**无**
+- `pytest -c pytest.ini -m mcp` 结果：待完整 v1.1.2 栈启动后验证（预计通过）
+
+**结论：硬 blocker 已清除。** v1.1.1 的 mcpServers CRD 重构仅影响 K8s CRD 模式；本项目 docker-compose 模式下 MCP 配置通过 mcporter.json 管理，schema 未变。WS-19/WS-20 无需修改。
 
 ### 1.3 Workaround 验证记录
 

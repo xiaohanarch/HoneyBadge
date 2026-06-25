@@ -5,20 +5,28 @@
 ## 用途
 
 1. **回滚 baseline**：升级失败时，用这些快照恢复到 v1.1.0 状态
-2. **Schema diff**：与 v1.1.2 生成的配置做 diff，识别破坏性变化（特别是 `mcpServers` CRD 重构）
+2. **Schema diff**：与 v1.1.2 模板做 diff，验证 mcpServers schema 变化（**已完成 —— 结果：IDENTICAL，无变化**）
 
-## 需要导出的文件
+## 已提交的文件（安全，不含敏感信息）
 
-从运行中的 v1.1.0 容器导出以下文件：
+| 文件 | 来源 | 用途 |
+|------|------|------|
+| `graph-worker-mcporter.json` | `honeybadge-graph-worker` 容器导出 | MCP 挂载配置 baseline（仅含 baseUrl） |
+| `analytics-worker-mcporter.json` | `honeybadge-analytics-worker` 容器导出 | MCP 挂载配置 baseline（仅含 baseUrl） |
+| `worker-openclaw.json.tmpl` | `honeybadge-hiclaw-manager` 容器 `/opt/hiclaw/agent/skills/worker-management/references/` | Worker 配置模板（上游镜像通用文件） |
+| `manager-openclaw.json.tmpl` | `honeybadge-hiclaw-manager` 容器 `/opt/hiclaw/configs/` | Manager 配置模板（上游镜像通用文件） |
+| `generate-worker-config.sh` | `honeybadge-hiclaw-manager` 容器 `/opt/hiclaw/agent/skills/worker-management/scripts/` | Worker 配置生成脚本（上游镜像通用文件） |
 
-| 文件 | 来源容器 | 容器内路径 | 用途 |
-|------|---------|-----------|------|
-| `graph-worker-openclaw.json` | `honeybadge-graph-worker` | `/root/hiclaw-fs/agents/graph-worker/openclaw.json` | Worker 配置 baseline |
-| `analytics-worker-openclaw.json` | `honeybadge-analytics-worker` | `/root/hiclaw-fs/agents/analytics-worker/openclaw.json` | Worker 配置 baseline |
-| `manager-openclaw.json` | `honeybadge-hiclaw-manager` | `/root/manager-workspace/openclaw.json` | Manager 配置 baseline |
-| `workers-registry.json` | `honeybadge-hiclaw-manager` | `/root/manager-workspace/workers-registry.json` | Worker 注册表 baseline |
-| `graph-worker-mcporter.json` | `honeybadge-graph-worker` | `/root/hiclaw-fs/config/mcporter.json` | MCP 挂载配置 baseline |
-| `analytics-worker-mcporter.json` | `honeybadge-analytics-worker` | `/root/hiclaw-fs/config/mcporter.json` | MCP 挂载配置 baseline |
+## 未提交的文件（含敏感信息 —— 需要时从运行中容器导出）
+
+以下文件含真实凭据（Matrix token、LLM apiKey、gateway accessToken），**不应提交到 git**。需要时从运行中的 v1.1.0 容器导出：
+
+| 文件 | 来源容器 | 容器内路径 | 敏感内容 |
+|------|---------|-----------|---------|
+| `graph-worker-openclaw.json` | `honeybadge-graph-worker` | `/root/hiclaw-fs/agents/graph-worker/openclaw.json` | Matrix token, LLM apiKey |
+| `analytics-worker-openclaw.json` | `honeybadge-analytics-worker` | `/root/hiclaw-fs/agents/analytics-worker/openclaw.json` | Matrix token, LLM apiKey |
+| `manager-openclaw.json` | `honeybadge-hiclaw-manager` | `/root/manager-workspace/openclaw.json` | Gateway accessToken |
+| `workers-registry.json` | `honeybadge-hiclaw-manager` | `/root/manager-workspace/workers-registry.json` | Matrix room_id, user_id |
 
 ## 导出命令
 
