@@ -305,7 +305,8 @@ services:
     restart: unless-stopped
     environment:
       LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY required for dev gateway bypass}
-      LLM_UPSTREAM_HOST: ${LLM_UPSTREAM_HOST:-coding.dashscope.aliyuncs.com}
+      LLM_UPSTREAM_HOST: ${LLM_UPSTREAM_HOST:-open.bigmodel.cn}
+      LLM_UPSTREAM_PATH_PREFIX: ${LLM_UPSTREAM_PATH_PREFIX:-/api/paas/v4}
     volumes:
       - ../hiclaw/aigw-bypass.conf.template:/etc/nginx/templates/default.conf.template:ro
     networks:
@@ -399,7 +400,7 @@ services:
       # Default model for Manager Agent (Aliyun DashScope coding endpoint).
       # Inherits LLM_MODEL from .env so a single source of truth controls the
       # upstream model name across nginx-bypass and worker openclaw.json.
-      - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-glm-5}
+      - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-glm-5.2}
       # Disable memorySearch (LOAD-BEARING in v1.1.0).
       # hiclaw-env.sh uses `${HICLAW_EMBEDDING_MODEL-text-embedding-v4}` (single
       # dash), so unset falls back to the broken default — empty string is the

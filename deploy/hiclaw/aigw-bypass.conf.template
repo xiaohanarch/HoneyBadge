@@ -7,8 +7,11 @@
 # /etc/nginx/conf.d/*.conf at container start).
 #
 # Environment variables (set in docker-compose.yaml):
-#   - LLM_API_KEY      — upstream LLM API key (replaces worker gateway key)
-#   - LLM_UPSTREAM_HOST — upstream host (e.g. api.minimaxi.com)
+#   - LLM_API_KEY              — upstream LLM API key (replaces worker gateway key)
+#   - LLM_UPSTREAM_HOST         — upstream host (e.g. open.bigmodel.cn)
+#   - LLM_UPSTREAM_PATH_PREFIX  — upstream API path prefix (default: /v1)
+#                                 DashScope: /v1 (uses /v1/chat/completions directly)
+#                                 BigModel:  /api/paas/v4 (rewrites to /api/paas/v4/chat/completions)
 #
 # Production note: this file is NEVER deployed to k3s/ECS. Production uses
 # real Higress with consumer/route/service-source configuration. Higress
@@ -52,7 +55,14 @@ server {
         proxy_ssl_verify off;       # dev-only; production runs through Higress with real verify
 
         # Use a variable for proxy_pass so nginx re-resolves DNS at runtime
+        # NOTE: set must come BEFORE rewrite — rewrite ... break stops further
+        # ngx_http_rewrite_module directives, so set would be skipped if placed after.
         set $upstream "https://${LLM_UPSTREAM_HOST}";
+
+        # Rewrite /v1/ to the upstream's API path prefix
+        # (DashScope uses /v1/ directly; BigModel uses /api/paas/v4/)
+        rewrite ^/v1/(.*)$ ${LLM_UPSTREAM_PATH_PREFIX}/$1 break;
+
         proxy_pass $upstream;
 
         proxy_http_version 1.1;

@@ -28,6 +28,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# On Windows (Git Bash/MSYS2), convert to Windows-style path for Docker compatibility.
+# Docker for Windows cannot resolve Unix-style paths like /d/dev/HoneyBadge.
+if command -v cygpath &>/dev/null; then
+    PROJECT_ROOT="$(cygpath -m "$PROJECT_ROOT")"
+    TMP_DIR="$(cygpath -m /tmp)"
+else
+    TMP_DIR="/tmp"
+fi
 
 # Source .env for LLM_API_KEY and other config (if not already in environment)
 ENV_FILE="$PROJECT_ROOT/deploy/docker/.env"
@@ -237,7 +245,7 @@ docker exec "$MANAGER_CONTAINER" bash -c \
 #     IRON RULE: Workers NEVER call any LLM directly. ALL LLM calls MUST route
 #     through Higress AI Gateway at http://aigw-local.hiclaw.io:8080/v1. No exceptions.
 # ---------------------------------------------------------------------------
-log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ glm-5)..."
+log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ glm-5.2)..."
 # baseUrl MUST include /v1: OpenAI JS SDK appends /chat/completions directly
 # Without /v1: path becomes /chat/completions → misses llm-minimax-route → no API key → 404
 for worker in graph-worker analytics-worker; do
@@ -270,19 +278,19 @@ for name, p in providers.items():
         print('Patched ' + name + ' baseUrl: ' + old + ' -> ' + p['baseUrl'])
     for model in p.get('models', []):
         old_id = model.get('id', '')
-        if old_id != 'glm-5':
-            model['id'] = 'glm-5'
-            model['name'] = 'glm-5'
-            print('Updated model: ' + old_id + ' -> glm-5')
+        if old_id != 'glm-5.2':
+            model['id'] = 'glm-5.2'
+            model['name'] = 'glm-5.2'
+            print('Updated model: ' + old_id + ' -> glm-5.2')
         # Always remove reasoning:true — openclaw thinking mode sends Claude-style
         # thinking blocks that DashScope rejects with role-ordering 400 errors.
         model.pop('reasoning', None)
 
 agents = cfg.get('agents', {}).get('defaults', {}).get('model', {})
 old_primary = agents.get('primary', '')
-if 'glm-5' not in old_primary:
+if 'glm-5.2' not in old_primary:
     for name in providers.keys():
-        agents['primary'] = name + '/glm-5'
+        agents['primary'] = name + '/glm-5.2'
         print('Updated primary: ' + old_primary + ' -> ' + agents['primary'])
         break
 
@@ -359,7 +367,7 @@ done
 #     IRON RULE: ALL LLM calls MUST go through Higress. Workers never call any
 #     LLM endpoint directly. This route is the single exit point for all LLM traffic.
 # ---------------------------------------------------------------------------
-log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → Bailian/glm-5)..."
+log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → BigModel/glm-5.2)..."
 HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
 LLM_API_KEY="${LLM_API_KEY:-${HICLAW_LLM_API_KEY:-}}"
 
@@ -554,8 +562,8 @@ MANAGER_MCPORTER_JSON='{
 # Write into the Manager container at both the active path
 # (/root/config/mcporter.json — what fast-query.sh reads via default
 # MCPORTER_CONFIG) and the workspace path (/root/manager-workspace/config/).
-printf '%s\n' "$MANAGER_MCPORTER_JSON" > /tmp/hb-manager-mcporter.json
-docker cp /tmp/hb-manager-mcporter.json \
+printf '%s\n' "$MANAGER_MCPORTER_JSON" > "$TMP_DIR/hb-manager-mcporter.json"
+docker cp "$TMP_DIR/hb-manager-mcporter.json" \
     "$MANAGER_CONTAINER:/root/config/mcporter.json" \
     && log "  → /root/config/mcporter.json written" \
     || warn "  Failed to write /root/config/mcporter.json"
@@ -567,7 +575,7 @@ docker exec "$MANAGER_CONTAINER" bash -c \
     || warn "  Failed to mirror to manager-workspace"
 
 # Sync to MinIO so it survives Manager container restarts.
-docker cp /tmp/hb-manager-mcporter.json \
+docker cp "$TMP_DIR/hb-manager-mcporter.json" \
     "$EMBEDDED_CONTAINER:/tmp/hb-manager-mcporter.json" && \
 docker exec "$EMBEDDED_CONTAINER" bash -c \
     "mc cp /tmp/hb-manager-mcporter.json hiclaw/hiclaw-storage/agents/manager/config/mcporter.json 2>&1 | tail -1" \
