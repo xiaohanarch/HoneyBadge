@@ -232,7 +232,7 @@ services:
   hiclaw-embedded:
     container_name: honeybadge-hiclaw-embedded
     hostname: hiclaw-embedded
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.0
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.2
     restart: unless-stopped
     # NOTE (2026-05-08): the higress + pilot-discovery binaries inside this image
     # segfault on WSL2 kernel 6.6.x regardless of any container sandbox setting.
@@ -340,7 +340,7 @@ services:
   # =============================================================================
 
   hiclaw-manager:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.0
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.2
     container_name: honeybadge-hiclaw-manager
     hostname: hiclaw-manager
     restart: unless-stopped
@@ -437,7 +437,7 @@ services:
   # =============================================================================
 
   hiclaw-graph-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
     container_name: honeybadge-graph-worker
     hostname: hiclaw-graph-worker
     restart: unless-stopped
@@ -462,7 +462,7 @@ services:
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   hiclaw-analytics-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
     container_name: honeybadge-analytics-worker
     hostname: hiclaw-analytics-worker
     restart: unless-stopped

@@ -14,7 +14,7 @@
 # This Dockerfile is kept as a reference for custom Worker image builds only
 # (e.g. baking in skills for production deployments without MinIO dependency).
 
-FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
+FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
 
 # Workers get their config from MinIO at runtime.
 # Nothing to COPY here for standard deployments.

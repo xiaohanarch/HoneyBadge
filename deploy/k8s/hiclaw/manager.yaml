@@ -81,7 +81,7 @@ spec:
     spec:
       containers:
         - name: hiclaw-embedded
-          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.0
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.2
           env:
             - name: HICLAW_ADMIN_USER
               valueFrom:
@@ -215,7 +215,7 @@ spec:
             - 'until wget -q --spider http://hiclaw-embedded:9000/minio/health/live; do echo "Waiting for hiclaw-embedded MinIO..."; sleep 5; done; echo "hiclaw-embedded is ready."'
       containers:
         - name: hiclaw-manager
-          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.0
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.2
           command: ["/bin/bash", "/opt/honeybadge/init/entrypoint-wrapper.sh"]
           env:
             # k8s runtime mode: start-manager-agent.sh acts as PID 1. The
