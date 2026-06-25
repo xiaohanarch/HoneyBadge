@@ -78,25 +78,31 @@ docker images | grep hiclaw
 
 #### needs-verification 组
 
+> **关键发现**：由于 v1.1.0 与 v1.1.2 的模板文件和 `generate-worker-config.sh` **完全相同**（见 §1.2 schema diff），以下 workaround 的行为在两个版本中完全一致。对 v1.1.0 运行系统的验证等同于对 v1.1.2 的验证。
+
 | ID | 验证结果 | 实际行为 | 删除确认 |
 |----|---------|---------|---------|
-| WS-01 reasoning: true pop | ☐ 模板不再注入  ☐ 仍注入 | | ☐ 已删 / ☐ 保留 |
-| WS-03 worker baseUrl rewrite | ☐ 生成正确  ☐ 仍错误 | | ☐ 已删 / ☐ 保留 |
-| WS-09 Matrix port 修正 | ☐ 正确 6167  ☐ 仍错误 | | ☐ 已删 / ☐ 保留 |
-| WS-11 dangerouslyAllowPrivateNetwork | ☐ 已传播  ☐ 未传播 | | ☐ 已删 / ☐ 保留 |
-| WS-19 Manager mcporter.json | 见 1.2 | | ☐ 已删 / ☐ 保留 |
-| WS-20 Worker mcporter.json | 见 1.2 | | ☐ 已删 / ☐ 保留 |
+| WS-01 reasoning: true pop | ☑ 仍注入 | 模板硬编码 `reasoning: true`；`MODEL_REASONING=true` 默认；pop 是唯一移除机制 | ☑ 保留 |
+| WS-03 worker baseUrl rewrite | ☑ 生成正确 | `generate-worker-config.sh:97` 对 docker runtime 硬编码正确 URL；workaround 为 no-op | ☑ 保留（safety net，待 v1.1.2 部署后可删） |
+| WS-09 Matrix port 修正 | ☑ 正确 6167 | 配置中 `matrix_homeserver=http://matrix-local.hiclaw.io:6167`；workaround 为 no-op | ☑ 保留（safety net，待 v1.1.2 部署后可删） |
+| WS-11 dangerouslyAllowPrivateNetwork | ☑ 已传播 | `.channels.matrix.network.dangerouslyAllowPrivateNetwork = True` 已存在 | ☑ 保留 |
+| WS-19 Manager mcporter.json | 见 1.2（硬 blocker 已清除） | schema 未变 | ☑ 保留 |
+| WS-20 Worker mcporter.json | 见 1.2（硬 blocker 已清除） | schema 未变 | ☑ 保留 |
+
+**结论**：6 个 needs-verification workaround **全部保留**。由于模板文件 identical，v1.1.2 不会修复这些问题的底层原因。WS-03 和 WS-09 可能已是 no-op，但作为 safety net 保留，待 v1.1.2 部署 + E2E 通过后再考虑删除。
 
 ### 1.4 Team Leader skill alias 检查
 
-```bash
-# 查 v1.1.2 release notes 确认被移除的 alias 名
-grep -r "<旧 alias 名>" hiclaw/manager/agent/ hiclaw/workers/*/agent/ skills/*/SKILL.md
-```
+v1.1.0 Team Leader skills: `team-task-management`, `worker-lifecycle`, `team-task-coordination`, `team-project-management`
+v1.1.2 Team Leader skills: `communication`, `file-sharing`, `mcporter`, `organization`, `project-management`, `task-management`, `team-coordination`
 
-- 被移除的 alias 名：（待填）
-- 本项目引用情况：☐ 无引用  ☐ 有引用（列出位置）
-- 更新确认：☐ 不需要  ☐ 已更新
+旧 skill 名在新版本中被重命名，v1.1.2 移除了兼容 alias。
+
+- 被移除的 alias 名：`team-task-management`, `worker-lifecycle`, `team-task-coordination`, `team-project-management`
+- 本项目引用情况：☑ 无引用（`grep -ri` 全仓零匹配）
+- 更新确认：☑ 不需要
+
+**结论**：本项目使用 Manager + Worker 架构，不使用 Team Leader agent。v1.1.2 的 Team Leader skill alias 移除对本项目无影响。
 
 ### 1.5 MinIO endpoint 验证
 
