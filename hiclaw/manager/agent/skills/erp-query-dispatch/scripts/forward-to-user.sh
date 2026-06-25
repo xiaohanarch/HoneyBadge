@@ -110,7 +110,16 @@ if [ -z "$MANAGER_TOKEN" ]; then
     exit 1
 fi
 
-# 3. Fallback: if meta.json lacks user_room_id, resolve via Manager's m.direct using user_mxid
+# 3. Fallback: if meta.json lacks user_room_id, find the most recently active
+#    DM room between the Manager and the target user.
+#
+#    We used to resolve via m.direct account data, but that mapping accumulates
+#    stale rooms from every previous E2E run (hundreds of rooms), and
+#    rooms[0] is almost always an old room — not the one where the current
+#    conversation is happening.  Instead, scan the Manager's joined rooms for
+#    2-member rooms containing the target user, and pick the one with the
+#    newest last-message timestamp.  This is O(N) API calls but N is small
+#    (the Manager only joins DM rooms, and we short-circuit on timestamp).
 if [ "$USER_ROOM_ID" = "-" ] || [ -z "$USER_ROOM_ID" ]; then
     if [ "$USER_MXID" = "-" ] || [ -z "$USER_MXID" ]; then
         echo "FORWARD_ERROR: meta.json has neither user_room_id nor user_mxid" >&2
@@ -121,17 +130,50 @@ if [ "$USER_ROOM_ID" = "-" ] || [ -z "$USER_ROOM_ID" ]; then
     export FB_USER_MXID="$USER_MXID"
     USER_ROOM_ID=$(python3 << 'FBEOF'
 import json, urllib.request, urllib.parse, os, sys
-mgr_uid = "@manager:matrix-local.hiclaw.io"
-enc_mgr = urllib.parse.quote(mgr_uid, safe="")
-url = f'{os.environ["FB_TUWUNEL"]}/_matrix/client/v3/user/{enc_mgr}/account_data/m.direct'
-req = urllib.request.Request(url, headers={"Authorization": "Bearer " + os.environ["FB_TOKEN"]})
-try:
-    with urllib.request.urlopen(req, timeout=5) as r:
-        m_direct = json.loads(r.read())
-    rooms = m_direct.get(os.environ["FB_USER_MXID"], [])
-    print(rooms[0] if rooms else "")
-except Exception:
+
+token  = os.environ["FB_TOKEN"]
+base   = os.environ["FB_TUWUNEL"]
+target = os.environ["FB_USER_MXID"]
+mgr    = "@manager:matrix-local.hiclaw.io"
+
+def api(path):
+    req = urllib.request.Request(
+        f"{base}{path}",
+        headers={"Authorization": "Bearer " + token})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+# 1. Get all joined rooms
+joined = api("/_matrix/client/v3/joined_rooms").get("joined_rooms", [])
+
+# 2. Filter for 2-member rooms containing the target user
+candidates = []
+for room_id in joined:
+    try:
+        members = list(api(
+            f"/_matrix/client/v3/rooms/{room_id}/joined_members"
+        ).get("joined", {}).keys())
+    except Exception:
+        continue
+    if len(members) == 2 and target in members and mgr in members:
+        # 3. Get last message timestamp from room state
+        try:
+            # Use messages API to get the most recent event
+            msg_url = (f"/_matrix/client/v3/rooms/{room_id}/messages"
+                       f"?dir=b&limit=1")
+            data = api(msg_url)
+            events = data.get("chunk", [])
+            ts = events[0].get("origin_server_ts", 0) if events else 0
+        except Exception:
+            ts = 0
+        candidates.append((ts, room_id))
+
+if not candidates:
     print("")
+else:
+    # Pick the room with the most recent message
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    print(candidates[0][1])
 FBEOF
 )
     if [ -z "$USER_ROOM_ID" ]; then

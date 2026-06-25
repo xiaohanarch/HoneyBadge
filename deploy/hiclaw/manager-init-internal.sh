@@ -17,6 +17,7 @@ set -uo pipefail
 # Config paths
 HB_CONFIG="/opt/honeybadge/config"
 MANAGER_WORKSPACE="/root/manager-workspace"
+MANAGER_OPENCLAW="${MANAGER_WORKSPACE}/openclaw.json"
 GENERATE_WORKER_CFG="/opt/hiclaw/agent/skills/worker-management/scripts/generate-worker-config.sh"
 MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
 MATRIX_URL="${HICLAW_MATRIX_URL:-http://${MATRIX_DOMAIN}:6167}"
@@ -502,6 +503,15 @@ for name, p in providers.items():
         if model.pop('reasoning', None) is not None:
             print('Removed reasoning:true from ' + model.get('id', ''))
             changed = True
+        # Cap maxTokens at 8192 — openclaw ships models with maxTokens=128000,
+        # which reserves nearly the entire context window for output. Combined
+        # with contextTokens=200000, this ensures promptBudget is large enough
+        # for full E2E suites without context overflow.
+        old_mt = model.get('maxTokens', 0)
+        if old_mt > 8192:
+            model['maxTokens'] = 8192
+            print('Capped maxTokens: ' + str(old_mt) + ' -> 8192 for ' + model.get('id', ''))
+            changed = True
 
 # Update agents.defaults.model.primary. v1.1.0 worker configs may not have
 # a models.providers dict at all (only the bare primary string), so we need
@@ -562,9 +572,9 @@ if defaults.get('maxConcurrent') != 4:
     defaults['maxConcurrent'] = 4
     print('Set maxConcurrent: 4')
     changed = True
-if defaults.get('contextTokens') != 40000:
-    defaults['contextTokens'] = 40000
-    print('Set contextTokens: 40000')
+if defaults.get('contextTokens') != 200000:
+    defaults['contextTokens'] = 200000
+    print('Set contextTokens: 200000')
     changed = True
 if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     defaults['contextPruning'] = {
@@ -815,20 +825,23 @@ channels['groupAllowFrom'] = hb_users + workers
 # deployment targets (docker-compose.yaml + k8s manager.yaml), so the template
 # generates the correct baseUrl without this patch.
 
-# Remove reasoning:true from all models
+# Remove reasoning:true from all models and cap maxTokens at 8192
 for p in cfg.get('models', {}).get('providers', {}).values():
     for m in p.get('models', []):
         if m.pop('reasoning', None) is not None:
             print('Removed reasoning:true from ' + m.get('id', ''))
+        old_mt = m.get('maxTokens', 0)
+        if old_mt > 8192:
+            m['maxTokens'] = 8192
 
 # WS-02 (memorySearch pop) removed in v1.1.2 upgrade — was already a no-op comment.
 # HICLAW_EMBEDDING_MODEL="" in docker-compose.yaml prevents injection at the source.
 
 # Context pruning — prevents unbounded Manager context growth (mirrors Worker settings)
 mgr_defaults = cfg.setdefault('agents', {}).setdefault('defaults', {})
-if mgr_defaults.get('contextTokens') != 40000:
-    mgr_defaults['contextTokens'] = 40000
-    print('Set Manager contextTokens: 40000')
+if mgr_defaults.get('contextTokens') != 200000:
+    mgr_defaults['contextTokens'] = 200000
+    print('Set Manager contextTokens: 200000')
 if mgr_defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     mgr_defaults['contextPruning'] = {
         'mode': 'cache-ttl',

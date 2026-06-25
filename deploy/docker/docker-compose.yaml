@@ -652,6 +652,11 @@ services:
       - MATRIX_USER_SECRET=${MATRIX_USER_SECRET:-hb-user-secret-dev}
       - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
       - MATRIX_HOMESERVER_PUBLIC=http://localhost:7167
+      # Manager password — used to log in as @manager and populate the
+      # Manager's m.direct account data after DM room creation.  Without
+      # this, OpenClaw classifies new rooms as "channel" (mention-gated)
+      # and silently ignores user queries.
+      - MANAGER_MATRIX_PASSWORD=${HICLAW_MANAGER_PASSWORD:-hiclaw-manager-password-dev}
       - TZ=Asia/Shanghai
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}

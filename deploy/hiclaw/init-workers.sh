@@ -285,6 +285,17 @@ for name, p in providers.items():
         # Always remove reasoning:true — openclaw thinking mode sends Claude-style
         # thinking blocks that DashScope rejects with role-ordering 400 errors.
         model.pop('reasoning', None)
+        # Cap maxTokens at 8192 — openclaw ships glm-5.2 with maxTokens=128000,
+        # which reserves nearly the entire context window for OUTPUT. That leaves
+        # promptBudget = contextWindow - maxTokens ≈ 22K, causing
+        # 'Context overflow: prompt too large for the model (precheck)' after
+        # only 30-50 tool-loop messages, and auto-compaction trips its
+        # 'already_compacted_recently' circuit breaker.
+        # glm-5.2 is a chat model — 8K output is plenty for tool calls + summaries.
+        old_mt = model.get('maxTokens', 0)
+        if old_mt > 8192:
+            model['maxTokens'] = 8192
+            print('Capped maxTokens: ' + str(old_mt) + ' -> 8192')
 
 agents = cfg.get('agents', {}).get('defaults', {}).get('model', {})
 old_primary = agents.get('primary', '')
@@ -312,9 +323,9 @@ defaults = cfg['agents']['defaults']
 if defaults.get('maxConcurrent') != 8:
     defaults['maxConcurrent'] = 8
     print('Set maxConcurrent: 8')
-if defaults.get('contextTokens') != 40000:
-    defaults['contextTokens'] = 40000
-    print('Set contextTokens: 40000')
+if defaults.get('contextTokens') != 200000:
+    defaults['contextTokens'] = 200000
+    print('Set contextTokens: 200000')
 if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     defaults['contextPruning'] = {
         'mode': 'cache-ttl',
@@ -453,9 +464,14 @@ cfg['channels']['matrix']['groupAllowFrom'] = hb_users + workers
 # Remove reasoning:true from all models — openclaw's thinking mode sends Claude-style
 # thinking content blocks that DashScope/qwen3.5-plus rejects with a 400 role error,
 # causing 'Message ordering conflict' on every user message.
+# Also cap maxTokens at 8192 — the shipped 128000 leaves only ~22K for prompt,
+# triggering 'Context overflow' after 30-50 messages and breaking E2E suites.
 for p in cfg.get('models', {}).get('providers', {}).values():
     for m in p.get('models', []):
         m.pop('reasoning', None)
+        old_mt = m.get('maxTokens', 0)
+        if old_mt > 8192:
+            m['maxTokens'] = 8192
 
 # Context pruning for Manager (mirrors Worker settings)
 if 'agents' not in cfg:
@@ -463,9 +479,9 @@ if 'agents' not in cfg:
 if 'defaults' not in cfg['agents']:
     cfg['agents']['defaults'] = {}
 mgr_defaults = cfg['agents']['defaults']
-if mgr_defaults.get('contextTokens') != 40000:
-    mgr_defaults['contextTokens'] = 40000
-    print('Set Manager contextTokens: 40000')
+if mgr_defaults.get('contextTokens') != 200000:
+    mgr_defaults['contextTokens'] = 200000
+    print('Set Manager contextTokens: 200000')
 if mgr_defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     mgr_defaults['contextPruning'] = {
         'mode': 'cache-ttl',

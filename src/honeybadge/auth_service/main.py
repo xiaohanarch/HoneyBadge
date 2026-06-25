@@ -62,8 +62,50 @@ MATRIX_HOMESERVER_PUBLIC: str = os.getenv(
 MANAGER_USER_ID: str = os.getenv(
     "MANAGER_USER_ID", "@manager:matrix-local.hiclaw.io"
 )
+MANAGER_MATRIX_PASSWORD: str = os.getenv(
+    "MANAGER_MATRIX_PASSWORD", "hiclaw-manager-password-dev"
+)
 
 _ALGORITHM = "HS256"
+
+# Cache the Manager's Matrix access token to avoid creating a new session on
+# every user login.  The token is read-only (only used for m.direct PUT) and
+# remains valid until the Manager container is recreated.
+_manager_token_cache: str | None = None
+
+
+async def _get_manager_token() -> str | None:
+    """Log in as the HiClaw Manager and return the Matrix access token.
+
+    Caches the token across calls.  Returns ``None`` if login fails — callers
+    treat this as non-fatal (the DM room is still created; OpenClaw will
+    detect it via the 2-member fallback or the fix-direct-rooms watcher).
+    """
+    global _manager_token_cache
+    if _manager_token_cache:
+        return _manager_token_cache
+
+    login_url = f"{TUWUNEL_URL}/_matrix/client/v3/login"
+    login_payload = {
+        "type": "m.login.password",
+        "identifier": {"type": "m.id.user", "user": "manager"},
+        "password": MANAGER_MATRIX_PASSWORD,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(login_url, json=login_payload)
+            if resp.status_code == 200:
+                _manager_token_cache = resp.json()["access_token"]
+                logger.info("manager_login_success")
+                return _manager_token_cache
+            logger.error(
+                "manager_login_failed",
+                status_code=resp.status_code,
+                body=resp.text[:200],
+            )
+    except Exception as exc:
+        logger.error("manager_login_error", error=str(exc))
+    return None
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -370,7 +412,7 @@ async def _provision_dm_room(access_token: str, user_id: str) -> str:
         room_id: str = create_resp.json()["room_id"]
         logger.info("dm_room_created", user_id=user_id, room_id=room_id)
 
-        # 3. Record in m.direct so future logins reuse this room
+        # 3. Record in user's m.direct so future logins reuse this room
         try:
             await client.put(
                 f"{TUWUNEL_URL}/_matrix/client/v3/user/{user_id}/account_data/m.direct",
@@ -385,6 +427,54 @@ async def _provision_dm_room(access_token: str, user_id: str) -> str:
                 error=str(exc),
             )
             # Non-fatal: room was created, just won't be found next time via m.direct
+
+        # 4. Populate the MANAGER's m.direct account data.
+        #
+        # OpenClaw's DM detection checks the Manager's own m.direct first
+        # (path: m.direct + strict 2-member → DM).  Without this, new rooms
+        # created after the Manager's initial /sync are not in the Manager's
+        # m.direct, the 2-member fallback no longer fires (cache seeded), and
+        # the room is classified as "channel".  Channel messages are
+        # mention-gated, so the Manager silently ignores non-@mention queries.
+        #
+        # Setting this at room-creation time eliminates the race that the
+        # fix-direct-rooms.py watcher was designed to patch.
+        try:
+            manager_token = await _get_manager_token()
+            if manager_token:
+                manager_headers = {"Authorization": f"Bearer {manager_token}"}
+
+                # GET Manager's current m.direct (merge, don't overwrite)
+                mgr_direct: dict[str, list[str]] = {}
+                resp = await client.get(
+                    f"{TUWUNEL_URL}/_matrix/client/v3/user/{manager_user_id}/account_data/m.direct",
+                    headers=manager_headers,
+                )
+                if resp.status_code == 200:
+                    mgr_direct = resp.json()
+
+                mgr_rooms = mgr_direct.get(user_id, [])
+                if room_id not in mgr_rooms:
+                    mgr_rooms.append(room_id)
+                    mgr_direct[user_id] = mgr_rooms
+                    await client.put(
+                        f"{TUWUNEL_URL}/_matrix/client/v3/user/{manager_user_id}/account_data/m.direct",
+                        headers=manager_headers,
+                        json=mgr_direct,
+                    )
+                    logger.info(
+                        "manager_mdirect_updated",
+                        room_id=room_id,
+                        user_id=user_id,
+                    )
+        except Exception as exc:
+            logger.warning(
+                "manager_mdirect_update_failed",
+                room_id=room_id,
+                error=str(exc),
+            )
+            # Non-fatal: room was created; the fix-direct-rooms.py watcher
+            # or the 2-member fallback will handle detection.
 
         return room_id
 
