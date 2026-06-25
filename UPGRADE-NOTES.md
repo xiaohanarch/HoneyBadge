@@ -65,12 +65,16 @@ docker images | grep hiclaw
 
 | ID | 验证结果 | 实际行为 | 删除确认 |
 |----|---------|---------|---------|
-| WS-02 memorySearch pop | ☐ 模板不再注入  ☐ 仍注入 | | ☐ 已删 |
-| WS-04 Manager baseUrl 模板 | ☐ 模板生成正确  ☐ 仍空 host | | ☐ 已删 |
-| WS-06 allowedConsumers 重建 | ☐ 重启后保留  ☐ 仍清空 | | ☐ 已删 |
-| WS-12 immutable-field shim | ☐ 已迁移  ☐ 需保留 | | ☐ 已删 |
-| WS-13 /root/openclaw.json 符号链接 | ☐ 死代码确认  ☐ 仍被读 | | ☐ 已删 |
-| WS-14 hot-reload deadlock 注释 | — | | ☐ 已删 |
+| WS-02 memorySearch pop | ☑ 已是死代码注释 | v1.1.0 模板 + `HICLAW_EMBEDDING_MODEL=""` 已阻止注入 | ☑ 已删（注释块） |
+| WS-04 Manager baseUrl 模板 | ☑ env var 已设置 | `HICLAW_AI_GATEWAY_DOMAIN` 在 docker-compose.yaml:393 + k8s manager.yaml:277 均已设置 | ☑ 已删 |
+| WS-06 allowedConsumers 重建 | **N/A — 误识别** | 见下方说明 | ☐ 无需删 |
+| WS-12 immutable-field shim | ☑ 已迁移 | v1.0.9→v1.1.0 一次性迁移，`if` guard 已使其 no-op | ☑ 已删（54 行 → 1 行 pipe） |
+| WS-13 /root/openclaw.json 符号链接 | ☑ 死代码确认 | `generate-worker-config.sh` 不读 `/root/openclaw.json` | ☑ 已删 |
+| WS-14 hot-reload deadlock 注释 | — | 仅注释块（实际代码在 v1.1.0 升级时已删） | ☑ 已删 |
+
+**WS-06 误识别说明**：调研阶段将 `init-workers.sh:347-407` 和 `manager-init-internal.sh:634-692` 标记为 WS-06（allowedConsumers 路由重建），但实际验证发现该代码是 WS-08（Higress LLM 路由 + API key 注入，still-needed）。`grep -r allowedConsumers deploy/` 在代码中零匹配。原始 `allowedConsumers` workaround 是 v1.0.9 中 Higress 路由的 `authConfig: {enabled: false}`，现已成为 LLM 路由的永久配置（路由使用 header 注入 API key，不使用 consumer 认证）。**WS-06 不是一个独立可删除的 workaround。**
+
+**删除统计**：净删 101 行（manager-init-internal.sh -58 行，deploy-k3s.yml -54 行），`bash -n` + YAML 解析均通过。
 
 #### needs-verification 组
 
@@ -148,7 +152,7 @@ docker exec honeybadge-graph-worker sh -c 'echo $MINIO_ENDPOINT'
 
 （记录计划外的发现，例如新 bug、新 workaround、文档与实际不符等）
 
-- （待填）
+1. **WS-06 误识别**（2026-06-25）：调研阶段将 `init-workers.sh:347-407` + `manager-init-internal.sh:634-692` 标记为 WS-06（allowedConsumers 路由重建 can-remove-now），但实际验证发现该代码是 WS-08（Higress LLM 路由 + API key 注入，still-needed）。`grep -r allowedConsumers deploy/` 在代码中零匹配 —— `allowedConsumers` 仅出现在历史文档中。原始 v1.0.9 的 `authConfig: {enabled: false}` workaround 已被吸收为 LLM 路由的永久配置。WS-06 不是一个独立可删除的 workaround，can-remove-now 实际数量为 5 而非 6。
 
 ---
 
