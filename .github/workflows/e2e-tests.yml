@@ -80,14 +80,13 @@ jobs:
           export JWT_SECRET="$(openssl rand -hex 32)"
           export HICLAW_MANAGER_PASSWORD="$(openssl rand -hex 16)"
           export HICLAW_MANAGER_GATEWAY_KEY="$(openssl rand -hex 16)"
-          # Use Bailian's coding-tuned non-reasoning model in CI to keep per-query
-          # Manager latency under the test budget. glm-5 has heavy reasoning_tokens
-          # overhead (~40s/query with context bloat); qwen3-coder-plus is a pure
-          # forward-pass coding model that responds an order of magnitude faster.
-          # NOTE: coding.dashscope.aliyuncs.com/v1 does NOT serve "qwen3-coder-flash"
-          # (returns 400 invalid_parameter_error). Verified supported names against
-          # the live endpoint: glm-5, qwen3-coder-plus.
-          export LLM_MODEL="qwen3-coder-plus"
+          # BigModel glm-5.2 — matches the upstream switch in docker-compose.yaml
+          # (LLM_UPSTREAM_HOST=open.bigmodel.cn, LLM_UPSTREAM_PATH_PREFIX=/api/paas/v4).
+          # The previous qwen3-coder-plus was DashScope-only; BigModel returns 400
+          # invalid_parameter_error for names outside its own model list.
+          # secrets.LLM_API_KEY must be a valid BigModel key or every LLM-dependent
+          # test fails with "Response: 助手" (worker never gets a completion).
+          export LLM_MODEL="glm-5.2"
           python3 <<'PY'
           import os, pathlib
           p = pathlib.Path('.env')
