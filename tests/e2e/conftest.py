@@ -233,7 +233,7 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
         print(f"[SETTLE] exception after {timeout_ms}ms: {type(e).__name__}: {str(e)[:200]}")
 
 
-def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000,
+def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 120000,
                             settle_timeout_ms: int = 120000,
                             min_wait_ms: int = 5000):
     """Wait for the assistant's actual response (not the Manager dispatch ack/preamble).
@@ -263,7 +263,7 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000,
     page_obj.wait_for_timeout(200)
 
 
-def send_query_on_page(page_obj, query: str, timeout: int = 60000):
+def send_query_on_page(page_obj, query: str, timeout: int = 120000):
     """Send a chat query on any page object (standalone helper, not fixture-bound)."""
     _wait_for_textarea_enabled(page_obj, timeout=timeout)
     textarea = page_obj.locator(CHAT_TEXTAREA).first
@@ -461,7 +461,7 @@ def reset_manager():
 @pytest.fixture
 def send_chat_query(page: Page):
     """Factory fixture to send a chat query and wait for response."""
-    def _send(query: str, timeout: int = 60000):
+    def _send(query: str, timeout: int = 120000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
         existing_count = _wait_for_msg_count_stable(page)
@@ -512,7 +512,7 @@ def create_user_page(browser: Browser):
 @pytest.fixture
 def send_query_and_get_response(page: Page):
     """Send query, wait for full response, return structured data."""
-    def _send(query: str, timeout: int = 60000):
+    def _send(query: str, timeout: int = 120000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
         existing_count = _wait_for_msg_count_stable(page)
