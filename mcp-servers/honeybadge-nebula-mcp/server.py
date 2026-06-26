@@ -94,6 +94,25 @@ PERMISSION_SERVICE_URL: str = os.environ.get(
     "PERMISSION_SERVICE_URL", "http://honeybadge-permissions:8092"
 )
 
+
+def _normalize_user_id(user_id: str) -> str:
+    """Strip Matrix prefix/suffix to get the plain application username.
+
+    Matrix usernames are prefixed with 'hb-' (e.g. 'hb-admin') and may
+    arrive as full MXIDs ('@hb-admin:matrix-local.hiclaw.io').  The
+    permission service expects the plain username (e.g. 'admin').
+    """
+    if not user_id:
+        return user_id
+    uid = user_id.strip()
+    # Strip Matrix MXID format: @username:server
+    if uid.startswith("@"):
+        uid = uid.split(":")[0][1:]
+    # Strip the hb- prefix added by honeybadge-auth during provisioning
+    if uid.startswith("hb-"):
+        uid = uid[3:]
+    return uid
+
 # Template for unknown users — note: user_id is always overridden at the
 # call site with the actual user_id so this field is intentionally a placeholder.
 # org_ids=[1] is a POC default; in production replace with org_ids=[] or
@@ -353,7 +372,7 @@ async def validate_and_execute_impl(
     # --- L3: Permission enforcement (PermissionEnforcer) ----------------
     # Auto-fetch permissions when caller provides user_id but not the full permissions dict.
     if user_context and user_context.get("user_id") and not user_context.get("permissions"):
-        user_id = user_context["user_id"]
+        user_id = _normalize_user_id(user_context["user_id"])
         perms_base = os.environ.get("PERMISSION_SERVICE_URL", "http://honeybadge-permissions:8092")
         try:
             async with httpx.AsyncClient() as _client:
@@ -445,6 +464,7 @@ async def get_user_permissions_impl(user_id: str) -> dict:
     Unknown users (e.g. Google SSO users not in the local config) receive
     a restrictive default (PTP only, org_id=[1]).
     """
+    user_id = _normalize_user_id(user_id)
     # Local fast path
     ctx = PERMISSION_CONFIG.get(user_id)
     if ctx is not None:
