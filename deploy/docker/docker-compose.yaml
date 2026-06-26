@@ -398,9 +398,10 @@ services:
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
       # Default model for Manager Agent (Aliyun DashScope coding endpoint).
-      # Inherits LLM_MODEL from .env so a single source of truth controls the
-      # upstream model name across nginx-bypass and worker openclaw.json.
-      - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-glm-5.2}
+      # MANAGER_LLM_MODEL controls the Manager + Workers (must be tool-calling
+      # capable — glm-5.2 or better).  LLM_MODEL controls MCP servers which
+      # only do nGQL generation and can use the faster glm-4-flash.
+      - HICLAW_DEFAULT_MODEL=${MANAGER_LLM_MODEL:-glm-5.2}
       # Disable memorySearch (LOAD-BEARING in v1.1.0).
       # hiclaw-env.sh uses `${HICLAW_EMBEDDING_MODEL-text-embedding-v4}` (single
       # dash), so unset falls back to the broken default — empty string is the
