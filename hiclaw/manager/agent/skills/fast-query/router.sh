@@ -25,7 +25,7 @@ fi
 
 # Priority 2: Simple single-entity lookup → fast-query
 # Condition A: contains a lookup verb
-LOOKUP_VERBS="查询|搜索|列出|查找|一共|总数|数量|多少|哪个|哪些|显示|获取|show|list|find|count"
+LOOKUP_VERBS="查询|搜索|列出|查找|一共|总数|数量|多少|哪个|哪些|显示|获取|统计|报告|汇总|总计|共有|show|list|find|count"
 # Condition B: does NOT contain complex multi-entity join indicators
 COMPLEX_INDICATORS="关联|匹配|对应|核对|对账|关系|是否.*关联|三单|供应商.*订单.*发票|发票.*订单|交叉|join"
 

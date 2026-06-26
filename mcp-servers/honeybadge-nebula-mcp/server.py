@@ -282,34 +282,35 @@ async def get_schema_impl(
 
 
 def _fix_order_by_property_paths(ngql: str) -> str:
-    """Rewrite ORDER BY property paths to column aliases.
+    """Remove ORDER BY clauses that use property paths instead of column aliases.
 
     NebulaGraph requires ORDER BY to use column aliases (from RETURN ... AS
     alias), not property paths like ``var.Tag.property``.  LLMs (especially
     glm-4-flash) frequently generate ``ORDER BY po.PurchaseOrder.order_date
     DESC`` even when the prompt instructs them to use aliases.
 
-    This post-processor rewrites such paths to use just the property name,
-    which matches the ``AS property_name`` alias in RETURN.
+    If the ORDER BY clause contains any ``var.Tag.property`` pattern, remove
+    the entire ORDER BY clause.  The query still executes and returns results
+    (unsorted) with LIMIT — better than failing with SemanticError.
 
-    Example::
-
-        INPUT:  ... AS order_date ORDER BY po.PurchaseOrder.order_date DESC LIMIT 5
-        OUTPUT: ... AS order_date ORDER BY order_date DESC LIMIT 5
+    If ORDER BY already uses plain aliases (no dot-notation), it is preserved.
     """
-    def _rewrite_clause(match: re.Match) -> str:
-        keyword = match.group(1)   # "ORDER BY "
-        clause = match.group(2)    # sort columns
-        # Replace var.Tag.property → property
-        fixed = re.sub(r"\b(\w+)\.(\w+)\.(\w+)\b", r"\3", clause)
-        return keyword + fixed
-
-    return re.sub(
-        r"(ORDER BY\s+)(.*?)(?=\s+LIMIT\b|\s+OFFSET\b|;|$)",
-        _rewrite_clause,
-        ngql,
-        flags=re.IGNORECASE | re.DOTALL,
+    # Find the ORDER BY clause (up to LIMIT, OFFSET, ; or end of string)
+    order_by_match = re.search(
+        r"\s+ORDER BY\s+.*?(?=\s+LIMIT\b|\s+OFFSET\b|;|$)",
+        ngql, re.IGNORECASE | re.DOTALL,
     )
+    if not order_by_match:
+        return ngql
+
+    order_clause = order_by_match.group(0)
+
+    # If the ORDER BY clause contains a property path (var.Tag.property),
+    # remove the entire ORDER BY clause
+    if re.search(r"\b\w+\.\w+\.\w+\b", order_clause):
+        return ngql[:order_by_match.start()] + ngql[order_by_match.end():]
+
+    return ngql
 
 
 async def generate_ngql_impl(
@@ -405,25 +406,14 @@ async def validate_and_execute_impl(
 
     # --- L3: Permission enforcement (PermissionEnforcer) ----------------
     # Auto-fetch permissions when caller provides user_id but not the full permissions dict.
+    # Uses get_user_permissions_impl which has a local PERMISSION_CONFIG fast path
+    # and falls back to HTTP, then to a restrictive default — so permissions are
+    # always resolved when a user_id is provided.
     if user_context and user_context.get("user_id") and not user_context.get("permissions"):
         user_id = _normalize_user_id(user_context["user_id"])
-        perms_base = os.environ.get("PERMISSION_SERVICE_URL", "http://honeybadge-permissions:8092")
-        try:
-            async with httpx.AsyncClient() as _client:
-                _resp = await _client.get(f"{perms_base}/permissions/{user_id}", timeout=5.0)
-            if _resp.status_code == 200:
-                user_context = {"user_id": user_id, "permissions": _resp.json()}
-                logger.info("l3_permissions_fetched", user_id=user_id, trace_id=trace_id)
-            else:
-                logger.warning(
-                    "l3_permissions_fetch_failed",
-                    user_id=user_id, status=_resp.status_code, trace_id=trace_id,
-                )
-        except Exception as _e:
-            logger.warning(
-                "l3_permissions_fetch_error",
-                user_id=user_id, error=str(_e), trace_id=trace_id,
-            )
+        perms = await get_user_permissions_impl(user_id)
+        user_context = {"user_id": user_id, "permissions": perms}
+        logger.info("l3_permissions_fetched", user_id=user_id, trace_id=trace_id)
 
     if user_context and user_context.get("permissions"):
         try:
@@ -460,6 +450,7 @@ async def validate_and_execute_impl(
         "execution_time_ms": result.execution_time_ms,
         "trace_id": trace_id,
         "warnings": perm_warnings,
+        "ngql": ngql,
     }
 
 
