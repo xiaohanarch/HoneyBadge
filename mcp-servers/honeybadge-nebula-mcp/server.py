@@ -281,6 +281,37 @@ async def get_schema_impl(
     return schema_text
 
 
+def _fix_order_by_property_paths(ngql: str) -> str:
+    """Rewrite ORDER BY property paths to column aliases.
+
+    NebulaGraph requires ORDER BY to use column aliases (from RETURN ... AS
+    alias), not property paths like ``var.Tag.property``.  LLMs (especially
+    glm-4-flash) frequently generate ``ORDER BY po.PurchaseOrder.order_date
+    DESC`` even when the prompt instructs them to use aliases.
+
+    This post-processor rewrites such paths to use just the property name,
+    which matches the ``AS property_name`` alias in RETURN.
+
+    Example::
+
+        INPUT:  ... AS order_date ORDER BY po.PurchaseOrder.order_date DESC LIMIT 5
+        OUTPUT: ... AS order_date ORDER BY order_date DESC LIMIT 5
+    """
+    def _rewrite_clause(match: re.Match) -> str:
+        keyword = match.group(1)   # "ORDER BY "
+        clause = match.group(2)    # sort columns
+        # Replace var.Tag.property → property
+        fixed = re.sub(r"\b(\w+)\.(\w+)\.(\w+)\b", r"\3", clause)
+        return keyword + fixed
+
+    return re.sub(
+        r"(ORDER BY\s+)(.*?)(?=\s+LIMIT\b|\s+OFFSET\b|;|$)",
+        _rewrite_clause,
+        ngql,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+
 async def generate_ngql_impl(
     llm: OpenAICompatibleAdapter,
     nebula: NebulaGraphClient,
@@ -314,6 +345,9 @@ async def generate_ngql_impl(
     ngql = re.sub(r"^```(?:ngql|cypher|nGQL)?\s*\n?", "", ngql)
     ngql = re.sub(r"\n?```\s*$", "", ngql)
     ngql = ngql.strip()
+
+    # Fix ORDER BY property paths → column aliases (NebulaGraph requirement)
+    ngql = _fix_order_by_property_paths(ngql)
 
     return {
         "ngql": ngql,
