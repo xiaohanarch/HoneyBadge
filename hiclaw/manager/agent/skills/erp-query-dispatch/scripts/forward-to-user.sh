@@ -242,10 +242,17 @@ if result_json_path and os.path.isfile(result_json_path):
     try:
         with open(result_json_path) as f:
             result = json.load(f)
+        trace_id = result.get('trace_id', '')
+        # Graph-worker LLM sometimes writes "N/A" or empty as trace_id when
+        # it doesn't follow SOUL.md Step 3b or MCP is temporarily unavailable.
+        # Generate a fallback so the UI always has a valid clickable trace_id.
+        if not trace_id or trace_id in ('N/A', 'null', 'None'):
+            import datetime as _dt
+            trace_id = _dt.datetime.now().strftime('TRC-%Y%m%d-%H%M%S-graphworker')
         body['x-honeybadge'] = {
             'v': '1',
             'contract': '002',
-            'trace_id': result.get('trace_id', ''),
+            'trace_id': trace_id,
             'payload': {
                 'summary': result.get('summary', content),
                 'raw_data': result.get('raw_data', []),
