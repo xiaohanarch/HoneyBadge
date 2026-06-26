@@ -410,6 +410,12 @@ services:
       # before any chat call. Empty string here keeps start-manager-agent.sh's
       # `if $emb_model != ""` branch from ever firing.
       - HICLAW_EMBEDDING_MODEL=
+      # mcporter config path — fast-query.sh defaults to /root/config/mcporter.json
+      # but the Manager workspace installs it at /root/manager-workspace/config/.
+      # Without this, fast-query.sh fails with ENOENT and the Manager falls back
+      # to the Worker route, which produces trace_id="N/A" (LLM doesn't propagate
+      # the MCP-generated trace_id, breaking TC-102/TC-107 trace assertions).
+      - MCPORTER_CONFIG=/root/manager-workspace/config/mcporter.json
       - TZ=Asia/Shanghai
     volumes:
       - ../hiclaw/entrypoint-wrapper.sh:/opt/honeybadge/init/entrypoint-wrapper.sh:ro

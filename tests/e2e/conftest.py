@@ -49,71 +49,144 @@ def _wait_for_current_session(page_obj, timeout=30000):
     )
 
 
-def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 15000):
+def _wait_for_msg_count_stable(page_obj, stable_ms=3000, timeout_ms=20000):
+    """Wait for the assistant message count to be stable for `stable_ms` milliseconds.
+
+    matrix-js-sdk backfills DM room history asynchronously after login. Old
+    contract-002 messages from previous test runs can appear in the DOM *after*
+    ``existing_count`` is captured, making the settle wait mistake them for new
+    messages. This function waits until the count stops changing for 3 seconds,
+    ensuring ``existing_count`` includes all backfilled messages.
+
+    Returns the stable message count (or the current count on timeout).
+    """
+    page_obj.evaluate("() => { window.__hbStableCount = undefined; window.__hbStableTs = 0; }")
+    try:
+        page_obj.wait_for_function(
+            f"""() => {{
+                const count = document.querySelectorAll('.chat-message.message-assistant').length;
+                const now = Date.now();
+                if (window.__hbStableCount !== count) {{
+                    window.__hbStableCount = count;
+                    window.__hbStableTs = now;
+                    return false;
+                }}
+                return (now - window.__hbStableTs) >= {stable_ms};
+            }}""",
+            timeout=timeout_ms,
+            polling=500,
+        )
+    except Exception:
+        pass  # proceed with whatever count we have
+    return page_obj.locator(MSG_ASSISTANT).count()
+
+
+def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 120000,
+                               min_wait_ms: int = 5000):
     """Stage-2 wait: settle on the actual response, not Manager's dispatch ack/preamble.
 
     Waits up to `timeout_ms` for ANY of:
       1. Structured worker reply (cypher-collapse or data-collapse header in a new message)
+         — only after `min_wait_ms` to skip stale DM history that matrix-js-sdk
+           backfills after login (old contract-002 messages render late and would
+           trigger a false positive without this grace period).
       2. Denial marker text (权限不足/permission denied/无权/Forbidden/access denied)
-      3. Last new-message body length stable for 2000ms (streaming finished naturally)
+         — always immediate so permission tests fail fast.
+      3. Last new-message body length (>100 chars) stable for 10000ms (streaming finished)
+         — only after `min_wait_ms` for the same reason as condition 1.
 
     Exits silently on timeout — callers must let the test assertion fail naturally.
+    Debug info is printed to stdout via ``[SETTLE]`` prefix.
 
-    Why 15s (not 60s+): the suite has ~49 call sites; stacked long timeouts blew
-    past CI's 90-min wall and caused PR #105's -24 regression. 15s × 49 = ~12 min
-    worst case; healthy case is 2-3s via the text-stability signal.
+    Why 120s (was 15s): glm-5.2 via BigModel takes 60-85s to complete a query
+    (router → fast-query → contract 002 forward).  The old 15s settle caused
+    premature exit on the Manager's short acknowledgement before the contract
+    002 arrived.  The 100-char minimum on condition 3 prevents settling on
+    acknowledgements like "正在为您查询，请稍候..." (~20 chars) while still
+    allowing genuine plain-text completions (>100 chars) to settle.
+
+    Why min_wait_ms=5s: safety net against the Manager sending a >100-char
+    preamble that would trigger condition 3 before the Worker responds. The
+    primary defense against stale DM history is ``_wait_for_msg_count_stable``
+    (called before ``existing_count`` is captured), but this 5s floor adds
+    extra protection for edge cases.
     """
-    page_obj.evaluate("() => { window.__hbStability = null; }")
+    page_obj.evaluate("() => { window.__hbStability = null; window.__hbSettleReason = ''; window.__hbSettleStart = Date.now(); }")
     try:
         page_obj.wait_for_function(
             f"""() => {{
                 const msgs = document.querySelectorAll('.chat-message.message-assistant');
                 if (msgs.length <= {existing_count}) return false;
 
+                const elapsed = Date.now() - (window.__hbSettleStart || 0);
+
                 // 1: structured worker contract-002 (cypher/data collapse)
+                //    Gated by min_wait_ms to skip stale DM history backfill.
+                if (elapsed >= {min_wait_ms}) {{
+                    for (let i = {existing_count}; i < msgs.length; i++) {{
+                        const m = msgs[i];
+                        if (m.querySelector('.data-collapse .el-collapse-item__header') ||
+                            m.querySelector('.cypher-collapse .el-collapse-item__header')) {{
+                            window.__hbSettleReason = 'cond1_structured idx=' + i + ' total=' + msgs.length + ' existing=' + {existing_count};
+                            return true;
+                        }}
+                    }}
+                }}
+
+                // 2: denial markers (permission tests fail fast — no min_wait)
+                const denial = /权限不足|permission denied|无权|forbidden|access denied/i;
                 for (let i = {existing_count}; i < msgs.length; i++) {{
-                    const m = msgs[i];
-                    if (m.querySelector('.data-collapse .el-collapse-item__header') ||
-                        m.querySelector('.cypher-collapse .el-collapse-item__header')) {{
+                    const body = msgs[i].querySelector('.message-body') || msgs[i];
+                    if (denial.test(body.textContent)) {{
+                        window.__hbSettleReason = 'cond2_denial idx=' + i;
                         return true;
                     }}
                 }}
 
-                // 2: denial markers (permission tests fail fast)
-                const denial = /权限不足|permission denied|无权|forbidden|access denied/i;
-                for (let i = {existing_count}; i < msgs.length; i++) {{
-                    const body = msgs[i].querySelector('.message-body') || msgs[i];
-                    if (denial.test(body.textContent)) return true;
+                // 3: streaming stable — last new-message body length unchanged
+                //    for 10s.  Only fires if text > 100 chars AND min_wait_ms
+                //    has elapsed, to avoid settling on short Manager acks or
+                //    stale backfilled messages while Worker is still processing.
+                if (elapsed >= {min_wait_ms}) {{
+                    const last = msgs[msgs.length - 1];
+                    const body = last.querySelector('.message-body') || last;
+                    const len = body ? body.textContent.trim().length : 0;
+                    if (len < 100) return false;
+                    const now = Date.now();
+                    if (!window.__hbStability || window.__hbStability.len !== len) {{
+                        window.__hbStability = {{ len: len, ts: now }};
+                        return false;
+                    }}
+                    if ((now - window.__hbStability.ts) >= 10000) {{
+                        window.__hbSettleReason = 'cond3_stable len=' + len + ' elapsed=' + elapsed;
+                        return true;
+                    }}
                 }}
 
-                // 3: streaming stable — last new-message text length unchanged for 2s
-                const last = msgs[msgs.length - 1];
-                const body = last.querySelector('.message-body') || last;
-                const len = body ? body.textContent.trim().length : 0;
-                const now = Date.now();
-                if (!window.__hbStability || window.__hbStability.len !== len) {{
-                    window.__hbStability = {{ len: len, ts: now }};
-                    return false;
-                }}
-                return (now - window.__hbStability.ts) >= 2000;
+                return false;
             }}""",
             timeout=timeout_ms,
             polling=200,
         )
-    except Exception:
-        pass  # silent — let downstream assertion produce a meaningful error
+        reason = page_obj.evaluate("() => window.__hbSettleReason || 'unknown'")
+        print(f"[SETTLE] exited: {reason}")
+    except Exception as e:
+        print(f"[SETTLE] exception after {timeout_ms}ms: {type(e).__name__}: {str(e)[:200]}")
 
 
 def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000,
-                            settle_timeout_ms: int = 15000):
+                            settle_timeout_ms: int = 120000,
+                            min_wait_ms: int = 5000):
     """Wait for the assistant's actual response (not the Manager dispatch ack/preamble).
 
     Two-stage wait:
       Stage 1: any NEW assistant message with body text >10 chars (existing semantics)
       Stage 2: response settled — Worker contract-002, denial marker, or text stable
 
-    Stage 2 is capped at 15s by default; pass `settle_timeout_ms=0` to skip it
-    (legacy callers that only need the first-message signal).
+    Stage 2 runs for up to `settle_timeout_ms` (120s default for glm-5.2);
+    pass `settle_timeout_ms=0` to skip it (legacy callers that only need the
+    first-message signal).
+    `min_wait_ms` gates conditions 1 and 3 in Stage 2 to skip stale DM history.
     """
     page_obj.wait_for_function(
         f"""() => {{
@@ -126,7 +199,8 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000,
         timeout=timeout,
     )
     if settle_timeout_ms > 0:
-        _wait_for_response_settled(page_obj, existing_count, timeout_ms=settle_timeout_ms)
+        _wait_for_response_settled(page_obj, existing_count, timeout_ms=settle_timeout_ms,
+                                   min_wait_ms=min_wait_ms)
     page_obj.wait_for_timeout(200)
 
 
@@ -134,7 +208,7 @@ def send_query_on_page(page_obj, query: str, timeout: int = 60000):
     """Send a chat query on any page object (standalone helper, not fixture-bound)."""
     _wait_for_textarea_enabled(page_obj, timeout=timeout)
     textarea = page_obj.locator(CHAT_TEXTAREA).first
-    existing_count = page_obj.locator(MSG_ASSISTANT).count()
+    existing_count = _wait_for_msg_count_stable(page_obj)
     textarea.fill(query)
     textarea.press("Enter")
     _wait_for_new_response(page_obj, existing_count, timeout=timeout)
@@ -315,7 +389,7 @@ def send_chat_query(page: Page):
     def _send(query: str, timeout: int = 60000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
-        existing_count = page.locator(MSG_ASSISTANT).count()
+        existing_count = _wait_for_msg_count_stable(page)
         textarea.fill(query)
         textarea.press("Enter")
         _wait_for_new_response(page, existing_count, timeout=timeout)
@@ -366,7 +440,7 @@ def send_query_and_get_response(page: Page):
     def _send(query: str, timeout: int = 60000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
-        existing_count = page.locator(MSG_ASSISTANT).count()
+        existing_count = _wait_for_msg_count_stable(page)
         textarea.fill(query)
         textarea.press("Enter")
         # _wait_for_new_response now waits past the Manager dispatch ack: it returns
