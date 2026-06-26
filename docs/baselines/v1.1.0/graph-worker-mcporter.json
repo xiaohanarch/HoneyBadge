@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "honeybadge-nebula": {
+      "baseUrl": "http://honeybadge-nebula-mcp:8000/sse"
+    },
+    "honeybadge-audit": {
+      "baseUrl": "http://honeybadge-audit-mcp:8000/sse"
+    },
+    "honeybadge-cache": {
+      "baseUrl": "http://honeybadge-cache-mcp:8000/sse"
+    }
+  }
+}

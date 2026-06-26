@@ -14,7 +14,7 @@
 #
 # This Dockerfile is kept as a reference for custom Manager builds only.
 
-FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.0
+FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.2
 
 # Copy custom Manager agent configuration (SOUL.md, AGENTS.md)
 # Mount path inside the Manager for agent identity files

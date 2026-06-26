@@ -28,6 +28,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# On Windows (Git Bash/MSYS2), convert to Windows-style path for Docker compatibility.
+# Docker for Windows cannot resolve Unix-style paths like /d/dev/HoneyBadge.
+if command -v cygpath &>/dev/null; then
+    PROJECT_ROOT="$(cygpath -m "$PROJECT_ROOT")"
+    TMP_DIR="$(cygpath -m /tmp)"
+else
+    TMP_DIR="/tmp"
+fi
 
 # Source .env for LLM_API_KEY and other config (if not already in environment)
 ENV_FILE="$PROJECT_ROOT/deploy/docker/.env"
@@ -237,7 +245,7 @@ docker exec "$MANAGER_CONTAINER" bash -c \
 #     IRON RULE: Workers NEVER call any LLM directly. ALL LLM calls MUST route
 #     through Higress AI Gateway at http://aigw-local.hiclaw.io:8080/v1. No exceptions.
 # ---------------------------------------------------------------------------
-log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ glm-5)..."
+log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ glm-5.2)..."
 # baseUrl MUST include /v1: OpenAI JS SDK appends /chat/completions directly
 # Without /v1: path becomes /chat/completions → misses llm-minimax-route → no API key → 404
 for worker in graph-worker analytics-worker; do
@@ -270,19 +278,30 @@ for name, p in providers.items():
         print('Patched ' + name + ' baseUrl: ' + old + ' -> ' + p['baseUrl'])
     for model in p.get('models', []):
         old_id = model.get('id', '')
-        if old_id != 'glm-5':
-            model['id'] = 'glm-5'
-            model['name'] = 'glm-5'
-            print('Updated model: ' + old_id + ' -> glm-5')
+        if old_id != 'glm-5.2':
+            model['id'] = 'glm-5.2'
+            model['name'] = 'glm-5.2'
+            print('Updated model: ' + old_id + ' -> glm-5.2')
         # Always remove reasoning:true — openclaw thinking mode sends Claude-style
         # thinking blocks that DashScope rejects with role-ordering 400 errors.
         model.pop('reasoning', None)
+        # Cap maxTokens at 8192 — openclaw ships glm-5.2 with maxTokens=128000,
+        # which reserves nearly the entire context window for OUTPUT. That leaves
+        # promptBudget = contextWindow - maxTokens ≈ 22K, causing
+        # 'Context overflow: prompt too large for the model (precheck)' after
+        # only 30-50 tool-loop messages, and auto-compaction trips its
+        # 'already_compacted_recently' circuit breaker.
+        # glm-5.2 is a chat model — 8K output is plenty for tool calls + summaries.
+        old_mt = model.get('maxTokens', 0)
+        if old_mt > 8192:
+            model['maxTokens'] = 8192
+            print('Capped maxTokens: ' + str(old_mt) + ' -> 8192')
 
 agents = cfg.get('agents', {}).get('defaults', {}).get('model', {})
 old_primary = agents.get('primary', '')
-if 'glm-5' not in old_primary:
+if 'glm-5.2' not in old_primary:
     for name in providers.keys():
-        agents['primary'] = name + '/glm-5'
+        agents['primary'] = name + '/glm-5.2'
         print('Updated primary: ' + old_primary + ' -> ' + agents['primary'])
         break
 
@@ -304,9 +323,9 @@ defaults = cfg['agents']['defaults']
 if defaults.get('maxConcurrent') != 8:
     defaults['maxConcurrent'] = 8
     print('Set maxConcurrent: 8')
-if defaults.get('contextTokens') != 40000:
-    defaults['contextTokens'] = 40000
-    print('Set contextTokens: 40000')
+if defaults.get('contextTokens') != 200000:
+    defaults['contextTokens'] = 200000
+    print('Set contextTokens: 200000')
 if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     defaults['contextPruning'] = {
         'mode': 'cache-ttl',
@@ -359,7 +378,7 @@ done
 #     IRON RULE: ALL LLM calls MUST go through Higress. Workers never call any
 #     LLM endpoint directly. This route is the single exit point for all LLM traffic.
 # ---------------------------------------------------------------------------
-log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → Bailian/glm-5)..."
+log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → BigModel/glm-5.2)..."
 HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
 LLM_API_KEY="${LLM_API_KEY:-${HICLAW_LLM_API_KEY:-}}"
 
@@ -445,9 +464,14 @@ cfg['channels']['matrix']['groupAllowFrom'] = hb_users + workers
 # Remove reasoning:true from all models — openclaw's thinking mode sends Claude-style
 # thinking content blocks that DashScope/qwen3.5-plus rejects with a 400 role error,
 # causing 'Message ordering conflict' on every user message.
+# Also cap maxTokens at 8192 — the shipped 128000 leaves only ~22K for prompt,
+# triggering 'Context overflow' after 30-50 messages and breaking E2E suites.
 for p in cfg.get('models', {}).get('providers', {}).values():
     for m in p.get('models', []):
         m.pop('reasoning', None)
+        old_mt = m.get('maxTokens', 0)
+        if old_mt > 8192:
+            m['maxTokens'] = 8192
 
 # Context pruning for Manager (mirrors Worker settings)
 if 'agents' not in cfg:
@@ -455,9 +479,9 @@ if 'agents' not in cfg:
 if 'defaults' not in cfg['agents']:
     cfg['agents']['defaults'] = {}
 mgr_defaults = cfg['agents']['defaults']
-if mgr_defaults.get('contextTokens') != 40000:
-    mgr_defaults['contextTokens'] = 40000
-    print('Set Manager contextTokens: 40000')
+if mgr_defaults.get('contextTokens') != 200000:
+    mgr_defaults['contextTokens'] = 200000
+    print('Set Manager contextTokens: 200000')
 if mgr_defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     mgr_defaults['contextPruning'] = {
         'mode': 'cache-ttl',
@@ -554,8 +578,8 @@ MANAGER_MCPORTER_JSON='{
 # Write into the Manager container at both the active path
 # (/root/config/mcporter.json — what fast-query.sh reads via default
 # MCPORTER_CONFIG) and the workspace path (/root/manager-workspace/config/).
-printf '%s\n' "$MANAGER_MCPORTER_JSON" > /tmp/hb-manager-mcporter.json
-docker cp /tmp/hb-manager-mcporter.json \
+printf '%s\n' "$MANAGER_MCPORTER_JSON" > "$TMP_DIR/hb-manager-mcporter.json"
+docker cp "$TMP_DIR/hb-manager-mcporter.json" \
     "$MANAGER_CONTAINER:/root/config/mcporter.json" \
     && log "  → /root/config/mcporter.json written" \
     || warn "  Failed to write /root/config/mcporter.json"
@@ -567,7 +591,7 @@ docker exec "$MANAGER_CONTAINER" bash -c \
     || warn "  Failed to mirror to manager-workspace"
 
 # Sync to MinIO so it survives Manager container restarts.
-docker cp /tmp/hb-manager-mcporter.json \
+docker cp "$TMP_DIR/hb-manager-mcporter.json" \
     "$EMBEDDED_CONTAINER:/tmp/hb-manager-mcporter.json" && \
 docker exec "$EMBEDDED_CONTAINER" bash -c \
     "mc cp /tmp/hb-manager-mcporter.json hiclaw/hiclaw-storage/agents/manager/config/mcporter.json 2>&1 | tail -1" \

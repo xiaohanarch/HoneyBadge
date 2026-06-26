@@ -232,7 +232,7 @@ services:
   hiclaw-embedded:
     container_name: honeybadge-hiclaw-embedded
     hostname: hiclaw-embedded
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.0
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-embedded:v1.1.2
     restart: unless-stopped
     # NOTE (2026-05-08): the higress + pilot-discovery binaries inside this image
     # segfault on WSL2 kernel 6.6.x regardless of any container sandbox setting.
@@ -305,7 +305,8 @@ services:
     restart: unless-stopped
     environment:
       LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY required for dev gateway bypass}
-      LLM_UPSTREAM_HOST: ${LLM_UPSTREAM_HOST:-coding.dashscope.aliyuncs.com}
+      LLM_UPSTREAM_HOST: ${LLM_UPSTREAM_HOST:-open.bigmodel.cn}
+      LLM_UPSTREAM_PATH_PREFIX: ${LLM_UPSTREAM_PATH_PREFIX:-/api/paas/v4}
     volumes:
       - ../hiclaw/aigw-bypass.conf.template:/etc/nginx/templates/default.conf.template:ro
     networks:
@@ -340,7 +341,7 @@ services:
   # =============================================================================
 
   hiclaw-manager:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.0
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-manager:v1.1.2
     container_name: honeybadge-hiclaw-manager
     hostname: hiclaw-manager
     restart: unless-stopped
@@ -399,7 +400,7 @@ services:
       # Default model for Manager Agent (Aliyun DashScope coding endpoint).
       # Inherits LLM_MODEL from .env so a single source of truth controls the
       # upstream model name across nginx-bypass and worker openclaw.json.
-      - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-glm-5}
+      - HICLAW_DEFAULT_MODEL=${LLM_MODEL:-glm-5.2}
       # Disable memorySearch (LOAD-BEARING in v1.1.0).
       # hiclaw-env.sh uses `${HICLAW_EMBEDDING_MODEL-text-embedding-v4}` (single
       # dash), so unset falls back to the broken default — empty string is the
@@ -437,7 +438,7 @@ services:
   # =============================================================================
 
   hiclaw-graph-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
     container_name: honeybadge-graph-worker
     hostname: hiclaw-graph-worker
     restart: unless-stopped
@@ -462,7 +463,7 @@ services:
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   hiclaw-analytics-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
     container_name: honeybadge-analytics-worker
     hostname: hiclaw-analytics-worker
     restart: unless-stopped
@@ -651,6 +652,11 @@ services:
       - MATRIX_USER_SECRET=${MATRIX_USER_SECRET:-hb-user-secret-dev}
       - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
       - MATRIX_HOMESERVER_PUBLIC=http://localhost:7167
+      # Manager password — used to log in as @manager and populate the
+      # Manager's m.direct account data after DM room creation.  Without
+      # this, OpenClaw classifies new rooms as "channel" (mention-gated)
+      # and silently ignores user queries.
+      - MANAGER_MATRIX_PASSWORD=${HICLAW_MANAGER_PASSWORD:-hiclaw-manager-password-dev}
       - TZ=Asia/Shanghai
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}

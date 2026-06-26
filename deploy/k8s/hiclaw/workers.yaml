@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: graph-worker
-          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
           command: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
           env:
             - name: HICLAW_WORKER_NAME
@@ -95,7 +95,7 @@ spec:
     spec:
       containers:
         - name: analytics-worker
-          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.0
+          image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
           command: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
           env:
             - name: HICLAW_WORKER_NAME

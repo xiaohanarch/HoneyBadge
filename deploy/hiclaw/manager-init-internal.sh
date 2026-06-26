@@ -17,6 +17,7 @@ set -uo pipefail
 # Config paths
 HB_CONFIG="/opt/honeybadge/config"
 MANAGER_WORKSPACE="/root/manager-workspace"
+MANAGER_OPENCLAW="${MANAGER_WORKSPACE}/openclaw.json"
 GENERATE_WORKER_CFG="/opt/hiclaw/agent/skills/worker-management/scripts/generate-worker-config.sh"
 MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
 MATRIX_URL="${HICLAW_MATRIX_URL:-http://${MATRIX_DOMAIN}:6167}"
@@ -150,40 +151,8 @@ AGENTS_EOF
     fi
 done
 
-# =========================================================================
-# Step 1b: Symlink /root/openclaw.json -> /root/manager-workspace/openclaw.json
-#
-# v1.0.9 LEGACY (kept for safety): create-worker.sh used to hardcode
-# MANAGER_CONFIG="${HOME}/openclaw.json" and abort if missing. v1.1.0
-# replaced create-worker.sh with generate-worker-config.sh, which does NOT
-# read /root/openclaw.json — making this section dead-but-harmless code.
-# The symlink itself (if created) costs nothing; we leave the section in
-# place so a downgrade path stays available, and the warning is benign.
-# =========================================================================
-log "Step 1b: Ensuring /root/openclaw.json symlink (v1.0.9 compatibility)..."
-
-MANAGER_OPENCLAW="$MANAGER_WORKSPACE/openclaw.json"
-ROOT_OPENCLAW="/root/openclaw.json"
-
-for i in $(seq 1 24); do
-    if [ -f "$MANAGER_OPENCLAW" ]; then
-        break
-    fi
-    sleep 5
-done
-
-if [ -f "$MANAGER_OPENCLAW" ]; then
-    # Replace any existing file/symlink with a symlink to the real config.
-    if [ ! -L "$ROOT_OPENCLAW" ] || [ "$(readlink "$ROOT_OPENCLAW")" != "$MANAGER_OPENCLAW" ]; then
-        rm -f "$ROOT_OPENCLAW"
-        ln -s "$MANAGER_OPENCLAW" "$ROOT_OPENCLAW"
-        log "  Symlinked $ROOT_OPENCLAW -> $MANAGER_OPENCLAW"
-    else
-        log "  Symlink already in place"
-    fi
-else
-    warn "  Manager openclaw.json not ready after 120s — Step 4 (allowlist patch) may also fail"
-fi
+# Step 1b (v1.0.9 /root/openclaw.json symlink) — removed in v1.1.2 upgrade.
+# generate-worker-config.sh (v1.1.0+) does not read /root/openclaw.json.
 
 # =========================================================================
 # Step 2: Register workers (v1.1.0 flow)
@@ -534,6 +503,15 @@ for name, p in providers.items():
         if model.pop('reasoning', None) is not None:
             print('Removed reasoning:true from ' + model.get('id', ''))
             changed = True
+        # Cap maxTokens at 8192 — openclaw ships models with maxTokens=128000,
+        # which reserves nearly the entire context window for output. Combined
+        # with contextTokens=200000, this ensures promptBudget is large enough
+        # for full E2E suites without context overflow.
+        old_mt = model.get('maxTokens', 0)
+        if old_mt > 8192:
+            model['maxTokens'] = 8192
+            print('Capped maxTokens: ' + str(old_mt) + ' -> 8192 for ' + model.get('id', ''))
+            changed = True
 
 # Update agents.defaults.model.primary. v1.1.0 worker configs may not have
 # a models.providers dict at all (only the bare primary string), so we need
@@ -594,9 +572,9 @@ if defaults.get('maxConcurrent') != 4:
     defaults['maxConcurrent'] = 4
     print('Set maxConcurrent: 4')
     changed = True
-if defaults.get('contextTokens') != 40000:
-    defaults['contextTokens'] = 40000
-    print('Set contextTokens: 40000')
+if defaults.get('contextTokens') != 200000:
+    defaults['contextTokens'] = 200000
+    print('Set contextTokens: 200000')
     changed = True
 if defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     defaults['contextPruning'] = {
@@ -843,32 +821,27 @@ channels = cfg.setdefault('channels', {}).setdefault('matrix', {})
 channels['dm'] = {'policy': 'allowlist', 'allowFrom': hb_users}
 channels['groupAllowFrom'] = hb_users + workers
 
-# Fix Manager LLM baseUrl (template generates http://:8080/v1 if HICLAW_AI_GATEWAY_DOMAIN unset)
-for name, p in cfg.get('models', {}).get('providers', {}).items():
-    old = p.get('baseUrl', '')
-    if old and 'aigw-local.hiclaw.io:8080/v1' not in old:
-        p['baseUrl'] = 'http://aigw-local.hiclaw.io:8080/v1'
-        print('Patched Manager provider ' + name + ' baseUrl: ' + repr(old) + ' -> ' + p['baseUrl'])
+# WS-04 removed in v1.1.2 upgrade: HICLAW_AI_GATEWAY_DOMAIN is now set in all
+# deployment targets (docker-compose.yaml + k8s manager.yaml), so the template
+# generates the correct baseUrl without this patch.
 
-# Remove reasoning:true from all models
+# Remove reasoning:true from all models and cap maxTokens at 8192
 for p in cfg.get('models', {}).get('providers', {}).values():
     for m in p.get('models', []):
         if m.pop('reasoning', None) is not None:
             print('Removed reasoning:true from ' + m.get('id', ''))
+        old_mt = m.get('maxTokens', 0)
+        if old_mt > 8192:
+            m['maxTokens'] = 8192
 
-# Note: the v1.0.x memorySearch pop() workaround was removed in v1.1.0.
-# v1.1.0 only injects agents.defaults.memorySearch when HICLAW_EMBEDDING_MODEL
-# is non-empty (see /opt/hiclaw/scripts/init/start-manager-agent.sh and
-# /opt/hiclaw/scripts/lib/hiclaw-env.sh: `HICLAW_EMBEDDING_MODEL="${HICLAW_EMBEDDING_MODEL-text-embedding-v4}"`).
-# docker-compose.yaml sets HICLAW_EMBEDDING_MODEL="" explicitly so the upstream
-# never injects memorySearch in the first place, making this scrub a no-op.
-# Evidence: docs/1.1.0-upgrade-evidence/bucket1-memorysearch-default-check.log.
+# WS-02 (memorySearch pop) removed in v1.1.2 upgrade — was already a no-op comment.
+# HICLAW_EMBEDDING_MODEL="" in docker-compose.yaml prevents injection at the source.
 
 # Context pruning — prevents unbounded Manager context growth (mirrors Worker settings)
 mgr_defaults = cfg.setdefault('agents', {}).setdefault('defaults', {})
-if mgr_defaults.get('contextTokens') != 40000:
-    mgr_defaults['contextTokens'] = 40000
-    print('Set Manager contextTokens: 40000')
+if mgr_defaults.get('contextTokens') != 200000:
+    mgr_defaults['contextTokens'] = 200000
+    print('Set Manager contextTokens: 200000')
 if mgr_defaults.get('contextPruning', {}).get('mode') != 'cache-ttl':
     mgr_defaults['contextPruning'] = {
         'mode': 'cache-ttl',
@@ -893,17 +866,7 @@ mc cp "$MANAGER_WORKSPACE/openclaw.json" \
     && log "  Manager openclaw.json synced to MinIO" \
     || warn "  MinIO sync skipped"
 
-# =========================================================================
-# Step 5: REMOVED in v1.1.0 upgrade
-#
-# v1.0.9 had a hot-reload deadlock workaround that killed openclaw-gateway
-# so supervisord would respawn it. v1.1.0's slim manager image dropped
-# supervisord — there is no respawner. Killing the process here would now
-# kill the container itself (PID 1 chain), causing a restart loop.
-#
-# v1.1.0's native manager-agent does not exhibit the v1.0.9 hot-reload
-# deadlock; this workaround is dead code and dangerous, so it is removed.
-# =========================================================================
+# WS-14 (v1.0.9 hot-reload deadlock comment) — removed in v1.1.2 upgrade.
 
 # =========================================================================
 # Done
