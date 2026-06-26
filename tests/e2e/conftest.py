@@ -319,10 +319,19 @@ def send_query_on_page(page_obj, query: str, timeout: int = 120000) -> str:
     _wait_for_new_response(page_obj, existing_count, timeout=timeout,
                            query_send_ts=query_send_ts)
 
-    # Scan NEW messages (from existing_count onward) for the last structured
-    # worker reply with a fresh trace_id.  Fall back to the last message.
+    # Post-settle re-scan: if multiple new messages arrived (likely Matrix
+    # backfill after Manager restart), wait for the message count to stabilize
+    # so the actual response (which arrives after backfill) is included.
+    # Backfill messages can trigger the settle prematurely because they carry
+    # fresh trace_ids (from Manager reprocessing).  The actual response arrives
+    # later and should be the last structured message.
     all_msgs = page_obj.locator(MSG_ASSISTANT)
     total = all_msgs.count()
+    new_msg_count = total - existing_count
+    if new_msg_count > 2:
+        _wait_for_msg_count_stable(page_obj, stable_ms=3000, timeout_ms=15000)
+        all_msgs = page_obj.locator(MSG_ASSISTANT)
+        total = all_msgs.count()
     best_text = ""
     for i in range(existing_count, total):
         candidate = all_msgs.nth(i)
@@ -569,7 +578,7 @@ def create_user_page(browser: Browser):
         new_session_btn = p.locator(NEW_CHAT_BUTTON)
         if new_session_btn.count() > 0 and new_session_btn.first.is_visible():
             new_session_btn.first.click()
-            _wait_for_textarea_enabled(p, timeout=10000)
+            _wait_for_textarea_enabled(p, timeout=30000)
         _wait_for_current_session(p, timeout=30000)
 
         pages.append(p)
