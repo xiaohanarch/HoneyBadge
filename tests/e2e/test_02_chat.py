@@ -137,8 +137,9 @@ class TestChatFunctionality:
 
         assert result["trace_id"], "No trace ID found"
 
-        # Verify trace ID link is rendered
-        trace_link = page.locator(MSG_ASSISTANT).last.locator(TRACE_ID_LINK)
+        # Verify trace ID link is rendered (may not be on the last message
+        # if the Manager sends a follow-up after contract 002)
+        trace_link = page.locator(TRACE_ID_LINK).first
         expect(trace_link).to_be_visible()
 
     def test_tc108_error_handling(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
