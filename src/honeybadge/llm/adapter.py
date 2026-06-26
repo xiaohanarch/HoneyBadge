@@ -747,6 +747,32 @@ async def generate_ngql(
   - 正确：`MATCH (po:PurchaseOrder) RETURN po.PurchaseOrder.po_number AS po_number, po.PurchaseOrder.total_amount AS amount ORDER BY amount DESC LIMIT 5`
   - 错误：`MATCH (po:PurchaseOrder) RETURN po.PurchaseOrder.total_amount ORDER BY po.PurchaseOrder.total_amount DESC LIMIT 5`（会报 SemanticError: Only column name can be used as sort item）
   - **所有 MATCH 查询的每个 RETURN 列都必须有 AS 别名**，ORDER BY 只用别名
+
+## "前N个" / "最新N个" 查询（CRITICAL — LLM 最常见的 ORDER BY 错误）
+
+当用户问 "前5个采购订单"、"最新10条发票"、"金额最大的3个供应商" 等含有排序+LIMIT 语义的问题时，**必须**：
+1. 在 RETURN 中用 `AS` 定义排序列的别名
+2. 在 ORDER BY 中**只使用该别名**
+3. 绝不在 ORDER BY 中使用 `var.Tag.property` 路径
+
+正确示例：
+```ngql
+MATCH (po:PurchaseOrder)
+RETURN po.PurchaseOrder.po_number AS po_number,
+       po.PurchaseOrder.order_date AS order_date,
+       po.PurchaseOrder.total_amount AS total_amount
+ORDER BY order_date DESC
+LIMIT 5
+```
+
+错误示例（会报 SemanticError: Only column name can be used as sort item）：
+```ngql
+MATCH (po:PurchaseOrder)
+RETURN po.PurchaseOrder.po_number AS po_number
+ORDER BY po.PurchaseOrder.order_date DESC
+LIMIT 5
+```
+
 - 最短路径: `FIND SHORTEST PATH FROM "vid1" TO "vid2" OVER * BIDIRECT UPTO 5 STEPS`
 - 标签函数: `tags(n)`（不是 `labels(n)`）
 

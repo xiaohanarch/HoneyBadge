@@ -92,7 +92,7 @@ class TestWorkerRouting:
         ts_before = datetime.now(timezone.utc)
         result = send_query_and_get_response(
             "分析采购订单金额异常，检测是否存在三单匹配问题",
-            timeout=60000,
+            timeout=120000,
         )
 
         # Should produce a substantive analytical response
@@ -119,7 +119,7 @@ class TestWorkerRouting:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("你好，请做个自我介绍", timeout=60000)
+        send_chat_query("你好，请做个自我介绍", timeout=120000)
 
         last_msg = page.locator(MSG_ASSISTANT).last
         response_text = last_msg.inner_text()
@@ -154,7 +154,7 @@ class TestWorkerRouting:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        result = send_query_and_get_response(query, timeout=60000)
+        result = send_query_and_get_response(query, timeout=120000)
 
         assert result["trace_id"], \
             f"'{query}' should produce trace_id (routed to worker)"
@@ -175,7 +175,7 @@ class TestWorkerRouting:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        result = send_query_and_get_response(query, timeout=60000)
+        result = send_query_and_get_response(query, timeout=120000)
 
         assert result["trace_id"], \
             f"'{query}' should produce trace_id (routed to analytics-worker)"
@@ -193,7 +193,7 @@ class TestWorkerRouting:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("Python的列表推导式怎么写", timeout=60000)
+        send_chat_query("Python的列表推导式怎么写", timeout=120000)
 
         last_msg = page.locator(MSG_ASSISTANT).last
         response_text = last_msg.inner_text()

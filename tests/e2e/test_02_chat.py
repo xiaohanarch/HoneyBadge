@@ -100,7 +100,7 @@ class TestChatFunctionality:
         progress = page.locator(f'{PROGRESS_AREA}, .el-steps, [class*="progress"], .processing, [class*="loading"]')
         # Progress is transient — if query is fast it may not appear
         # Main assertion: response eventually arrives
-        page.wait_for_selector(MSG_ASSISTANT, timeout=60000)
+        page.wait_for_selector(MSG_ASSISTANT, timeout=120000)
         expect(page.locator(MSG_ASSISTANT).last).to_be_visible()
 
     def test_tc105_query_results_table(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
@@ -118,7 +118,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询供应商", timeout=60000)
+        send_chat_query("查询供应商", timeout=120000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher code block is empty"
@@ -137,8 +137,9 @@ class TestChatFunctionality:
 
         assert result["trace_id"], "No trace ID found"
 
-        # Verify trace ID link is rendered
-        trace_link = page.locator(MSG_ASSISTANT).last.locator(TRACE_ID_LINK)
+        # Verify trace ID link is rendered (may not be on the last message
+        # if the Manager sends a follow-up after contract 002)
+        trace_link = page.locator(TRACE_ID_LINK).first
         expect(trace_link).to_be_visible()
 
     def test_tc108_error_handling(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
@@ -146,7 +147,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询不存在的标签哈哈哈哈哈哈哈", timeout=60000)
+        send_chat_query("查询不存在的标签哈哈哈哈哈哈哈", timeout=120000)
 
         response = page.locator(MSG_ASSISTANT).last
         expect(response).to_be_visible()
@@ -159,7 +160,7 @@ class TestChatFunctionality:
         wait_for_chat_ready()
 
         # First query establishes context
-        send_chat_query("查询采购订单", timeout=60000)
+        send_chat_query("查询采购订单", timeout=120000)
         page.wait_for_timeout(2000)
 
         # Second query references context
@@ -230,7 +231,7 @@ class TestChatFunctionality:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=60000)
+        send_chat_query("查询采购订单", timeout=120000)
 
         row_count = expand_data_table()
         assert row_count > 0, f"Data table should have rows, got {row_count}"

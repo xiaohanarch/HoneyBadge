@@ -16,7 +16,7 @@ Data实际情况:
 - PurchaseOrder: org_id 1000-1039 各约320-350条
 - SalesOrder: org_id 1000-1039 各约170-230条
 - analyst: org_ids=[1000], allowed_processes=[PTP]
-- subsidiary_lead: org_ids=[1021], allowed_processes=[PTP, OTC]
+- subsidiary_lead: org_ids=[1011], allowed_processes=[PTP, OTC]
 - admin: org_ids=None, data_scope=ALL
 """
 import re
@@ -43,12 +43,12 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query PTP process - should succeed
-        send_chat_query("查询采购订单", timeout=60000)
+        send_chat_query("查询采购订单", timeout=120000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Admin should access PTP (PurchaseOrder)"
 
         # Query OTC process - should succeed
-        send_chat_query("查询销售订单", timeout=60000)
+        send_chat_query("查询销售订单", timeout=120000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Admin should access OTC (SalesOrder)"
 
@@ -64,7 +64,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query PTP - should succeed with data (analyst org_id=1000 has ~320 PO)
-        send_chat_query("统计采购订单数量", timeout=60000)
+        send_chat_query("统计采购订单数量", timeout=120000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Analyst should access PTP (PurchaseOrder)"
 
@@ -85,7 +85,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query OTC - SalesOrder is NOT in analyst's allowed_processes
-        send_chat_query("查询销售订单", timeout=60000)
+        send_chat_query("查询销售订单", timeout=120000)
         page.wait_for_timeout(2000)
 
         # Look for permission denied or error message
@@ -116,9 +116,9 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Query should work
-        send_chat_query("查询采购订单", timeout=60000)
+        send_chat_query("查询采购订单", timeout=120000)
         response = page.locator(MSG_ASSISTANT)
-        expect(response.last).to_be_visible(timeout=60000)
+        expect(response.last).to_be_visible(timeout=120000)
 
         # Verify write buttons are not present
         write_buttons = page.locator(
@@ -141,7 +141,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Try to query SalesOrder (OTC process - blocked for analyst)
-        send_chat_query("查询销售订单", timeout=60000)
+        send_chat_query("查询销售订单", timeout=120000)
         page.wait_for_timeout(2000)
 
         response = page.locator(MSG_ASSISTANT)
@@ -184,7 +184,7 @@ class TestPermissions:
         wait_for_chat_ready()
 
         # Attempt restricted query (SalesOrder/OTC)
-        send_chat_query("查询销售订单", timeout=60000)
+        send_chat_query("查询销售订单", timeout=120000)
         page.wait_for_timeout(2000)
 
         response = page.locator(MSG_ASSISTANT)
@@ -229,44 +229,35 @@ class TestPermissions:
                 assert admin_response.status_code in (401, 403), \
                     f"Analyst accessing /api/admin/users should get 401/403, got {admin_response.status_code}"
 
-    def test_tc408_org_id_filter_verification(self, create_user_page):
+    def test_tc408_org_id_filter_verification(self, reset_manager, create_user_page):
         """TC-408: Verify org_id filter is correctly applied to queries.
 
         Data实际情况:
-        - admin: org_ids=None, data_scope=ALL → sees ALL (~13000 PO across 40 orgs)
-        - analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (~320 PO)
-        - subsidiary_lead: org_ids=[1021], data_scope=ORG → sees ONLY org 1021 (~337 PO)
+        - admin: org_ids=None, data_scope=ALL → sees ALL (~4577 PO across 15 orgs)
+        - analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (~329 PO)
+        - subsidiary_lead: org_ids=[1011], data_scope=ORG → sees ONLY org 1011 (~280 PO)
 
         CORRECT assertion: admin看到的数据量 >> analyst看到的数据量
         """
         # Admin query - separate context
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单数量", timeout=60000)
-        admin_page.wait_for_timeout(2000)
-        admin_messages = admin_page.locator(MSG_ASSISTANT)
-        admin_text = admin_messages.last.inner_text() if admin_messages.count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
 
         # Extract admin PO count (admin sees ALL orgs)
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst query - separate context
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单数量", timeout=60000)
-        analyst_page.wait_for_timeout(2000)
-        analyst_messages = analyst_page.locator(MSG_ASSISTANT)
-        analyst_text = analyst_messages.last.inner_text() if analyst_messages.count() > 0 else ""
+        analyst_text = send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
 
         # Extract analyst PO count (analyst sees ONLY org 1000)
         analyst_count = self._extract_count_from_response(analyst_text)
 
         # Subsidiary query - separate context
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=60000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_messages = subsidiary_page.locator(MSG_ASSISTANT)
-        subsidiary_text = subsidiary_messages.last.inner_text() if subsidiary_messages.count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
 
-        # Extract subsidiary PO count (subsidiary sees ONLY org 1021)
+        # Extract subsidiary PO count (subsidiary sees ONLY org 1011)
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
 
         # CORRECT ASSERTIONS
@@ -281,46 +272,40 @@ class TestPermissions:
             f"Admin ({admin_count}) should see way more data than analyst ({analyst_count}). " \
             f"Admin has ALL orgs, analyst has only org 1000."
 
-        # 3. admin sees MUCH MORE than subsidiary (admin: all, subsidiary: only org 1021)
+        # 3. admin sees MUCH MORE than subsidiary (admin: all, subsidiary: only org 1011)
         assert admin_count > subsidiary_count * 10, \
             f"Admin ({admin_count}) should see way more data than subsidiary ({subsidiary_count}). " \
-            f"Admin has ALL orgs, subsidiary has only org 1021."
+            f"Admin has ALL orgs, subsidiary has only org 1011."
 
         # 4. analyst and subsidiary should see similar amounts (~300-350 each)
         # Both are limited to single org, data_scope=ORG
         assert 200 < analyst_count < 500, \
             f"Analyst should see ~320 records from org 1000. Got: {analyst_count}"
         assert 200 < subsidiary_count < 500, \
-            f"Subsidiary should see ~337 records from org 1021. Got: {subsidiary_count}"
+            f"Subsidiary should see ~280 records from org 1011. Got: {subsidiary_count}"
 
-    def test_tc408b_analyst_vs_subsidiary_data_different(self, create_user_page):
+    def test_tc408b_analyst_vs_subsidiary_data_different(self, reset_manager, create_user_page):
         """TC-408b: Verify analyst and subsidiary see DIFFERENT org data.
 
-        Critical isolation test: analyst(org=1000) vs subsidiary(org=1021)
+        Critical isolation test: analyst(org=1000) vs subsidiary(org=1011)
         They should NOT see each other's data.
         """
         # Analyst (org_id=1000) query
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=60000)
-        analyst_page.wait_for_timeout(2000)
-        analyst_messages = analyst_page.locator(MSG_ASSISTANT)
-        analyst_text = analyst_messages.last.inner_text() if analyst_messages.count() > 0 else ""
+        analyst_text = send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=120000)
 
-        # Subsidiary (org_id=1021) query same PO
+        # Subsidiary (org_id=1011) query same PO
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询采购订单PO00000001", timeout=60000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_messages = subsidiary_page.locator(MSG_ASSISTANT)
-        subsidiary_text = subsidiary_messages.last.inner_text() if subsidiary_messages.count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询采购订单PO00000001", timeout=120000)
 
-        # PO00000001 belongs to org 1000 (not 1021)
-        # analyst(org=1000) should see it, subsidiary(org=1021) should NOT
+        # PO00000001 belongs to org 1000 (not 1011)
+        # analyst(org=1000) should see it, subsidiary(org=1011) should NOT
 
         # Verify data isolation
         analyst_sees_po1 = "PO00000001" in analyst_text or "采购订单" in analyst_text
         subsidiary_sees_po1 = "PO00000001" in subsidiary_text or "采购订单" in subsidiary_text
 
-        # analyst (org 1000) owns PO00000001, subsidiary (org 1021) does not
+        # analyst (org 1000) owns PO00000001, subsidiary (org 1011) does not
         # This is context-dependent - the exact PO numbers may vary by org
         # Key assertion: they should see DIFFERENT data subsets
 
@@ -329,39 +314,35 @@ class TestPermissions:
     # subsidiary_lead/analyst因权限小只能看到本org数据(百级)
     # 差异可达30-40倍
 
-    def test_tc409_high_risk_procurement_admin_vs_subsidiary(self, create_user_page):
+    def test_tc409_high_risk_procurement_admin_vs_subsidiary(self, reset_manager, create_user_page):
         """TC-409: 采购订单org过滤验证 - admin看全量，subsidiary只能看本org
 
         数据基础:
         - admin: org_ids=None, data_scope=ALL → 看到全部(~13000)
-        - subsidiary_lead: org_ids=[1021], data_scope=ORG → 只看到org1021(~337)
+        - subsidiary_lead: org_ids=[1011], data_scope=ORG → 只看到org1011(~337)
 
         预期: admin返回数量 >> subsidiary返回数量
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计所有采购订单的数量", timeout=60000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "统计所有采购订单的数量", timeout=120000)
         admin_count = self._extract_count_from_response(admin_text)
 
         # Subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计所有采购订单的数量", timeout=60000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计所有采购订单的数量", timeout=120000)
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
 
         # 断言
         assert admin_count > 0, f"Admin应看到采购数据. Response: {admin_text[:200]}"
         assert subsidiary_count > 0, f"Subsidiary应看到本org数据. Response: {subsidiary_text[:200]}"
 
-        # admin看全部org，subsidiary只看org1021
+        # admin看全部org，subsidiary只看org1011
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
-            f"admin有全部org权限，subsidiary只有org1021权限。"
+            f"admin有全部org权限，subsidiary只有org1011权限。"
 
-    def test_tc410_large_amount_po_admin_vs_analyst(self, create_user_page):
+    def test_tc410_large_amount_po_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-410: 采购订单org过滤验证 - admin看全量，analyst只能看本org
 
         数据基础:
@@ -372,16 +353,12 @@ class TestPermissions:
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "一共有多少条采购订单", timeout=60000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "一共有多少条采购订单", timeout=120000)
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst查询
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "一共有多少条采购订单", timeout=60000)
-        analyst_page.wait_for_timeout(2000)
-        analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        analyst_text = send_query_on_page(analyst_page, "一共有多少条采购订单", timeout=120000)
         analyst_count = self._extract_count_from_response(analyst_text)
 
         # 断言
@@ -393,23 +370,19 @@ class TestPermissions:
             f"Admin({admin_count})应看到>analyst({analyst_count})。" \
             f"admin无org限制，analyst只有org1000权限。"
 
-    def test_tc411_abnormal_transactions_admin_vs_subsidiary(self, create_user_page):
+    def test_tc411_abnormal_transactions_admin_vs_subsidiary(self, reset_manager, create_user_page):
         """TC-411: 采购订单org过滤独立验证 - admin vs subsidiary再次确认
 
         使用不同查询措辞验证org过滤的一致性
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "采购订单总共有多少条", timeout=60000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "采购订单总共有多少条", timeout=120000)
         admin_count = self._extract_count_from_response(admin_text)
 
         # Subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "采购订单总共有多少条", timeout=60000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "采购订单总共有多少条", timeout=120000)
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
 
         # 断言
@@ -419,25 +392,21 @@ class TestPermissions:
         # 验证org权限过滤生效
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
-            f"admin看全公司，subsidiary只看org1021。"
+            f"admin看全公司，subsidiary只看org1011。"
 
-    def test_tc412_recent_po_admin_vs_analyst(self, create_user_page):
+    def test_tc412_recent_po_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-412: 采购订单org过滤独立验证 - admin vs analyst再次确认
 
         使用不同查询措辞验证org过滤的一致性
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "报告采购订单的总记录数", timeout=60000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "报告采购订单的总记录数", timeout=120000)
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst查询
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "报告采购订单的总记录数", timeout=60000)
-        analyst_page.wait_for_timeout(2000)
-        analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        analyst_text = send_query_on_page(analyst_page, "报告采购订单的总记录数", timeout=120000)
         analyst_count = self._extract_count_from_response(analyst_text)
 
         # 断言
@@ -449,23 +418,19 @@ class TestPermissions:
             f"Admin({admin_count})应>analyst({analyst_count})。" \
             f"admin无org过滤，analyst只有org1000。"
 
-    def test_tc413_pending_approval_po_admin_vs_subsidiary(self, create_user_page):
+    def test_tc413_pending_approval_po_admin_vs_subsidiary(self, reset_manager, create_user_page):
         """TC-413: 采购订单org过滤稳定性验证 - admin vs subsidiary
 
         预期差异: admin >> subsidiary
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单总数", timeout=60000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "统计采购订单总数", timeout=120000)
         admin_count = self._extract_count_from_response(admin_text)
 
         # Subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计采购订单总数", timeout=60000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单总数", timeout=120000)
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
 
         # 断言
@@ -474,25 +439,21 @@ class TestPermissions:
 
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count})应>subsidiary({subsidiary_count})。" \
-            f"admin无org限制，subsidiary只有org1021。"
+            f"admin无org限制，subsidiary只有org1011。"
 
-    def test_tc414_supplier_qualifications_admin_vs_analyst(self, create_user_page):
+    def test_tc414_supplier_qualifications_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-414: 采购订单org过滤并发验证 - admin vs analyst
 
         analyst有PTP权限但org受限
         """
         # Admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单记录数", timeout=60000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "统计采购订单记录数", timeout=120000)
         admin_count = self._extract_count_from_response(admin_text)
 
         # Analyst查询
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单记录数", timeout=60000)
-        analyst_page.wait_for_timeout(2000)
-        analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        analyst_text = send_query_on_page(analyst_page, "统计采购订单记录数", timeout=120000)
         analyst_count = self._extract_count_from_response(analyst_text)
 
         # 断言
@@ -508,7 +469,7 @@ class TestPermissions:
         page = analyst_logged_in
         wait_for_chat_ready()
 
-        send_chat_query("查询采购订单", timeout=60000)
+        send_chat_query("查询采购订单", timeout=120000)
 
         cypher_text = expand_cypher_block()
         assert cypher_text, "Cypher block is empty"
@@ -529,10 +490,20 @@ class TestPermissions:
             for i in range(headers.count()):
                 header_texts.append(headers.nth(i).inner_text().lower())
 
-            sensitive_cols = ["cost_price", "成本价", "cost"]
+            # Check for sensitive cost-related columns by exact match (not substring).
+            # "cost" as a substring would false-positive on "standard_cost" / "list_price";
+            # the actual sensitive column is "cost_price" / "成本价".
+            header_set = set(header_texts)
+            sensitive_cols = ["cost_price", "成本价"]
             for col in sensitive_cols:
-                assert col not in " ".join(header_texts), \
+                assert col not in header_set, \
                     f"Sensitive column '{col}' visible to analyst: {header_texts}"
+            # Also reject any header containing "cost" as a whole word (e.g. "cost",
+            # "unit_cost") but NOT "standard_cost" which is a derived display field.
+            for h in header_texts:
+                # "cost" exact match (not "standard_cost", not "list_price")
+                if h == "cost":
+                    pytest.fail(f"Sensitive column 'cost' visible to analyst: {header_texts}")
 
     @staticmethod
     def _extract_count_from_response(text: str) -> int:

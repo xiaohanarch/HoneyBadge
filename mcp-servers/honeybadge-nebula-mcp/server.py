@@ -94,6 +94,25 @@ PERMISSION_SERVICE_URL: str = os.environ.get(
     "PERMISSION_SERVICE_URL", "http://honeybadge-permissions:8092"
 )
 
+
+def _normalize_user_id(user_id: str) -> str:
+    """Strip Matrix prefix/suffix to get the plain application username.
+
+    Matrix usernames are prefixed with 'hb-' (e.g. 'hb-admin') and may
+    arrive as full MXIDs ('@hb-admin:matrix-local.hiclaw.io').  The
+    permission service expects the plain username (e.g. 'admin').
+    """
+    if not user_id:
+        return user_id
+    uid = user_id.strip()
+    # Strip Matrix MXID format: @username:server
+    if uid.startswith("@"):
+        uid = uid.split(":")[0][1:]
+    # Strip the hb- prefix added by honeybadge-auth during provisioning
+    if uid.startswith("hb-"):
+        uid = uid[3:]
+    return uid
+
 # Template for unknown users — note: user_id is always overridden at the
 # call site with the actual user_id so this field is intentionally a placeholder.
 # org_ids=[1] is a POC default; in production replace with org_ids=[] or
@@ -262,6 +281,37 @@ async def get_schema_impl(
     return schema_text
 
 
+def _fix_order_by_property_paths(ngql: str) -> str:
+    """Rewrite ORDER BY property paths to column aliases.
+
+    NebulaGraph requires ORDER BY to use column aliases (from RETURN ... AS
+    alias), not property paths like ``var.Tag.property``.  LLMs (especially
+    glm-4-flash) frequently generate ``ORDER BY po.PurchaseOrder.order_date
+    DESC`` even when the prompt instructs them to use aliases.
+
+    This post-processor rewrites such paths to use just the property name,
+    which matches the ``AS property_name`` alias in RETURN.
+
+    Example::
+
+        INPUT:  ... AS order_date ORDER BY po.PurchaseOrder.order_date DESC LIMIT 5
+        OUTPUT: ... AS order_date ORDER BY order_date DESC LIMIT 5
+    """
+    def _rewrite_clause(match: re.Match) -> str:
+        keyword = match.group(1)   # "ORDER BY "
+        clause = match.group(2)    # sort columns
+        # Replace var.Tag.property → property
+        fixed = re.sub(r"\b(\w+)\.(\w+)\.(\w+)\b", r"\3", clause)
+        return keyword + fixed
+
+    return re.sub(
+        r"(ORDER BY\s+)(.*?)(?=\s+LIMIT\b|\s+OFFSET\b|;|$)",
+        _rewrite_clause,
+        ngql,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+
 async def generate_ngql_impl(
     llm: OpenAICompatibleAdapter,
     nebula: NebulaGraphClient,
@@ -295,6 +345,9 @@ async def generate_ngql_impl(
     ngql = re.sub(r"^```(?:ngql|cypher|nGQL)?\s*\n?", "", ngql)
     ngql = re.sub(r"\n?```\s*$", "", ngql)
     ngql = ngql.strip()
+
+    # Fix ORDER BY property paths → column aliases (NebulaGraph requirement)
+    ngql = _fix_order_by_property_paths(ngql)
 
     return {
         "ngql": ngql,
@@ -353,7 +406,7 @@ async def validate_and_execute_impl(
     # --- L3: Permission enforcement (PermissionEnforcer) ----------------
     # Auto-fetch permissions when caller provides user_id but not the full permissions dict.
     if user_context and user_context.get("user_id") and not user_context.get("permissions"):
-        user_id = user_context["user_id"]
+        user_id = _normalize_user_id(user_context["user_id"])
         perms_base = os.environ.get("PERMISSION_SERVICE_URL", "http://honeybadge-permissions:8092")
         try:
             async with httpx.AsyncClient() as _client:
@@ -445,6 +498,7 @@ async def get_user_permissions_impl(user_id: str) -> dict:
     Unknown users (e.g. Google SSO users not in the local config) receive
     a restrictive default (PTP only, org_id=[1]).
     """
+    user_id = _normalize_user_id(user_id)
     # Local fast path
     ctx = PERMISSION_CONFIG.get(user_id)
     if ctx is not None:

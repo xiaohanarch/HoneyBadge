@@ -45,6 +45,12 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
+# Manager + Workers MUST use a tool-calling-capable model (glm-5.2).
+# glm-4-flash cannot call skills (fast-query.sh) properly.
+# Do NOT fall back to LLM_MODEL here — LLM_MODEL may be glm-4-flash (for
+# MCP servers' nGQL generation only), which would break the Manager.
+MANAGER_LLM_MODEL="${MANAGER_LLM_MODEL:-glm-5.2}"
+
 MANAGER_CONTAINER="${MANAGER_CONTAINER:-honeybadge-hiclaw-manager}"
 # v1.1.0 split: MinIO/Higress/Tuwunel now run in hiclaw-embedded.
 # mc operations and Higress health checks target EMBEDDED_CONTAINER;
@@ -245,7 +251,7 @@ docker exec "$MANAGER_CONTAINER" bash -c \
 #     IRON RULE: Workers NEVER call any LLM directly. ALL LLM calls MUST route
 #     through Higress AI Gateway at http://aigw-local.hiclaw.io:8080/v1. No exceptions.
 # ---------------------------------------------------------------------------
-log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ glm-5.2)..."
+log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ ${MANAGER_LLM_MODEL:-glm-5.2})..."
 # baseUrl MUST include /v1: OpenAI JS SDK appends /chat/completions directly
 # Without /v1: path becomes /chat/completions → misses llm-minimax-route → no API key → 404
 for worker in graph-worker analytics-worker; do
@@ -278,10 +284,10 @@ for name, p in providers.items():
         print('Patched ' + name + ' baseUrl: ' + old + ' -> ' + p['baseUrl'])
     for model in p.get('models', []):
         old_id = model.get('id', '')
-        if old_id != 'glm-5.2':
-            model['id'] = 'glm-5.2'
-            model['name'] = 'glm-5.2'
-            print('Updated model: ' + old_id + ' -> glm-5.2')
+        if old_id != '${MANAGER_LLM_MODEL:-glm-5.2}':
+            model['id'] = '${MANAGER_LLM_MODEL:-glm-5.2}'
+            model['name'] = '${MANAGER_LLM_MODEL:-glm-5.2}'
+            print('Updated model: ' + old_id + ' -> ${MANAGER_LLM_MODEL:-glm-5.2}')
         # Always remove reasoning:true — openclaw thinking mode sends Claude-style
         # thinking blocks that DashScope rejects with role-ordering 400 errors.
         model.pop('reasoning', None)
@@ -299,9 +305,9 @@ for name, p in providers.items():
 
 agents = cfg.get('agents', {}).get('defaults', {}).get('model', {})
 old_primary = agents.get('primary', '')
-if 'glm-5.2' not in old_primary:
+if '${MANAGER_LLM_MODEL:-glm-5.2}' not in old_primary:
     for name in providers.keys():
-        agents['primary'] = name + '/glm-5.2'
+        agents['primary'] = name + '/${MANAGER_LLM_MODEL:-glm-5.2}'
         print('Updated primary: ' + old_primary + ' -> ' + agents['primary'])
         break
 
@@ -378,7 +384,7 @@ done
 #     IRON RULE: ALL LLM calls MUST go through Higress. Workers never call any
 #     LLM endpoint directly. This route is the single exit point for all LLM traffic.
 # ---------------------------------------------------------------------------
-log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → BigModel/glm-5.2)..."
+log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → BigModel/${MANAGER_LLM_MODEL:-glm-5.2})..."
 HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
 LLM_API_KEY="${LLM_API_KEY:-${HICLAW_LLM_API_KEY:-}}"
 
@@ -578,6 +584,8 @@ MANAGER_MCPORTER_JSON='{
 # Write into the Manager container at both the active path
 # (/root/config/mcporter.json — what fast-query.sh reads via default
 # MCPORTER_CONFIG) and the workspace path (/root/manager-workspace/config/).
+# Ensure /root/config/ exists — v1.1.2 may not create it by default.
+docker exec "$MANAGER_CONTAINER" mkdir -p /root/config
 printf '%s\n' "$MANAGER_MCPORTER_JSON" > "$TMP_DIR/hb-manager-mcporter.json"
 docker cp "$TMP_DIR/hb-manager-mcporter.json" \
     "$MANAGER_CONTAINER:/root/config/mcporter.json" \

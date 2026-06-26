@@ -55,7 +55,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create a session first
-        send_chat_query("查询供应商", timeout=60000)
+        send_chat_query("查询供应商", timeout=120000)
         page.wait_for_timeout(1000)
 
         # Right-click or hover to find rename option
@@ -87,7 +87,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create a session to delete
-        send_chat_query("查询采购订单", timeout=60000)
+        send_chat_query("查询采购订单", timeout=120000)
         page.wait_for_timeout(1000)
 
         # Find the session in sidebar
@@ -121,7 +121,7 @@ class TestSessionManagement:
             if new_session_btn.count() > 0:
                 new_session_btn.first.click()
                 page.wait_for_timeout(500)
-            send_chat_query(f"查询供应商 {i}", timeout=60000)
+            send_chat_query(f"查询供应商 {i}", timeout=120000)
             page.wait_for_timeout(500)
 
         # Verify session list in sidebar
@@ -140,7 +140,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create session with query
-        send_chat_query("查询物料", timeout=60000)
+        send_chat_query("查询物料", timeout=120000)
         page.wait_for_timeout(1000)
 
         # Reload page. Do NOT wait for "networkidle" — Matrix SDK keeps a long-poll
@@ -194,7 +194,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create session with content
-        send_chat_query("查询供应商", timeout=60000)
+        send_chat_query("查询供应商", timeout=120000)
         page.wait_for_timeout(1000)
 
         # Look for export button

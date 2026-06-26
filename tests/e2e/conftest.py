@@ -2,9 +2,12 @@
 Playwright E2E Test Configuration and Fixtures
 HoneyBadge - Enterprise Knowledge Graph Assistant
 """
+import datetime
 import json
 import os
 import re
+import subprocess
+import time
 import pytest
 from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
 from tests.e2e.selectors import (
@@ -14,6 +17,63 @@ from tests.e2e.selectors import (
     DATA_COLLAPSE_HEADER, DATA_ROWS, DATA_TABLE,
     NEW_CHAT_BUTTON, SESSION_ITEM, INPUT_CONTAINER,
 )
+
+MANAGER_CONTAINER = "honeybadge-hiclaw-manager"
+SESSION_DIR = "/root/manager-workspace/.openclaw/agents/main/sessions"
+
+
+def reset_manager_sessions():
+    """Clear all Manager OpenClaw sessions and restart the container.
+
+    The Manager LLM (glm-5.2) enters repetition loops after 5-10 queries in
+    the same session.  E2E permission tests send 20+ queries to the same DM
+    rooms, accumulating context that triggers the loop.  This function:
+      1. Deletes all session transcript files (*.jsonl)
+      2. Resets sessions.json to an empty store
+      3. Restarts the Manager container so in-memory session caches are freed
+      4. Waits for the OpenClaw process to come back up
+
+    Call this between tests that would otherwise inherit a bloated session.
+    """
+    # 1. Delete session transcript files
+    subprocess.run(
+        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
+         f"rm -f {SESSION_DIR}/*.jsonl"],
+        capture_output=True, timeout=10,
+    )
+
+    # 2. Reset sessions.json to empty
+    subprocess.run(
+        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
+         f'echo "{{}}" > {SESSION_DIR}/sessions.json'],
+        capture_output=True, timeout=10,
+    )
+
+    # 3. Restart the Manager container
+    subprocess.run(
+        ["docker", "restart", MANAGER_CONTAINER],
+        capture_output=True, timeout=30,
+    )
+
+    # 4. Wait for the OpenClaw process to be running
+    for _ in range(30):
+        result = subprocess.run(
+            ["docker", "exec", MANAGER_CONTAINER, "pgrep", "-f", "openclaw"],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode == 0:
+            break
+        time.sleep(1)
+    else:
+        print("[reset_manager_sessions] WARNING: Manager process not detected after 30s")
+
+    # 5. Wait for the Matrix client to connect to the homeserver.
+    #    The Manager takes ~22s after restart to join rooms and connect to
+    #    the gateway.  Without this wait, the first query after restart may
+    #    time out because the Matrix message isn't delivered.
+    #    We use a fixed wait because docker logs --tail=N only shows the last
+    #    N lines, which may not include the startup "connected to gateway" msg.
+    time.sleep(25)
 
 
 def _wait_for_textarea_enabled(page_obj, timeout=60000):
@@ -49,72 +109,181 @@ def _wait_for_current_session(page_obj, timeout=30000):
     )
 
 
-def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 15000):
+def _wait_for_msg_count_stable(page_obj, stable_ms=3000, timeout_ms=30000):
+    """Wait for the assistant message count to be stable for `stable_ms` milliseconds.
+
+    matrix-js-sdk backfills DM room history asynchronously after login. Old
+    contract-002 messages from previous test runs can appear in the DOM *after*
+    ``existing_count`` is captured, making the settle wait mistake them for new
+    messages. This function waits until the count stops changing for 3 seconds,
+    ensuring ``existing_count`` includes all backfilled messages.
+
+    Special case: when the count is 0, the stability window is extended to 10s.
+    A count of 0 that has been stable for 3s often means the Matrix initial sync
+    hasn't started delivering backfilled messages yet — not that the room is
+    genuinely empty. Waiting 10s gives the sync enough time to begin delivering
+    messages, at which point the count changes and the normal 3s window applies.
+
+    Returns the stable message count (or the current count on timeout).
+    """
+    page_obj.evaluate("() => { window.__hbStableCount = undefined; window.__hbStableTs = 0; window.__hbStableStart = Date.now(); }")
+    try:
+        page_obj.wait_for_function(
+            f"""() => {{
+                const count = document.querySelectorAll('.chat-message.message-assistant').length;
+                const now = Date.now();
+                if (window.__hbStableCount !== count) {{
+                    window.__hbStableCount = count;
+                    window.__hbStableTs = now;
+                    return false;
+                }}
+                // When count is 0, require 5s stability — Matrix sync may
+                // not have started delivering backfilled messages yet.  Trace_id
+                // filtering in the settle condition handles late backfill.
+                const requiredMs = count === 0 ? 5000 : {stable_ms};
+                return (now - window.__hbStableTs) >= requiredMs;
+            }}""",
+            timeout=timeout_ms,
+            polling=500,
+        )
+    except Exception:
+        pass  # proceed with whatever count we have
+    return page_obj.locator(MSG_ASSISTANT).count()
+
+
+def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 120000,
+                               min_wait_ms: int = 5000, query_send_ts: int = 0):
     """Stage-2 wait: settle on the actual response, not Manager's dispatch ack/preamble.
 
     Waits up to `timeout_ms` for ANY of:
       1. Structured worker reply (cypher-collapse or data-collapse header in a new message)
+         — only after `min_wait_ms` AND only if the message's trace_id timestamp is
+           >= ``query_send_ts`` (or has no trace_id).  This is the primary defense
+           against stale DM history: matrix-js-sdk backfills old contract-002 messages
+           from previous test runs, and they carry trace_ids with timestamps BEFORE
+           the current query was sent.  By parsing the trace_id's embedded timestamp
+           (format: TRC-YYYYMMDD-HHMMSS-xxxxx), we reliably distinguish stale from new.
       2. Denial marker text (权限不足/permission denied/无权/Forbidden/access denied)
-      3. Last new-message body length stable for 2000ms (streaming finished naturally)
+         — always immediate so permission tests fail fast.
+      3. Last new-message body length (>100 chars) stable for 10000ms (streaming finished)
+         — only after `min_wait_ms` AND only if the last message's trace_id timestamp
+           is >= ``query_send_ts`` (or has no trace_id).
 
     Exits silently on timeout — callers must let the test assertion fail naturally.
-
-    Why 15s (not 60s+): the suite has ~49 call sites; stacked long timeouts blew
-    past CI's 90-min wall and caused PR #105's -24 regression. 15s × 49 = ~12 min
-    worst case; healthy case is 2-3s via the text-stability signal.
+    Debug info is printed to stdout via ``[SETTLE]`` prefix.
     """
-    page_obj.evaluate("() => { window.__hbStability = null; }")
+    page_obj.evaluate(
+        f"() => {{ window.__hbStability = null; window.__hbSettleReason = ''; "
+        f"window.__hbSettleStart = Date.now(); "
+        f"window.__hbQuerySendTs = {query_send_ts}; }}"
+    )
     try:
         page_obj.wait_for_function(
             f"""() => {{
                 const msgs = document.querySelectorAll('.chat-message.message-assistant');
                 if (msgs.length <= {existing_count}) return false;
 
+                const elapsed = Date.now() - (window.__hbSettleStart || 0);
+                const querySendTs = window.__hbQuerySendTs || 0;
+
+                // Parse trace_id timestamp: TRC-YYYYMMDD-HHMMSS-xxxxx → epoch ms
+                function parseTraceTs(elem) {{
+                    var link = elem.querySelector('.trace-id-link');
+                    if (!link) return -1;  // no trace_id — treat as new
+                    var m = (link.textContent || '').match(/TRC-(\\d{{4}})(\\d{{2}})(\\d{{2}})-(\\d{{2}})(\\d{{2}})(\\d{{2}})/);
+                    if (!m) return -1;
+                    return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]).getTime();
+                }}
+
+                function isStale(elem) {{
+                    if (!querySendTs) return false;  // no query_ts — don't filter
+                    var ts = parseTraceTs(elem);
+                    return ts > 0 && ts < querySendTs;
+                }}
+
                 // 1: structured worker contract-002 (cypher/data collapse)
+                //    Gated by min_wait_ms AND trace_id timestamp check.
+                //    Structured worker replies ALWAYS carry a trace_id (from the
+                //    MCP pipeline).  Messages with data/cypher-collapse but NO
+                //    trace_id are stale backfill from older test runs — skip them.
+                if (elapsed >= {min_wait_ms}) {{
+                    for (let i = {existing_count}; i < msgs.length; i++) {{
+                        const m = msgs[i];
+                        if (m.querySelector('.data-collapse .el-collapse-item__header') ||
+                            m.querySelector('.cypher-collapse .el-collapse-item__header')) {{
+                            var ts1 = parseTraceTs(m);
+                            if (ts1 < 0) continue;  // no trace_id — stale backfill
+                            if (querySendTs && ts1 < querySendTs) continue;  // stale trace_id
+                            window.__hbSettleReason = 'cond1_structured idx=' + i + ' total=' + msgs.length + ' existing=' + {existing_count};
+                            return true;
+                        }}
+                    }}
+                }}
+
+                // 2: denial markers (permission tests fail fast — no min_wait)
+                const denial = /权限不足|permission denied|无权|forbidden|access denied/i;
                 for (let i = {existing_count}; i < msgs.length; i++) {{
-                    const m = msgs[i];
-                    if (m.querySelector('.data-collapse .el-collapse-item__header') ||
-                        m.querySelector('.cypher-collapse .el-collapse-item__header')) {{
+                    if (isStale(msgs[i])) continue;
+                    const body = msgs[i].querySelector('.message-body') || msgs[i];
+                    if (denial.test(body.textContent)) {{
+                        window.__hbSettleReason = 'cond2_denial idx=' + i;
                         return true;
                     }}
                 }}
 
-                // 2: denial markers (permission tests fail fast)
-                const denial = /权限不足|permission denied|无权|forbidden|access denied/i;
-                for (let i = {existing_count}; i < msgs.length; i++) {{
-                    const body = msgs[i].querySelector('.message-body') || msgs[i];
-                    if (denial.test(body.textContent)) return true;
+                // 3: streaming stable — last new-message body length unchanged
+                //    for 10s.  Only fires if text > 100 chars AND min_wait_ms
+                //    has elapsed AND last message is NOT stale.
+                if (elapsed >= {min_wait_ms}) {{
+                    const last = msgs[msgs.length - 1];
+                    if (isStale(last)) return false;  // last message is stale — keep waiting
+                    const body = last.querySelector('.message-body') || last;
+                    const len = body ? body.textContent.trim().length : 0;
+                    if (len < 100) return false;
+                    const now = Date.now();
+                    if (!window.__hbStability || window.__hbStability.len !== len) {{
+                        window.__hbStability = {{ len: len, ts: now }};
+                        return false;
+                    }}
+                    if ((now - window.__hbStability.ts) >= 10000) {{
+                        window.__hbSettleReason = 'cond3_stable len=' + len + ' elapsed=' + elapsed;
+                        return true;
+                    }}
                 }}
 
-                // 3: streaming stable — last new-message text length unchanged for 2s
-                const last = msgs[msgs.length - 1];
-                const body = last.querySelector('.message-body') || last;
-                const len = body ? body.textContent.trim().length : 0;
-                const now = Date.now();
-                if (!window.__hbStability || window.__hbStability.len !== len) {{
-                    window.__hbStability = {{ len: len, ts: now }};
-                    return false;
-                }}
-                return (now - window.__hbStability.ts) >= 2000;
+                return false;
             }}""",
             timeout=timeout_ms,
             polling=200,
         )
-    except Exception:
-        pass  # silent — let downstream assertion produce a meaningful error
+        reason = page_obj.evaluate("() => window.__hbSettleReason || 'unknown'")
+        print(f"[SETTLE] exited: {reason}")
+    except Exception as e:
+        print(f"[SETTLE] exception after {timeout_ms}ms: {type(e).__name__}: {str(e)[:200]}")
 
 
-def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000,
-                            settle_timeout_ms: int = 15000):
+def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 120000,
+                            settle_timeout_ms: int = 240000,
+                            min_wait_ms: int = 5000, query_send_ts: int = 0):
     """Wait for the assistant's actual response (not the Manager dispatch ack/preamble).
 
     Two-stage wait:
       Stage 1: any NEW assistant message with body text >10 chars (existing semantics)
       Stage 2: response settled — Worker contract-002, denial marker, or text stable
 
-    Stage 2 is capped at 15s by default; pass `settle_timeout_ms=0` to skip it
-    (legacy callers that only need the first-message signal).
+    Stage 2 runs for up to `settle_timeout_ms` (120s default for glm-5.2);
+    pass `settle_timeout_ms=0` to skip it (legacy callers that only need the
+    first-message signal).
+    `min_wait_ms` gates conditions 1 and 3 in Stage 2 to skip stale DM history.
+    `query_send_ts` is the Unix timestamp (ms) when the query was sent; cond1
+    and cond3 use it to parse trace_id timestamps and skip stale backfilled
+    messages whose trace_id was generated before the query.
     """
+    # Stage 1 timeout: use at least 240s.  After reset_manager restarts the
+    # Manager, it reprocesses backfilled DM messages for 60-90s before getting
+    # to the new query.  With glm-5.2 at ~30-60s per LLM step, total time from
+    # query to first response can be 2-3 minutes.
+    stage1_timeout = max(timeout, 240000)
     page_obj.wait_for_function(
         f"""() => {{
             const msgs = document.querySelectorAll('.chat-message.message-assistant');
@@ -123,21 +292,57 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 60000,
             const body = last.querySelector('.message-body') || last;
             return body && body.textContent.trim().length > 10;
         }}""",
-        timeout=timeout,
+        timeout=stage1_timeout,
     )
     if settle_timeout_ms > 0:
-        _wait_for_response_settled(page_obj, existing_count, timeout_ms=settle_timeout_ms)
+        _wait_for_response_settled(page_obj, existing_count, timeout_ms=settle_timeout_ms,
+                                   min_wait_ms=min_wait_ms,
+                                   query_send_ts=query_send_ts)
     page_obj.wait_for_timeout(200)
 
 
-def send_query_on_page(page_obj, query: str, timeout: int = 60000):
-    """Send a chat query on any page object (standalone helper, not fixture-bound)."""
+def send_query_on_page(page_obj, query: str, timeout: int = 120000) -> str:
+    """Send a chat query on any page object (standalone helper, not fixture-bound).
+
+    Returns the response text — preferring the last structured worker reply
+    (data-collapse / cypher-collapse header with a fresh trace_id) over the
+    Manager's dispatch ack.  With the fast-query.sh flow, the Worker's
+    contract-002 arrives BEFORE the Manager's dispatch ack, so
+    ``messages.last`` would get the dispatch ack text instead of the data.
+    """
     _wait_for_textarea_enabled(page_obj, timeout=timeout)
     textarea = page_obj.locator(CHAT_TEXTAREA).first
-    existing_count = page_obj.locator(MSG_ASSISTANT).count()
+    existing_count = _wait_for_msg_count_stable(page_obj)
+    query_send_ts = int(time.time() * 1000)
     textarea.fill(query)
     textarea.press("Enter")
-    _wait_for_new_response(page_obj, existing_count, timeout=timeout)
+    _wait_for_new_response(page_obj, existing_count, timeout=timeout,
+                           query_send_ts=query_send_ts)
+
+    # Scan NEW messages (from existing_count onward) for the last structured
+    # worker reply with a fresh trace_id.  Fall back to the last message.
+    all_msgs = page_obj.locator(MSG_ASSISTANT)
+    total = all_msgs.count()
+    best_text = ""
+    for i in range(existing_count, total):
+        candidate = all_msgs.nth(i)
+        if candidate.locator(DATA_COLLAPSE_HEADER).count() > 0 \
+           or candidate.locator(CYPHER_COLLAPSE_HEADER).count() > 0:
+            trace_link = candidate.locator(TRACE_ID_LINK)
+            if trace_link.count() == 0:
+                continue
+            trace_text = trace_link.first.inner_text()
+            trace_match = re.search(
+                r'TRC-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})', trace_text)
+            if trace_match:
+                y, mo, d, h, mi, s = (int(x) for x in trace_match.groups())
+                trace_ts = int(datetime.datetime(y, mo, d, h, mi, s).timestamp() * 1000)
+                if trace_ts < query_send_ts:
+                    continue  # stale backfill
+            best_text = candidate.inner_text()
+    if not best_text and total > 0:
+        best_text = all_msgs.last.inner_text()
+    return best_text
 
 
 # Configuration
@@ -151,7 +356,7 @@ DEMO_USERS = {
     "analyst": {"username": "analyst", "password": "analyst123", "roles": ["analyst"], "org_id": 1000},
     "auditor": {"username": "auditor", "password": "auditor123", "roles": ["auditor"], "org_id": 1000},
     "procurement_lead": {"username": "procurement_lead", "password": "lead123", "roles": ["analyst"], "org_id": 1000},
-    "subsidiary_lead": {"username": "subsidiary_lead", "password": "lead123", "roles": ["analyst"], "org_id": 1021},
+    "subsidiary_lead": {"username": "subsidiary_lead", "password": "lead123", "roles": ["analyst"], "org_id": 1011},
 }
 
 
@@ -310,15 +515,33 @@ def wait_for_chat_ready(page: Page):
 
 
 @pytest.fixture
+def reset_manager():
+    """Reset Manager OpenClaw sessions before the test.
+
+    Clears all session transcript files and restarts the Manager container
+    so the LLM starts with a clean context.  Use this fixture in permission
+    tests that send many queries to the same DM room — glm-5.2 enters
+    repetition loops after 5-10 accumulated turns.
+
+    Usage: add ``reset_manager`` as a parameter to the test method.
+    The fixture runs before the test body (and before page/admin_logged_in
+    fixtures that depend on it).
+    """
+    reset_manager_sessions()
+
+
+@pytest.fixture
 def send_chat_query(page: Page):
     """Factory fixture to send a chat query and wait for response."""
-    def _send(query: str, timeout: int = 60000):
+    def _send(query: str, timeout: int = 120000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
-        existing_count = page.locator(MSG_ASSISTANT).count()
+        existing_count = _wait_for_msg_count_stable(page)
+        query_send_ts = int(time.time() * 1000)
         textarea.fill(query)
         textarea.press("Enter")
-        _wait_for_new_response(page, existing_count, timeout=timeout)
+        _wait_for_new_response(page, existing_count, timeout=timeout,
+                               query_send_ts=query_send_ts)
     return _send
 
 
@@ -363,16 +586,18 @@ def create_user_page(browser: Browser):
 @pytest.fixture
 def send_query_and_get_response(page: Page):
     """Send query, wait for full response, return structured data."""
-    def _send(query: str, timeout: int = 60000):
+    def _send(query: str, timeout: int = 120000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
-        existing_count = page.locator(MSG_ASSISTANT).count()
+        existing_count = _wait_for_msg_count_stable(page)
+        query_send_ts = int(time.time() * 1000)
         textarea.fill(query)
         textarea.press("Enter")
         # _wait_for_new_response now waits past the Manager dispatch ack: it returns
         # only after the response has settled (structured worker reply, denial marker,
         # or stable text length). No separate 120s wait needed here.
-        _wait_for_new_response(page, existing_count, timeout=timeout)
+        _wait_for_new_response(page, existing_count, timeout=timeout,
+                               query_send_ts=query_send_ts)
 
         all_msgs = page.locator(MSG_ASSISTANT)
         total = all_msgs.count()
@@ -380,12 +605,26 @@ def send_query_and_get_response(page: Page):
         # placeholder at index `existing_count`), then the Worker's contract 002
         # arrives as a subsequent message carrying the actual data table / cypher.
         # Scan the NEW messages (from existing_count to end) and pick the one
-        # that actually contains structured-data UI; fall back to the last message.
+        # that actually contains structured-data UI AND has a trace_id whose
+        # embedded timestamp is >= query_send_ts (i.e. not stale backfill).
+        # Fall back to the last message.
         data_msg = None
         for i in range(existing_count, total):
             candidate = all_msgs.nth(i)
             if candidate.locator(DATA_COLLAPSE_HEADER).count() > 0 \
                or candidate.locator(CYPHER_COLLAPSE_HEADER).count() > 0:
+                # Structured worker replies always carry a trace_id from the MCP
+                # pipeline.  No trace_id → stale backfill from older runs — skip.
+                trace_link = candidate.locator(TRACE_ID_LINK)
+                if trace_link.count() == 0:
+                    continue
+                trace_text = trace_link.first.inner_text()
+                trace_match = re.search(r'TRC-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})', trace_text)
+                if trace_match:
+                    y, mo, d, h, mi, s = (int(x) for x in trace_match.groups())
+                    trace_ts = int(datetime.datetime(y, mo, d, h, mi, s).timestamp() * 1000)
+                    if trace_ts < query_send_ts:
+                        continue  # Stale backfilled message — keep scanning
                 data_msg = candidate
                 break
         if data_msg is None:

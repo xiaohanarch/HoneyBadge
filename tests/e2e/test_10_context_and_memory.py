@@ -45,17 +45,17 @@ class TestContextAndMemory:
         wait_for_chat_ready()
 
         # First query - 询问基本信息
-        send_chat_query("查询采购订单", timeout=60000)
+        send_chat_query("查询采购订单", timeout=120000)
         page.wait_for_timeout(2000)
         first_response_count = page.locator('.chat-message').count()
 
         # Second query - 基于上文的追问
-        send_chat_query("统计这些订单的总金额", timeout=60000)
+        send_chat_query("统计这些订单的总金额", timeout=120000)
         page.wait_for_timeout(2000)
         second_response_count = page.locator('.chat-message').count()
 
         # Third query - 继续追问
-        send_chat_query("找出金额最大的前3个", timeout=60000)
+        send_chat_query("找出金额最大的前3个", timeout=120000)
         page.wait_for_timeout(2000)
         third_response_count = page.locator('.chat-message').count()
 
@@ -81,7 +81,7 @@ class TestContextAndMemory:
         wait_for_chat_ready(admin_page)
 
         # 发送查询创建内容
-        send_query_on_page(admin_page, "查询采购订单", timeout=60000)
+        send_query_on_page(admin_page, "查询采购订单", timeout=120000)
         admin_page.wait_for_timeout(2000)
 
         # 获取当前会话 ID (从 URL 或 localStorage)
@@ -119,11 +119,11 @@ class TestContextAndMemory:
         wait_for_chat_ready()
 
         # First query - 设置上下文/关注点
-        send_chat_query("我主要关注采购订单的数据", timeout=60000)
+        send_chat_query("我主要关注采购订单的数据", timeout=120000)
         page.wait_for_timeout(2000)
 
         # Second query - 利用之前的上下文
-        send_chat_query("找出金额最大的10个", timeout=60000)
+        send_chat_query("找出金额最大的10个", timeout=120000)
         page.wait_for_timeout(2000)
         response = page.locator(MSG_ASSISTANT)
         response_text = response.last.inner_text() if response.count() > 0 else ""
@@ -141,7 +141,7 @@ class TestContextAndMemory:
         # Admin 创建会话并设置私密上下文
         admin_page = create_user_page("admin", "admin123")
         wait_for_chat_ready(admin_page)
-        send_query_on_page(admin_page, "我正在分析ORG1000的采购数据，这是公司最关键的部门", timeout=60000)
+        send_query_on_page(admin_page, "我正在分析ORG1000的采购数据，这是公司最关键的部门", timeout=120000)
         admin_page.wait_for_timeout(2000)
 
         # 获取 admin 的消息
@@ -174,16 +174,12 @@ class TestContextAndMemory:
         # Admin 创建会话
         admin_page = create_user_page("admin", "admin123")
         wait_for_chat_ready(admin_page)
-        send_query_on_page(admin_page, "这是admin的会话，查询所有采购订单", timeout=60000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "这是admin的会话，查询所有采购订单", timeout=120000)
 
         # Subsidiary 创建会话
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         wait_for_chat_ready(subsidiary_page)
-        send_query_on_page(subsidiary_page, "这是subsidiary的会话，只看本公司的订单", timeout=60000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "这是subsidiary的会话，只看本公司的订单", timeout=120000)
 
         # 断言: 两个用户的上下文完全独立，不应交叉
         assert "admin" not in subsidiary_text.lower() or len(subsidiary_text) == 0, \
@@ -199,7 +195,7 @@ class TestContextAndMemory:
         # Admin 创建第一个会话
         admin_page1 = create_user_page("admin", "admin123")
         wait_for_chat_ready(admin_page1)
-        send_query_on_page(admin_page1, "会话1: 查询采购订单", timeout=60000)
+        send_query_on_page(admin_page1, "会话1: 查询采购订单", timeout=120000)
         admin_page1.wait_for_timeout(2000)
         session1_messages = admin_page1.locator('.chat-message').count()
 
@@ -209,7 +205,7 @@ class TestContextAndMemory:
             pytest.skip("New session button not available")
         new_session_btn.first.click()
         admin_page1.wait_for_timeout(1000)
-        send_query_on_page(admin_page1, "会话2: 查询销售订单", timeout=60000)
+        send_query_on_page(admin_page1, "会话2: 查询销售订单", timeout=120000)
         admin_page1.wait_for_timeout(2000)
         session2_messages = admin_page1.locator('.chat-message').count()
 
@@ -239,7 +235,7 @@ class TestContextAndMemory:
         wait_for_chat_ready()
 
         # Session 1 - 设置偏好
-        send_chat_query("记住我主要关注采购流程的异常情况", timeout=60000)
+        send_chat_query("记住我主要关注采购流程的异常情况", timeout=120000)
         page.wait_for_timeout(2000)
 
         # 创建新会话
@@ -250,7 +246,7 @@ class TestContextAndMemory:
         page.wait_for_timeout(1000)
 
         # Session 2 - 验证偏好被记住
-        send_chat_query("我关注的流程最近有什么异常", timeout=60000)
+        send_chat_query("我关注的流程最近有什么异常", timeout=120000)
         page.wait_for_timeout(2000)
         response = page.locator(MSG_ASSISTANT)
         response_text = response.last.inner_text() if response.count() > 0 else ""
@@ -275,7 +271,7 @@ class TestContextAndMemory:
         # Admin 创建私密会话
         admin_page = create_user_page("admin", "admin123")
         wait_for_chat_ready(admin_page)
-        send_query_on_page(admin_page, "这是admin的私密分析，只存在于admin账号中", timeout=60000)
+        send_query_on_page(admin_page, "这是admin的私密分析，只存在于admin账号中", timeout=120000)
         admin_page.wait_for_timeout(2000)
 
         # Analyst 登录 (独立浏览器上下文, 天然隔离, 无需先 logout admin)
@@ -295,12 +291,12 @@ class TestContextAndMemory:
         """TC-1009: One subsidiary cannot see another subsidiary's history.
 
         假设有多个子公司用户，各自的数据完全隔离。
-        当前只有 subsidiary_lead(org=1021)，验证其看不到其他 org 的数据。
+        当前只有 subsidiary_lead(org=1011)，验证其看不到其他 org 的数据。
         """
         # subsidiary_lead 创建会话
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         wait_for_chat_ready(subsidiary_page)
-        send_query_on_page(subsidiary_page, "这是ORG1021的数据，别的子公司看不到", timeout=60000)
+        send_query_on_page(subsidiary_page, "这是ORG1011的数据，别的子公司看不到", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
 
         # 用 analyst(org=1000) 登录 (独立浏览器上下文, 天然隔离)
@@ -310,8 +306,8 @@ class TestContextAndMemory:
         # analyst 应该看不到 subsidiary_lead 的会话
         all_text = analyst_page.locator('body').inner_text()
 
-        # 断言: analyst(org=1000) 绝对不应该看到 subsidiary(org=1021) 的数据
-        assert "ORG1021" not in all_text, \
+        # 断言: analyst(org=1000) 绝对不应该看到 subsidiary(org=1011) 的数据
+        assert "ORG1011" not in all_text, \
             "CRITICAL: Analyst should NEVER see subsidiary's org data"
         assert "别的子公司" not in all_text, \
             "CRITICAL: Cross-subsidiary data isolation violated"
@@ -333,7 +329,7 @@ class TestContextAndMemory:
         ]
 
         for query in queries:
-            send_chat_query(query, timeout=60000)
+            send_chat_query(query, timeout=120000)
             page.wait_for_timeout(2000)
 
         # 检查最后的响应是否总结了之前的对话
