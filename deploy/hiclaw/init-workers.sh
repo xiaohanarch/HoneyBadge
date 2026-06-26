@@ -122,12 +122,15 @@ if [ -f "$MANAGER_SOUL" ]; then
         BUILTIN="/root/manager-workspace/SOUL.md"
         CUSTOM="/tmp/hb-manager-soul.md"
         if [ -f "$BUILTIN" ] && grep -q "hiclaw-builtin-end" "$BUILTIN"; then
-            # Keep built-in section, append custom HoneyBadge content after it
-            sed -n "1,/hiclaw-builtin-end/p" "$BUILTIN" > /tmp/merged-soul.md
+            # Put custom HoneyBadge content FIRST, then built-in section.
+            # LLMs pay more attention to content at the beginning of the
+            # system prompt, so our routing protocol must come before the
+            # HiClaw built-in instructions.
+            cat "$CUSTOM" > /tmp/merged-soul.md
             echo "" >> /tmp/merged-soul.md
-            cat "$CUSTOM" >> /tmp/merged-soul.md
+            sed -n "1,/hiclaw-builtin-end/p" "$BUILTIN" >> /tmp/merged-soul.md
             cp /tmp/merged-soul.md "$BUILTIN"
-            echo "Manager SOUL.md: appended custom content after builtin section"
+            echo "Manager SOUL.md: prepended custom content before builtin section"
         else
             # No builtin marker — just use our custom SOUL.md
             cp "$CUSTOM" "$BUILTIN"
