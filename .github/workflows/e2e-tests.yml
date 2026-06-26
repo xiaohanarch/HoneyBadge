@@ -80,13 +80,14 @@ jobs:
           export JWT_SECRET="$(openssl rand -hex 32)"
           export HICLAW_MANAGER_PASSWORD="$(openssl rand -hex 16)"
           export HICLAW_MANAGER_GATEWAY_KEY="$(openssl rand -hex 16)"
-          # BigModel glm-5.2 — matches the upstream switch in docker-compose.yaml
-          # (LLM_UPSTREAM_HOST=open.bigmodel.cn, LLM_UPSTREAM_PATH_PREFIX=/api/paas/v4).
-          # The previous qwen3-coder-plus was DashScope-only; BigModel returns 400
-          # invalid_parameter_error for names outside its own model list.
-          # secrets.LLM_API_KEY must be a valid BigModel key or every LLM-dependent
-          # test fails with "Response: 助手" (worker never gets a completion).
-          export LLM_MODEL="glm-5.2"
+          # CI uses glm-4-flash (non-reasoning) instead of glm-5.2 (reasoning).
+          # glm-5.2 has ~40s/query reasoning_tokens overhead that causes
+          # Page.wait_for_function 120s timeouts on many E2E tests. glm-4-flash
+          # is a pure forward-pass model — an order of magnitude faster, keeping
+          # per-query latency well under the test timeout budget.
+          # Dev/prod still defaults to glm-5.2 via .env.example; this override
+          # only affects CI.
+          export LLM_MODEL="glm-4-flash"
           python3 <<'PY'
           import os, pathlib
           p = pathlib.Path('.env')
