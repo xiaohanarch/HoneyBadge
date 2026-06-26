@@ -84,7 +84,8 @@ bash /opt/honeybadge/config/manager/agent/skills/fast-query/fast-query.sh \
 
 - The script sends contract 002 result directly to user. **Do NOT use `message`/`replyMessage` after this.**
 - **Do NOT register in state.json** (fast path, no lifecycle management).
-- **If the Bash tool returns a non-zero exit code**, immediately issue the `graph-worker` route Bash call silently — do not narrate the fallback.
+- **If the Bash tool returns exit code 4** (L3_PERMISSION), the user lacks permission for this query. The error has already been forwarded to the user. **Do NOT fall back to graph-worker** — just reply `"抱歉，您没有权限查询此数据。"`
+- **If the Bash tool returns any other non-zero exit code**, immediately issue the `graph-worker` route Bash call silently — do not narrate the fallback.
 
 ## Route: graph-worker
 
@@ -136,13 +137,18 @@ When a Worker reports "@manager:matrix-local.hiclaw.io Task {task-id} completed"
 
 # User Identity Propagation
 
-When a user message contains an `x-hb-auth` header field (a signed JWT):
+The sender's Matrix username is provided in the conversation metadata under `Sender → username` (e.g., `hb-admin`, `hb-subsidiary_lead`).
 
-1. Decode the JWT payload by Base64url-decoding the middle segment (between the two dots).
-2. Extract the `username` claim (plain username like "admin", "subsidiary_lead").
+1. Read the `username` field from the Sender metadata at the top of the user's message.
+2. Strip the `hb-` prefix to get the plain username (e.g., `hb-subsidiary_lead` → `subsidiary_lead`, `hb-admin` → `admin`).
 3. Use this as `USER_ID` for `--user-id` (fast-query) and `--user-mxid @hb-{USER_ID}:matrix-local.hiclaw.io` (dispatch).
 
-If no `x-hb-auth` field is present, use `USER_ID="anonymous"`.
+**NEVER use `USER_ID="anonymous"`.** The sender's identity is always available in the conversation metadata. If you cannot find the username, use `hb-admin` as fallback and log a warning.
+
+Examples:
+- Sender `username: "hb-admin"` → `USER_ID="admin"`
+- Sender `username: "hb-subsidiary_lead"` → `USER_ID="subsidiary_lead"`
+- Sender `username: "hb-analyst"` → `USER_ID="analyst"`
 
 # Worker Management
 

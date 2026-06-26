@@ -76,7 +76,7 @@ class TestPermissions:
         has_data_indicator = any(kw in response_text for kw in ["条", "记录", "count", "COUNT", "共", "total"])
         assert has_data_indicator, f"Analyst should see PO data from org 1000. Response: {response_text[:200]}"
 
-    def test_tc402b_analyst_cannot_access_otc(self, analyst_logged_in, wait_for_chat_ready, send_chat_query):
+    def test_tc402b_analyst_cannot_access_otc(self, reset_manager, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-402b: Analyst blocked from OTC process (SalesOrder).
 
         This is the CORRECT test for TC-402 - analyst should NOT access SalesOrder.
@@ -131,7 +131,7 @@ class TestPermissions:
         # Note: This assumes UI properly hides write features for auditor role
         assert write_button_count == 0, f"Auditor should not see write buttons, found {write_button_count}"
 
-    def test_tc404_blocked_process_permission_error(self, analyst_logged_in, wait_for_chat_ready, send_chat_query):
+    def test_tc404_blocked_process_permission_error(self, reset_manager, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-404: Accessing blocked OTC process shows permission error.
 
         analyst allowed_processes=[PTP] only, OTC is blocked.
@@ -174,7 +174,7 @@ class TestPermissions:
         # This test verifies UI element presence/absence
         # Actual assertions depend on UI implementation
 
-    def test_tc406_permission_denied_error_display(self, analyst_logged_in, wait_for_chat_ready, send_chat_query):
+    def test_tc406_permission_denied_error_display(self, reset_manager, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-406: Permission denied shows appropriate error message.
 
         When analyst tries to access something outside allowed_processes,

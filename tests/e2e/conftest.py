@@ -49,6 +49,14 @@ def reset_manager_sessions():
         capture_output=True, timeout=10,
     )
 
+    # 2b. Clean stale task directories so the Manager LLM doesn't reuse
+    # old worker results instead of making a fresh query
+    subprocess.run(
+        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
+         "rm -rf /root/hiclaw-fs/shared/tasks/erp-* /root/hiclaw-fs/shared/tasks/fast-* 2>/dev/null"],
+        capture_output=True, timeout=10,
+    )
+
     # 3. Restart the Manager container
     subprocess.run(
         ["docker", "restart", MANAGER_CONTAINER],
