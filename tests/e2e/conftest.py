@@ -356,7 +356,7 @@ DEMO_USERS = {
     "analyst": {"username": "analyst", "password": "analyst123", "roles": ["analyst"], "org_id": 1000},
     "auditor": {"username": "auditor", "password": "auditor123", "roles": ["auditor"], "org_id": 1000},
     "procurement_lead": {"username": "procurement_lead", "password": "lead123", "roles": ["analyst"], "org_id": 1000},
-    "subsidiary_lead": {"username": "subsidiary_lead", "password": "lead123", "roles": ["analyst"], "org_id": 1021},
+    "subsidiary_lead": {"username": "subsidiary_lead", "password": "lead123", "roles": ["analyst"], "org_id": 1011},
 }
 
 

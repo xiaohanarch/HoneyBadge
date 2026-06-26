@@ -5,7 +5,7 @@ HoneyBadge - Enterprise Knowledge Graph Assistant
 Test Coverage:
 - TC-301: Admin sessions invisible to analyst
 - TC-302: Analyst sessions invisible to admin
-- TC-303: Cross-org data isolation (admin:ALL vs analyst:1000 vs subsidiary:1021)
+- TC-303: Cross-org data isolation (admin:ALL vs analyst:1000 vs subsidiary:1011)
 - TC-304: Subsidiary user cannot see parent org data
 - TC-305: Session data isolated by user
 - TC-306: Cache isolation between users
@@ -17,7 +17,7 @@ Data实际情况:
 - SalesOrder: org_id 1000-1039 各约170-230条
 - admin: org_ids=None, data_scope=ALL → sees ALL (~13000 PO)
 - analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (~320 PO)
-- subsidiary_lead: org_ids=[1021], data_scope=ORG → sees ONLY org 1021 (~337 PO)
+- subsidiary_lead: org_ids=[1011], data_scope=ORG → sees ONLY org 1011 (~337 PO)
 """
 import pytest
 from playwright.sync_api import expect
@@ -81,25 +81,21 @@ class TestUserIsolation:
 
         admin (org_ids=None) sees ALL data
         analyst (org_ids=[1000]) sees ONLY org 1000 data
-        subsidiary_lead (org_ids=[1021]) sees ONLY org 1021 data
+        subsidiary_lead (org_ids=[1011]) sees ONLY org 1011 data
 
         Key assertion: counts should differ significantly
         - admin sees ~13000 records (all 40 orgs)
         - analyst sees ~320 records (only org 1000)
-        - subsidiary sees ~337 records (only org 1021)
+        - subsidiary sees ~337 records (only org 1011)
         """
         # Admin query
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
         admin_count = self._extract_count(admin_text)
 
         # Analyst query (org_id=1000)
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
-        analyst_page.wait_for_timeout(2000)
-        analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        analyst_text = send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
         analyst_count = self._extract_count(analyst_text)
 
         # CORRECT ASSERTIONS
@@ -114,20 +110,18 @@ class TestUserIsolation:
     def test_tc304_subsidiary_cannot_see_parent_org(self, create_user_page):
         """TC-304: Subsidiary user cannot see parent org (other orgs) data.
 
-        subsidiary_lead org_ids=[1021] should ONLY see org 1021 data.
+        subsidiary_lead org_ids=[1011] should ONLY see org 1011 data.
         Should NOT see data from org 1000, 1001, etc.
         """
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
 
-        # Query采购订单 - should return ONLY org 1021's data
-        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        # Query采购订单 - should return ONLY org 1011's data
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
-        # subsidiary_lead with org_id=1021 should see ~337 records
+        # subsidiary_lead with org_id=1011 should see ~337 records
         assert 200 < subsidiary_count < 500, \
-            f"Subsidiary (org 1021) should see ~337 records. Got: {subsidiary_count}. " \
+            f"Subsidiary (org 1011) should see ~337 records. Got: {subsidiary_count}. " \
             f"Response: {subsidiary_text[:200]}"
 
         # Should NOT see all records (would be ~13000 if no org filtering)
@@ -194,28 +188,22 @@ class TestUserIsolation:
     def test_tc307_query_results_filtered_by_org_id(self, create_user_page):
         """TC-307: Query results respect org_id filtering.
 
-        analyst (org=1000) vs subsidiary (org=1021) should see DIFFERENT data.
+        analyst (org=1000) vs subsidiary (org=1011) should see DIFFERENT data.
         This is the KEY data isolation test.
         """
         # Admin query - baseline (all data)
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "统计采购订单数量", timeout=120000)
         admin_count = self._extract_count(admin_text)
 
         # Analyst query (org_id=1000)
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
-        analyst_page.wait_for_timeout(2000)
-        analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        analyst_text = send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
         analyst_count = self._extract_count(analyst_text)
 
-        # Subsidiary query (org_id=1021)
+        # Subsidiary query (org_id=1011)
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # CORRECT ASSERTIONS - Verify org_id filtering is working
@@ -228,7 +216,7 @@ class TestUserIsolation:
         assert admin_count > analyst_count * 10, \
             f"Admin ({admin_count}) should see >> analyst ({analyst_count})"
 
-        # 3. admin >> subsidiary (admin all orgs, subsidiary only org 1021)
+        # 3. admin >> subsidiary (admin all orgs, subsidiary only org 1011)
         assert admin_count > subsidiary_count * 10, \
             f"Admin ({admin_count}) should see >> subsidiary ({subsidiary_count})"
 
@@ -262,19 +250,15 @@ class TestUserIsolation:
         """
         # PO numbers by org (from test data analysis):
         # org 1000: PO00000001, PO00000002, etc.
-        # org 1021: PO00000002, PO00000004, etc. (different set)
+        # org 1011: PO00000002, PO00000004, etc. (different set)
 
         # Analyst (org=1000) queries for PO00000001
         analyst_page = create_user_page("analyst", "analyst123")
-        send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=120000)
-        analyst_page.wait_for_timeout(2000)
-        analyst_text = analyst_page.locator(MSG_ASSISTANT).last.inner_text() if analyst_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        analyst_text = send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=120000)
 
-        # Subsidiary (org=1021) queries for PO00000002
+        # Subsidiary (org=1011) queries for PO00000002
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询采购订单PO00000002", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询采购订单PO00000002", timeout=120000)
 
         # Verify both got responses (queries processed)
         assert len(analyst_text) > 0, "Analyst query should return response"
@@ -293,22 +277,18 @@ class TestUserIsolation:
 
         RBP+LLM核心场景:
         - admin查询"高风险采购订单" → 返回全公司所有org的高风险(多)
-        - subsidiary查询"高风险采购订单" → 只返回org1021的高风险(少)
+        - subsidiary查询"高风险采购订单" → 只返回org1011的高风险(少)
 
         断言: admin >> subsidiary (体现权限差距)
         """
         # admin查询
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "查询高风险的采购订单", timeout=120000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "查询高风险的采购订单", timeout=120000)
         admin_count = self._extract_count(admin_text)
 
         # subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询高风险的采购订单", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询高风险的采购订单", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # 断言: 体现权限差距
@@ -316,24 +296,20 @@ class TestUserIsolation:
         assert subsidiary_count > 0, f"Subsidiary应有数据. Response: {subsidiary_text[:200]}"
         assert admin_count > subsidiary_count * 10, \
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
-            f"权限差距: admin看全公司，subsidiary只看org1021。"
+            f"权限差距: admin看全公司，subsidiary只看org1011。"
 
     def test_tc311_large_amount_po_isolation(self, create_user_page):
         """TC-311: 大额采购订单数据量差异
 
         - admin: 全org大额PO
-        - subsidiary: org1021大额PO
+        - subsidiary: org1011大额PO
         """
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "查询金额超过100万的采购订单", timeout=120000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "查询金额超过100万的采购订单", timeout=120000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询金额超过100万的采购订单", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询金额超过100万的采购订单", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
@@ -348,15 +324,11 @@ class TestUserIsolation:
         admin权限大能看到更多异常，subsidiary权限小只能看本org异常
         """
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "查询异常的采购订单", timeout=120000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "查询异常的采购订单", timeout=120000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询异常的采购订单", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询异常的采购订单", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
@@ -371,15 +343,11 @@ class TestUserIsolation:
         体现: 大领导可发现跨多个org的供应商问题，小领导只能看到本org
         """
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "查询有问题的供应商", timeout=120000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "查询有问题的供应商", timeout=120000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询有问题的供应商", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询有问题的供应商", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
@@ -391,18 +359,14 @@ class TestUserIsolation:
     def test_tc314_payment_issues_isolation(self, create_user_page):
         """TC-314: 付款异常数据量差异
 
-        admin看到所有org的付款异常，subsidiary只看到org1021的
+        admin看到所有org的付款异常，subsidiary只看到org1011的
         """
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "查询付款异常的发票", timeout=120000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "查询付款异常的发票", timeout=120000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "查询付款异常的发票", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询付款异常的发票", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:200]}"
@@ -416,20 +380,16 @@ class TestUserIsolation:
 
         这是RBP+LLM的核心价值场景:
         - admin可以进行全公司范围的欺诈模式分析
-        - subsidiary只能在org1021范围内分析
+        - subsidiary只能在org1011范围内分析
 
         大领导能发现的欺诈模式远多于小领导
         """
         admin_page = create_user_page("admin", "admin123")
-        send_query_on_page(admin_page, "分析采购交易中的可疑模式", timeout=120000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "分析采购交易中的可疑模式", timeout=120000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        send_query_on_page(subsidiary_page, "分析采购交易中的可疑模式", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "分析采购交易中的可疑模式", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # 两者都应该有数据返回(都能进行分析)

@@ -16,7 +16,7 @@ Data实际情况:
 - PurchaseOrder: org_id 1000-1039 各约320-350条
 - SalesOrder: org_id 1000-1039 各约170-230条
 - analyst: org_ids=[1000], allowed_processes=[PTP]
-- subsidiary_lead: org_ids=[1021], allowed_processes=[PTP, OTC]
+- subsidiary_lead: org_ids=[1011], allowed_processes=[PTP, OTC]
 - admin: org_ids=None, data_scope=ALL
 """
 import re
@@ -233,9 +233,9 @@ class TestPermissions:
         """TC-408: Verify org_id filter is correctly applied to queries.
 
         Data实际情况:
-        - admin: org_ids=None, data_scope=ALL → sees ALL (~13000 PO across 40 orgs)
-        - analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (~320 PO)
-        - subsidiary_lead: org_ids=[1021], data_scope=ORG → sees ONLY org 1021 (~337 PO)
+        - admin: org_ids=None, data_scope=ALL → sees ALL (~4577 PO across 15 orgs)
+        - analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (~329 PO)
+        - subsidiary_lead: org_ids=[1011], data_scope=ORG → sees ONLY org 1011 (~280 PO)
 
         CORRECT assertion: admin看到的数据量 >> analyst看到的数据量
         """
@@ -257,7 +257,7 @@ class TestPermissions:
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
 
-        # Extract subsidiary PO count (subsidiary sees ONLY org 1021)
+        # Extract subsidiary PO count (subsidiary sees ONLY org 1011)
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
 
         # CORRECT ASSERTIONS
@@ -272,40 +272,40 @@ class TestPermissions:
             f"Admin ({admin_count}) should see way more data than analyst ({analyst_count}). " \
             f"Admin has ALL orgs, analyst has only org 1000."
 
-        # 3. admin sees MUCH MORE than subsidiary (admin: all, subsidiary: only org 1021)
+        # 3. admin sees MUCH MORE than subsidiary (admin: all, subsidiary: only org 1011)
         assert admin_count > subsidiary_count * 10, \
             f"Admin ({admin_count}) should see way more data than subsidiary ({subsidiary_count}). " \
-            f"Admin has ALL orgs, subsidiary has only org 1021."
+            f"Admin has ALL orgs, subsidiary has only org 1011."
 
         # 4. analyst and subsidiary should see similar amounts (~300-350 each)
         # Both are limited to single org, data_scope=ORG
         assert 200 < analyst_count < 500, \
             f"Analyst should see ~320 records from org 1000. Got: {analyst_count}"
         assert 200 < subsidiary_count < 500, \
-            f"Subsidiary should see ~337 records from org 1021. Got: {subsidiary_count}"
+            f"Subsidiary should see ~280 records from org 1011. Got: {subsidiary_count}"
 
     def test_tc408b_analyst_vs_subsidiary_data_different(self, reset_manager, create_user_page):
         """TC-408b: Verify analyst and subsidiary see DIFFERENT org data.
 
-        Critical isolation test: analyst(org=1000) vs subsidiary(org=1021)
+        Critical isolation test: analyst(org=1000) vs subsidiary(org=1011)
         They should NOT see each other's data.
         """
         # Analyst (org_id=1000) query
         analyst_page = create_user_page("analyst", "analyst123")
         analyst_text = send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=120000)
 
-        # Subsidiary (org_id=1021) query same PO
+        # Subsidiary (org_id=1011) query same PO
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         subsidiary_text = send_query_on_page(subsidiary_page, "查询采购订单PO00000001", timeout=120000)
 
-        # PO00000001 belongs to org 1000 (not 1021)
-        # analyst(org=1000) should see it, subsidiary(org=1021) should NOT
+        # PO00000001 belongs to org 1000 (not 1011)
+        # analyst(org=1000) should see it, subsidiary(org=1011) should NOT
 
         # Verify data isolation
         analyst_sees_po1 = "PO00000001" in analyst_text or "采购订单" in analyst_text
         subsidiary_sees_po1 = "PO00000001" in subsidiary_text or "采购订单" in subsidiary_text
 
-        # analyst (org 1000) owns PO00000001, subsidiary (org 1021) does not
+        # analyst (org 1000) owns PO00000001, subsidiary (org 1011) does not
         # This is context-dependent - the exact PO numbers may vary by org
         # Key assertion: they should see DIFFERENT data subsets
 
@@ -319,7 +319,7 @@ class TestPermissions:
 
         数据基础:
         - admin: org_ids=None, data_scope=ALL → 看到全部(~13000)
-        - subsidiary_lead: org_ids=[1021], data_scope=ORG → 只看到org1021(~337)
+        - subsidiary_lead: org_ids=[1011], data_scope=ORG → 只看到org1011(~337)
 
         预期: admin返回数量 >> subsidiary返回数量
         """
@@ -337,10 +337,10 @@ class TestPermissions:
         assert admin_count > 0, f"Admin应看到采购数据. Response: {admin_text[:200]}"
         assert subsidiary_count > 0, f"Subsidiary应看到本org数据. Response: {subsidiary_text[:200]}"
 
-        # admin看全部org，subsidiary只看org1021
+        # admin看全部org，subsidiary只看org1011
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
-            f"admin有全部org权限，subsidiary只有org1021权限。"
+            f"admin有全部org权限，subsidiary只有org1011权限。"
 
     def test_tc410_large_amount_po_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-410: 采购订单org过滤验证 - admin看全量，analyst只能看本org
@@ -392,7 +392,7 @@ class TestPermissions:
         # 验证org权限过滤生效
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
-            f"admin看全公司，subsidiary只看org1021。"
+            f"admin看全公司，subsidiary只看org1011。"
 
     def test_tc412_recent_po_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-412: 采购订单org过滤独立验证 - admin vs analyst再次确认
@@ -439,7 +439,7 @@ class TestPermissions:
 
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count})应>subsidiary({subsidiary_count})。" \
-            f"admin无org限制，subsidiary只有org1021。"
+            f"admin无org限制，subsidiary只有org1011。"
 
     def test_tc414_supplier_qualifications_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-414: 采购订单org过滤并发验证 - admin vs analyst

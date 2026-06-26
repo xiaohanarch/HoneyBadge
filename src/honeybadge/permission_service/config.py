@@ -42,7 +42,7 @@ PERMISSION_CONFIG: dict[str, PermissionContext] = {
     "subsidiary_lead": PermissionContext(
         user_id="subsidiary_lead",
         allowed_processes=["PTP", "OTC"],
-        org_ids=[1021],
+        org_ids=[1011],
         dept_ids=None,
         data_scope="ORG",
     ),

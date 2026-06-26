@@ -174,16 +174,12 @@ class TestContextAndMemory:
         # Admin 创建会话
         admin_page = create_user_page("admin", "admin123")
         wait_for_chat_ready(admin_page)
-        send_query_on_page(admin_page, "这是admin的会话，查询所有采购订单", timeout=120000)
-        admin_page.wait_for_timeout(2000)
-        admin_text = admin_page.locator(MSG_ASSISTANT).last.inner_text() if admin_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        admin_text = send_query_on_page(admin_page, "这是admin的会话，查询所有采购订单", timeout=120000)
 
         # Subsidiary 创建会话
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         wait_for_chat_ready(subsidiary_page)
-        send_query_on_page(subsidiary_page, "这是subsidiary的会话，只看本公司的订单", timeout=120000)
-        subsidiary_page.wait_for_timeout(2000)
-        subsidiary_text = subsidiary_page.locator(MSG_ASSISTANT).last.inner_text() if subsidiary_page.locator(MSG_ASSISTANT).count() > 0 else ""
+        subsidiary_text = send_query_on_page(subsidiary_page, "这是subsidiary的会话，只看本公司的订单", timeout=120000)
 
         # 断言: 两个用户的上下文完全独立，不应交叉
         assert "admin" not in subsidiary_text.lower() or len(subsidiary_text) == 0, \
@@ -295,12 +291,12 @@ class TestContextAndMemory:
         """TC-1009: One subsidiary cannot see another subsidiary's history.
 
         假设有多个子公司用户，各自的数据完全隔离。
-        当前只有 subsidiary_lead(org=1021)，验证其看不到其他 org 的数据。
+        当前只有 subsidiary_lead(org=1011)，验证其看不到其他 org 的数据。
         """
         # subsidiary_lead 创建会话
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         wait_for_chat_ready(subsidiary_page)
-        send_query_on_page(subsidiary_page, "这是ORG1021的数据，别的子公司看不到", timeout=120000)
+        send_query_on_page(subsidiary_page, "这是ORG1011的数据，别的子公司看不到", timeout=120000)
         subsidiary_page.wait_for_timeout(2000)
 
         # 用 analyst(org=1000) 登录 (独立浏览器上下文, 天然隔离)
@@ -310,8 +306,8 @@ class TestContextAndMemory:
         # analyst 应该看不到 subsidiary_lead 的会话
         all_text = analyst_page.locator('body').inner_text()
 
-        # 断言: analyst(org=1000) 绝对不应该看到 subsidiary(org=1021) 的数据
-        assert "ORG1021" not in all_text, \
+        # 断言: analyst(org=1000) 绝对不应该看到 subsidiary(org=1011) 的数据
+        assert "ORG1011" not in all_text, \
             "CRITICAL: Analyst should NEVER see subsidiary's org data"
         assert "别的子公司" not in all_text, \
             "CRITICAL: Cross-subsidiary data isolation violated"
