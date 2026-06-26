@@ -203,12 +203,17 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
 
                 // 1: structured worker contract-002 (cypher/data collapse)
                 //    Gated by min_wait_ms AND trace_id timestamp check.
+                //    Structured worker replies ALWAYS carry a trace_id (from the
+                //    MCP pipeline).  Messages with data/cypher-collapse but NO
+                //    trace_id are stale backfill from older test runs — skip them.
                 if (elapsed >= {min_wait_ms}) {{
                     for (let i = {existing_count}; i < msgs.length; i++) {{
                         const m = msgs[i];
                         if (m.querySelector('.data-collapse .el-collapse-item__header') ||
                             m.querySelector('.cypher-collapse .el-collapse-item__header')) {{
-                            if (isStale(m)) continue;  // stale backfill — keep waiting
+                            var ts1 = parseTraceTs(m);
+                            if (ts1 < 0) continue;  // no trace_id — stale backfill
+                            if (querySendTs && ts1 < querySendTs) continue;  // stale trace_id
                             window.__hbSettleReason = 'cond1_structured idx=' + i + ' total=' + msgs.length + ' existing=' + {existing_count};
                             return true;
                         }}
@@ -296,8 +301,15 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 120000,
     page_obj.wait_for_timeout(200)
 
 
-def send_query_on_page(page_obj, query: str, timeout: int = 120000):
-    """Send a chat query on any page object (standalone helper, not fixture-bound)."""
+def send_query_on_page(page_obj, query: str, timeout: int = 120000) -> str:
+    """Send a chat query on any page object (standalone helper, not fixture-bound).
+
+    Returns the response text — preferring the last structured worker reply
+    (data-collapse / cypher-collapse header with a fresh trace_id) over the
+    Manager's dispatch ack.  With the fast-query.sh flow, the Worker's
+    contract-002 arrives BEFORE the Manager's dispatch ack, so
+    ``messages.last`` would get the dispatch ack text instead of the data.
+    """
     _wait_for_textarea_enabled(page_obj, timeout=timeout)
     textarea = page_obj.locator(CHAT_TEXTAREA).first
     existing_count = _wait_for_msg_count_stable(page_obj)
@@ -306,6 +318,31 @@ def send_query_on_page(page_obj, query: str, timeout: int = 120000):
     textarea.press("Enter")
     _wait_for_new_response(page_obj, existing_count, timeout=timeout,
                            query_send_ts=query_send_ts)
+
+    # Scan NEW messages (from existing_count onward) for the last structured
+    # worker reply with a fresh trace_id.  Fall back to the last message.
+    all_msgs = page_obj.locator(MSG_ASSISTANT)
+    total = all_msgs.count()
+    best_text = ""
+    for i in range(existing_count, total):
+        candidate = all_msgs.nth(i)
+        if candidate.locator(DATA_COLLAPSE_HEADER).count() > 0 \
+           or candidate.locator(CYPHER_COLLAPSE_HEADER).count() > 0:
+            trace_link = candidate.locator(TRACE_ID_LINK)
+            if trace_link.count() == 0:
+                continue
+            trace_text = trace_link.first.inner_text()
+            trace_match = re.search(
+                r'TRC-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})', trace_text)
+            if trace_match:
+                y, mo, d, h, mi, s = (int(x) for x in trace_match.groups())
+                trace_ts = int(datetime.datetime(y, mo, d, h, mi, s).timestamp() * 1000)
+                if trace_ts < query_send_ts:
+                    continue  # stale backfill
+            best_text = candidate.inner_text()
+    if not best_text and total > 0:
+        best_text = all_msgs.last.inner_text()
+    return best_text
 
 
 # Configuration
@@ -576,16 +613,18 @@ def send_query_and_get_response(page: Page):
             candidate = all_msgs.nth(i)
             if candidate.locator(DATA_COLLAPSE_HEADER).count() > 0 \
                or candidate.locator(CYPHER_COLLAPSE_HEADER).count() > 0:
-                # Skip stale messages whose trace_id timestamp predates the query
+                # Structured worker replies always carry a trace_id from the MCP
+                # pipeline.  No trace_id → stale backfill from older runs — skip.
                 trace_link = candidate.locator(TRACE_ID_LINK)
-                if trace_link.count() > 0:
-                    trace_text = trace_link.first.inner_text()
-                    trace_match = re.search(r'TRC-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})', trace_text)
-                    if trace_match:
-                        y, mo, d, h, mi, s = (int(x) for x in trace_match.groups())
-                        trace_ts = int(datetime.datetime(y, mo, d, h, mi, s).timestamp() * 1000)
-                        if trace_ts < query_send_ts:
-                            continue  # Stale backfilled message — keep scanning
+                if trace_link.count() == 0:
+                    continue
+                trace_text = trace_link.first.inner_text()
+                trace_match = re.search(r'TRC-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})', trace_text)
+                if trace_match:
+                    y, mo, d, h, mi, s = (int(x) for x in trace_match.groups())
+                    trace_ts = int(datetime.datetime(y, mo, d, h, mi, s).timestamp() * 1000)
+                    if trace_ts < query_send_ts:
+                        continue  # Stale backfilled message — keep scanning
                 data_msg = candidate
                 break
         if data_msg is None:

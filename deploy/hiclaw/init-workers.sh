@@ -45,10 +45,11 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-# Use LLM_MODEL from .env if MANAGER_LLM_MODEL is not explicitly set.
-# This ensures CI's LLM_MODEL=glm-4-flash override actually takes effect —
-# without this, the script defaults to glm-5.2 and reverts the CI override.
-MANAGER_LLM_MODEL="${MANAGER_LLM_MODEL:-${LLM_MODEL:-glm-5.2}}"
+# Manager + Workers MUST use a tool-calling-capable model (glm-5.2).
+# glm-4-flash cannot call skills (fast-query.sh) properly.
+# Do NOT fall back to LLM_MODEL here — LLM_MODEL may be glm-4-flash (for
+# MCP servers' nGQL generation only), which would break the Manager.
+MANAGER_LLM_MODEL="${MANAGER_LLM_MODEL:-glm-5.2}"
 
 MANAGER_CONTAINER="${MANAGER_CONTAINER:-honeybadge-hiclaw-manager}"
 # v1.1.0 split: MinIO/Higress/Tuwunel now run in hiclaw-embedded.
