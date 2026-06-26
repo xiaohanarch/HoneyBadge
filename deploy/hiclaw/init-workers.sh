@@ -45,6 +45,11 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
+# Use LLM_MODEL from .env if MANAGER_LLM_MODEL is not explicitly set.
+# This ensures CI's LLM_MODEL=glm-4-flash override actually takes effect —
+# without this, the script defaults to glm-5.2 and reverts the CI override.
+MANAGER_LLM_MODEL="${MANAGER_LLM_MODEL:-${LLM_MODEL:-glm-5.2}}"
+
 MANAGER_CONTAINER="${MANAGER_CONTAINER:-honeybadge-hiclaw-manager}"
 # v1.1.0 split: MinIO/Higress/Tuwunel now run in hiclaw-embedded.
 # mc operations and Higress health checks target EMBEDDED_CONTAINER;
@@ -578,6 +583,8 @@ MANAGER_MCPORTER_JSON='{
 # Write into the Manager container at both the active path
 # (/root/config/mcporter.json — what fast-query.sh reads via default
 # MCPORTER_CONFIG) and the workspace path (/root/manager-workspace/config/).
+# Ensure /root/config/ exists — v1.1.2 may not create it by default.
+docker exec "$MANAGER_CONTAINER" mkdir -p /root/config
 printf '%s\n' "$MANAGER_MCPORTER_JSON" > "$TMP_DIR/hb-manager-mcporter.json"
 docker cp "$TMP_DIR/hb-manager-mcporter.json" \
     "$MANAGER_CONTAINER:/root/config/mcporter.json" \
