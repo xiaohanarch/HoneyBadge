@@ -212,7 +212,7 @@ run_tests() {
   export AUTH_BASE_URL="${AUTH_BASE_URL:-http://localhost:8091}"
 
   # Build pytest command
-  PYTEST_CMD="pytest tests/e2e/ -v --tb=short --timeout=120 -x"
+  PYTEST_CMD="pytest tests/e2e/ -v --tb=short --timeout=300 -x"
 
   # Add test filter if specified
   if [ -n "$FILTER" ]; then

@@ -5,6 +5,8 @@ HoneyBadge - Enterprise Knowledge Graph Assistant
 import json
 import os
 import re
+import subprocess
+import time
 import pytest
 from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
 from tests.e2e.selectors import (
@@ -14,6 +16,63 @@ from tests.e2e.selectors import (
     DATA_COLLAPSE_HEADER, DATA_ROWS, DATA_TABLE,
     NEW_CHAT_BUTTON, SESSION_ITEM, INPUT_CONTAINER,
 )
+
+MANAGER_CONTAINER = "honeybadge-hiclaw-manager"
+SESSION_DIR = "/root/manager-workspace/.openclaw/agents/main/sessions"
+
+
+def reset_manager_sessions():
+    """Clear all Manager OpenClaw sessions and restart the container.
+
+    The Manager LLM (glm-5.2) enters repetition loops after 5-10 queries in
+    the same session.  E2E permission tests send 20+ queries to the same DM
+    rooms, accumulating context that triggers the loop.  This function:
+      1. Deletes all session transcript files (*.jsonl)
+      2. Resets sessions.json to an empty store
+      3. Restarts the Manager container so in-memory session caches are freed
+      4. Waits for the OpenClaw process to come back up
+
+    Call this between tests that would otherwise inherit a bloated session.
+    """
+    # 1. Delete session transcript files
+    subprocess.run(
+        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
+         f"rm -f {SESSION_DIR}/*.jsonl"],
+        capture_output=True, timeout=10,
+    )
+
+    # 2. Reset sessions.json to empty
+    subprocess.run(
+        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
+         f'echo "{{}}" > {SESSION_DIR}/sessions.json'],
+        capture_output=True, timeout=10,
+    )
+
+    # 3. Restart the Manager container
+    subprocess.run(
+        ["docker", "restart", MANAGER_CONTAINER],
+        capture_output=True, timeout=30,
+    )
+
+    # 4. Wait for the OpenClaw process to be running
+    for _ in range(30):
+        result = subprocess.run(
+            ["docker", "exec", MANAGER_CONTAINER, "pgrep", "-f", "openclaw"],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode == 0:
+            break
+        time.sleep(1)
+    else:
+        print("[reset_manager_sessions] WARNING: Manager process not detected after 30s")
+
+    # 5. Wait for the Matrix client to connect to the homeserver.
+    #    The Manager takes ~22s after restart to join rooms and connect to
+    #    the gateway.  Without this wait, the first query after restart may
+    #    time out because the Matrix message isn't delivered.
+    #    We use a fixed wait because docker logs --tail=N only shows the last
+    #    N lines, which may not include the startup "connected to gateway" msg.
+    time.sleep(25)
 
 
 def _wait_for_textarea_enabled(page_obj, timeout=60000):
@@ -381,6 +440,22 @@ def wait_for_chat_ready(page: Page):
     def _wait():
         _wait_for_textarea_enabled(page, timeout=15000)
     return _wait
+
+
+@pytest.fixture
+def reset_manager():
+    """Reset Manager OpenClaw sessions before the test.
+
+    Clears all session transcript files and restarts the Manager container
+    so the LLM starts with a clean context.  Use this fixture in permission
+    tests that send many queries to the same DM room — glm-5.2 enters
+    repetition loops after 5-10 accumulated turns.
+
+    Usage: add ``reset_manager`` as a parameter to the test method.
+    The fixture runs before the test body (and before page/admin_logged_in
+    fixtures that depend on it).
+    """
+    reset_manager_sessions()
 
 
 @pytest.fixture
