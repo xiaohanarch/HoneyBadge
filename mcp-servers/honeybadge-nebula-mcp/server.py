@@ -350,6 +350,8 @@ async def generate_ngql_impl(
     # Fix ORDER BY property paths → column aliases (NebulaGraph requirement)
     ngql = _fix_order_by_property_paths(ngql)
 
+    logger.info("ngql_generated", trace_id=trace_id, ngql=ngql[:500])
+
     return {
         "ngql": ngql,
         "trace_id": trace_id,
@@ -433,8 +435,10 @@ async def validate_and_execute_impl(
         perm_warnings = []
 
     # --- Execute --------------------------------------------------------
+    logger.info("ngql_executing", trace_id=trace_id, ngql=ngql[:500])
     result: NebulaQueryResult = await nebula.execute(ngql, space=target_space)
     if not result.success:
+        logger.warning("ngql_execution_failed", trace_id=trace_id, error=result.error_message, ngql=ngql[:500])
         return {
             "success": False,
             "error": "EXECUTION_ERROR",
@@ -442,6 +446,7 @@ async def validate_and_execute_impl(
             "trace_id": trace_id,
         }
 
+    logger.info("ngql_execution_ok", trace_id=trace_id, row_count=result.row_count, columns=result.columns)
     return {
         "success": True,
         "columns": result.columns,
