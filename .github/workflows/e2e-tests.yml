@@ -80,13 +80,11 @@ jobs:
           export JWT_SECRET="$(openssl rand -hex 32)"
           export HICLAW_MANAGER_PASSWORD="$(openssl rand -hex 16)"
           export HICLAW_MANAGER_GATEWAY_KEY="$(openssl rand -hex 16)"
-          # CI uses glm-4-flash (non-reasoning) instead of glm-5.2 (reasoning).
-          # glm-5.2 has ~40s/query reasoning_tokens overhead that causes
-          # Page.wait_for_function 120s timeouts on many E2E tests. glm-4-flash
-          # is a pure forward-pass model — an order of magnitude faster, keeping
-          # per-query latency well under the test timeout budget.
-          # Dev/prod still defaults to glm-5.2 via .env.example; this override
-          # only affects CI.
+          # CI uses glm-4-flash for MCP servers (nGQL generation only).
+          # Manager + Workers use glm-5.2 (set by init-workers.sh via
+          # MANAGER_LLM_MODEL) — tool-calling requires a reasoning model.
+          # glm-4-flash is an order of magnitude faster, keeping per-query
+          # MCP latency well under the test timeout budget.
           export LLM_MODEL="glm-4-flash"
           python3 <<'PY'
           import os, pathlib
