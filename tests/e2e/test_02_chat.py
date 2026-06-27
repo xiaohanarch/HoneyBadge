@@ -50,7 +50,7 @@ class TestChatFunctionality:
         expect(page.locator(MESSAGES_CONTAINER)).to_be_visible()
         expect(page.locator(CHAT_TEXTAREA)).to_be_visible()
 
-    def test_tc102_send_query_receives_response_with_trace(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+    def test_tc102_send_query_receives_response_with_trace(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-102: Query returns response with meaningful text and trace ID."""
         page = admin_logged_in
         wait_for_chat_ready()
@@ -103,7 +103,7 @@ class TestChatFunctionality:
         page.wait_for_selector(MSG_ASSISTANT, timeout=120000)
         expect(page.locator(MSG_ASSISTANT).last).to_be_visible()
 
-    def test_tc105_query_results_table(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+    def test_tc105_query_results_table(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-105: Query results displayed in data table with actual rows."""
         page = admin_logged_in
         wait_for_chat_ready()
@@ -182,7 +182,7 @@ class TestChatFunctionality:
             "playwright async API. Tracked in docs/1.1.0-upgrade-followups.md Bucket 4."
         ),
     )
-    def test_tc110_multiple_queries_with_traces(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+    def test_tc110_multiple_queries_with_traces(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-110: Multiple queries each produce responses with unique trace IDs."""
         page = admin_logged_in
         wait_for_chat_ready()
