@@ -383,7 +383,8 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 120000,
     page_obj.wait_for_timeout(200)
 
 
-def send_query_on_page(page_obj, query: str, timeout: int = 120000) -> str:
+def send_query_on_page(page_obj, query: str, timeout: int = 120000,
+                       settle_timeout_ms: int = 240000) -> str:
     """Send a chat query on any page object (standalone helper, not fixture-bound).
 
     Returns the response text — preferring the last structured worker reply
@@ -391,6 +392,11 @@ def send_query_on_page(page_obj, query: str, timeout: int = 120000) -> str:
     Manager's dispatch ack.  With the fast-query.sh flow, the Worker's
     contract-002 arrives BEFORE the Manager's dispatch ack, so
     ``messages.last`` would get the dispatch ack text instead of the data.
+
+    ``settle_timeout_ms`` controls the Stage-2 settle window (default 240s).
+    Pass a longer value (e.g. 360000) for queries that trigger multi-dimensional
+    analytics-worker analysis — the LLM may run 3+ generate+execute MCP cycles
+    at ~45s each before writing result.json.
     """
     _wait_for_textarea_enabled(page_obj, timeout=timeout)
     textarea = page_obj.locator(CHAT_TEXTAREA).first
@@ -399,6 +405,7 @@ def send_query_on_page(page_obj, query: str, timeout: int = 120000) -> str:
     textarea.fill(query)
     textarea.press("Enter")
     _wait_for_new_response(page_obj, existing_count, timeout=timeout,
+                           settle_timeout_ms=settle_timeout_ms,
                            query_send_ts=query_send_ts)
 
     # Post-settle re-scan: if multiple new messages arrived (likely Matrix
