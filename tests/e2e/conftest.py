@@ -319,16 +319,24 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 120000,
     # to the new query.  With glm-5.2 at ~30-60s per LLM step, total time from
     # query to first response can be 2-3 minutes.
     stage1_timeout = max(timeout, 240000)
-    page_obj.wait_for_function(
-        f"""() => {{
-            const msgs = document.querySelectorAll('.chat-message.message-assistant');
-            if (msgs.length <= {existing_count}) return false;
-            const last = msgs[msgs.length - 1];
-            const body = last.querySelector('.message-body') || last;
-            return body && body.textContent.trim().length > 10;
-        }}""",
-        timeout=stage1_timeout,
-    )
+    for _attempt in range(2):
+        try:
+            page_obj.wait_for_function(
+                f"""() => {{
+                    const msgs = document.querySelectorAll('.chat-message.message-assistant');
+                    if (msgs.length <= {existing_count}) return false;
+                    const last = msgs[msgs.length - 1];
+                    const body = last.querySelector('.message-body') || last;
+                    return body && body.textContent.trim().length > 10;
+                }}""",
+                timeout=stage1_timeout,
+            )
+            break
+        except Exception as e:
+            if "Execution context was destroyed" not in str(e) or _attempt == 1:
+                raise
+            print(f"[STAGE1] navigation destroyed context, retrying: {str(e)[:120]}]")
+            page_obj.wait_for_timeout(500)  # brief pause for navigation to settle
     if settle_timeout_ms > 0:
         _wait_for_response_settled(page_obj, existing_count, timeout_ms=settle_timeout_ms,
                                    min_wait_ms=min_wait_ms,
@@ -417,6 +425,28 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "routing: worker routing tests")
 
 
+def _setup_matrix_route(page_obj):
+    """Patch Matrix homeserver URL so the browser uses the SSH tunnel
+    (localhost:7167) instead of the blocked external NodePort 30167."""
+    matrix_local = os.getenv("MATRIX_HOMESERVER_LOCAL", "http://localhost:7167")
+
+    def _patch_login(route):
+        response = route.fetch()
+        try:
+            body = response.json()
+            if "matrix_homeserver" in body:
+                body["matrix_homeserver"] = matrix_local
+            route.fulfill(
+                status=response.status,
+                content_type="application/json",
+                body=json.dumps(body),
+            )
+        except Exception:
+            route.fulfill(response=response)
+
+    page_obj.route("**/login", _patch_login)
+
+
 @pytest.fixture(scope="session")
 def browser():
     """Launch browser for entire test session."""
@@ -443,23 +473,7 @@ def page(browser: Browser):
 
     # Patch Matrix homeserver URL so the local Playwright browser uses the SSH tunnel
     # (port 7167 forwarded locally) instead of the blocked external NodePort 30167.
-    matrix_local = os.getenv("MATRIX_HOMESERVER_LOCAL", "http://localhost:7167")
-
-    def _patch_login(route):
-        response = route.fetch()
-        try:
-            body = response.json()
-            if "matrix_homeserver" in body:
-                body["matrix_homeserver"] = matrix_local
-            route.fulfill(
-                status=response.status,
-                content_type="application/json",
-                body=json.dumps(body),
-            )
-        except Exception:
-            route.fulfill(response=response)
-
-    page.route("**/login", _patch_login)
+    _setup_matrix_route(page)
 
     # Debug: log requests to matrix/7167 to verify connectivity
     page.on("request", lambda req: print(f"[NET] {req.method} {req.url[:80]}") if any(x in req.url for x in ["7167", "30167", "matrix", "_matrix"]) else None)
@@ -602,6 +616,12 @@ def create_user_page(browser: Browser):
         )
         p = context.new_page()
         p.set_default_timeout(30000)
+        # Patch Matrix homeserver URL — same as the `page` fixture. Without
+        # this, the login response returns the external NodePort 30167 URL,
+        # the Matrix SDK tries to connect to the unreachable host, and the
+        # resulting reconnection attempts cause navigation/reload during
+        # long wait_for_function polls ("Execution context was destroyed").
+        _setup_matrix_route(p)
         p.goto(f"{BASE_URL}/login")
         p.wait_for_selector(LOGIN_BUTTON, timeout=15000)
         p.fill(LOGIN_USERNAME, username)
