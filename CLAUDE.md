@@ -158,8 +158,8 @@ The hook (`.githooks/pre-commit`) blocks CRLF in `*.sh|bash|ngql|cypher|py|yaml|
 - Workers reach the gateway via Docker network alias `aigw-local.hiclaw.io:8080` (NOT `hiclaw-manager:8080`, which Envoy blackholes)
 - Worker `openclaw.json` `baseUrl` MUST end in `/v1` (OpenAI SDK appends `/chat/completions` directly)
 - Use `HICLAW_LLM_PROVIDER=openai-compat` (idempotent). The built-in `qwen` provider hardcodes `dashscope.aliyuncs.com` and overwrites manual YAML on every restart.
-- `HICLAW_AI_GATEWAY_SERVER` (v1.0.8+ name; was `HICLAW_AI_GATEWAY_DOMAIN`) must be set, or `manager-openclaw.json.tmpl` generates `baseUrl: http://:8080/v1` (empty host)
-- Container recreation resets Manager's DM allowlist to `[@admin]` — re-run `init-workers.sh` to repatch + sync to MinIO
+- `HICLAW_AI_GATEWAY_DOMAIN` (v1.1.0+ name; old v1.0.8 name `HICLAW_AI_GATEWAY_SERVER` removed) must be set, or `manager-openclaw.json.tmpl` generates `baseUrl: http://:8080/v1` (empty host). K8s manifests also need `HICLAW_AI_GATEWAY_URL` (full URL incl. scheme+port) for CRD validation.
+- HiClaw v1.1.2 disabled `observe-recovery` — container recreation **no longer resets** Manager's DM allowlist to `[@admin]`. `init-workers.sh` still patches it on boot as a safety measure, but it is no longer required after every recreation.
 
 ## Language
 

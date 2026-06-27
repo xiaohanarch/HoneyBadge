@@ -105,15 +105,15 @@ LLM_MODEL_NAME=glm-4-flash
 
 ---
 
-## HiClaw v1.1.0 dev topology
+## HiClaw v1.1.2 dev topology
 
 The HiClaw stack was split in v1.1.0 from a single all-in-one container into
-two services:
+two services (image tags now at v1.1.2):
 
 | Service | Image | Role |
 |---|---|---|
-| `hiclaw-embedded` | `hiclaw-embedded:v1.1.0` | Tuwunel (Matrix `:6167`) + MinIO (`:9000/:9001`) + Higress (`:18080`) + Element Web (`:18888`) |
-| `hiclaw-manager` | slim `hiclaw-manager:v1.1.0` | OpenClaw agent only. Reads SOUL/AGENTS/skills out of MinIO, talks to Matrix and the AI gateway over the compose network. |
+| `hiclaw-embedded` | `hiclaw-embedded:v1.1.2` | Tuwunel (Matrix `:6167`) + MinIO (`:9000/:9001`) + Higress (`:18080`) + Element Web (`:18888`) |
+| `hiclaw-manager` | slim `hiclaw-manager:v1.1.2` | OpenClaw agent only. Reads SOUL/AGENTS/skills out of MinIO, talks to Matrix and the AI gateway over the compose network. |
 
 The two worker services (`hiclaw-graph-worker`, `hiclaw-analytics-worker`) are
 unchanged — they register themselves through Matrix during `manager-init-internal.sh`

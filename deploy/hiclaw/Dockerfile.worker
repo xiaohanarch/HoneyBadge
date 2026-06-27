@@ -1,6 +1,6 @@
 # deploy/hiclaw/Dockerfile.worker
-# Built on hiclaw-worker v1.1.0
-# HiClaw Worker (OpenClaw) container — applies to HiClaw v1.1.0
+# Built on hiclaw-worker v1.1.2
+# HiClaw Worker (OpenClaw) container — applies to HiClaw v1.1.2
 #
 # UPGRADE CHECKLIST (see docs/patches/hiclaw-interface-contract-v1.md):
 #   1. Verify Worker SKILL.md directory structure and instruction syntax

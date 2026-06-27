@@ -1,9 +1,9 @@
 # =============================================================================
-# HiClaw v1.1.0 — split topology (mirrors deploy/docker/docker-compose.yaml)
+# HiClaw v1.1.2 — split topology (introduced in v1.1.0; mirrors deploy/docker/docker-compose.yaml)
 #
-# v1.1.0 ships TWO container images:
-#   hiclaw-embedded:v1.1.0  — infra: Tuwunel Matrix + MinIO + Higress + Element
-#   hiclaw-manager:v1.1.0   — slim Manager Agent (supervisord removed)
+# v1.1.2 ships TWO container images:
+#   hiclaw-embedded:v1.1.2  — infra: Tuwunel Matrix + MinIO + Higress + Element
+#   hiclaw-manager:v1.1.2   — slim Manager Agent (supervisord removed)
 #
 # The legacy v1.0.9 all-in-one Pod is therefore split into two Deployments:
 #   hiclaw-embedded         — provides matrix/gateway/minio/element ports

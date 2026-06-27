@@ -4,9 +4,9 @@
 
 基于 ERP 系统（Oracle EBS / 定制 ERP）构建的自然语言问答系统，支持采购/供应链数据查询、欺诈检测和三单匹配异常检测。
 
-> 文档版本：v3.3 · 最后更新：2026-04-23
+> 文档版本：v3.4 · 最后更新：2026-06-27
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/xiaohanarch/HoneyBadge)
+[![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/xiaohanarch/HoneyBadge)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 
@@ -129,13 +129,15 @@
 |------|------|------|
 | NebulaGraph Schema | ✅ | 34 Tags, 38 Edges + 测试数据 57 实体类型 |
 | HiClaw Manager-Worker | ✅ | Matrix 协议通信，Manager + graph-worker + analytics-worker |
-| 五层防幻觉框架 | ✅ | L1-L3 已实现 |
+| HiClaw v1.1.2 升级 | ✅ | v1.1.0 → v1.1.2，6 个死代码 workaround 已删，observe-recovery 禁用 |
+| 五层防幻觉框架 | ✅ | L1-L3 已实现，L3 权限通过 route-and-execute.sh 强制执行 |
 | honeybadge-auth 服务 | ✅ | 每用户 Matrix 账号 + JWT |
 | matrix-js-sdk 前端 | ✅ | 浏览器直连 Tuwunel |
 | MCP 工具服务 | ✅ | nebula/audit/cache MCP |
 | 欺诈检测测试数据 | ✅ | 12 种异常模式（PTP + OTC + 跨流程） |
 | 可观测性 | ✅ | Prometheus/Grafana/Loki/Alertmanager |
 | ETL Pipeline | ⏸ | ODS 层定义，Phase 2 完善 |
+| K8s/ECS 生产部署 | ⏸ | Phase 2 待迁移 |
 
 ### 2.3 Phase 2：业务能力扩展
 
@@ -165,7 +167,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                              HoneyBadge Phase 1 部署架构                             │
-│                              （实际运行状态 · 2026-04-16）                          │
+│                              （实际运行状态 · 2026-06-27）                          │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
   ╔═══════════════════════════════════════════════════════════════════════════════╗
@@ -181,7 +183,7 @@
   ║          │                        认证用户 · 创建 Matrix 专属账号                ║
   ║          │                        返回 matrix_token + roles_jwt               ║
   ║          │                                                                    ║
-  ║          └── matrix-js-sdk 直连 ──→ honeybadge-hiclaw-manager (:6167)        ║
+  ║          └── matrix-js-sdk 直连 ──→ honeybadge-hiclaw-embedded (:6167)       ║
   ║                                       Tuwunel Matrix Server                     ║
   ║                                                                               ║
   ╚═══════════════════════════════════════════════════════════════════════════════╝
@@ -189,11 +191,18 @@
                                               │ Matrix 协议分发任务
                                               ▼
   ┌──────────────────────────────────────────────────────────────────────────────────┐
-  │                           honeybadge-hiclaw-manager (:6167等)                    │
+  │                   honeybadge-hiclaw-embedded (基础设施容器)                        │
   │  ┌────────────────────────────────────────────────────────────────────────────┐ │
   │  │ Tuwunel Matrix (:6167) · Higress AI Gateway (:8080) · MinIO (:9000)      │ │
-  │  │ Element Web (:18888) · Manager Agent (OpenClaw)                             │ │
-  │  │                        all-in-one 有状态容器                                │ │
+  │  │ Element Web (:18888)               有状态容器（v1.1.0 拆分自 all-in-one）    │ │
+  │  └────────────────────────────────────────────────────────────────────────────┘ │
+  └──────────────────────────────────────────────────────────────────────────────────┘
+                                              │ Matrix DM 分发任务
+                                              ▼
+  ┌──────────────────────────────────────────────────────────────────────────────────┐
+  │                    honeybadge-hiclaw-manager (精简 Agent 容器)                    │
+  │  ┌────────────────────────────────────────────────────────────────────────────┐ │
+  │  │ Manager Agent (OpenClaw) · supervisord 已移除 · 启动时从 MinIO 拉取配置      │ │
   │  └────────────────────────────────────────────────────────────────────────────┘ │
   └──────────────────────────────────────────────────────────────────────────────────┘
           │                                                            │
@@ -327,13 +336,14 @@
 | 组件 | 选型 | 版本 | 说明 |
 |------|------|------|------|
 | 图数据库 | NebulaGraph | 3.8 | 分布式，存算分离 |
-| Agent 编排 | HiClaw | 1.0.6 | 阿里巴巴开源 |
+| Agent 编排 | HiClaw | 1.1.2 | 阿里巴巴开源 |
 | Matrix 服务器 | Tuwunel | - | 内嵌于 HiClaw Manager |
 | AI 网关 | Higress | - | 内嵌于 HiClaw Manager |
 | 前端框架 | Vue 3 | 3.4+ | Composition API + matrix-js-sdk |
 | 后端框架 | FastAPI | 0.115+ | async/await |
 | 认证服务 | honeybadge-auth | 1.0 | 专属 Matrix 账号 + JWT |
-| LLM（开发） | qwen3.5-plus | - | 阿里云百炼 DashScope，OpenAI 兼容接口 |
+| LLM（开发） | GLM-5.2 | - | 智谱 BigModel，OpenAI 兼容接口 |
+| LLM（MCP nGQL 生成） | GLM-4-Flash | - | 智谱 BigModel，轻量快速模型 |
 | LLM（生产目标） | GLM-5 | 744B MoE | 华为昇腾 910B 私有部署 |
 | 缓存 | Redis | 7+ | 查询缓存 |
 | 审计 | PostgreSQL | 16 | 不可篡改审计日志 |
@@ -354,9 +364,10 @@
 - 阿里背书 + Apache 协议 + 活跃维护（v1.1.2）
 
 **架构**：
-- **Manager Agent**（基于 OpenClaw）：接收用户任务，创建/调度 Worker，执行心跳检查
-- **Worker Agent**：无状态、临时容器，启动时从 MinIO 拉取配置，通过 Matrix Room 与 Manager 通信
-- **MCP 集成**：Worker 通过 mcporter CLI 调用 MCP Server 工具
+- **Manager Agent**（基于 OpenClaw）：接收用户任务，通过 `route-and-execute.sh` 统一路由决定走 fast-query 直通路径还是分发 Worker
+- **fast-query 直通路径**：简单查询（查找/列出/统计）由 Manager 直接调用 MCP Server，跳过 Worker，3 跳完成（Manager→MCP→用户），同时强制执行 L3 权限校验
+- **Worker Agent**：无状态、临时容器，启动时从 MinIO 拉取配置，通过 Matrix Room 与 Manager 通信；处理复杂查询（多跳分析、异常检测）
+- **MCP 集成**：Manager 和 Worker 均通过 mcporter CLI 调用 MCP Server 工具
 
 **关键设计：Matrix Room ≠ Worker**
 
@@ -1054,7 +1065,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 | 指标 | HoneyBadge | OpenClaw | DeerFlow | HiClaw | HermesClaw |
 |------|-----------|----------|----------|--------|------------|
-| **任务路由** | 关键词匹配（Manager SOUL.md） | Binding 优先级路由 | Lead Agent LLM 推理分解 | 同 OpenClaw 机制 | LLM 推理 |
+| **任务路由** | 关键词匹配 + route-and-execute.sh 统一路由 | Binding 优先级路由 | Lead Agent LLM 推理分解 | 同 OpenClaw 机制 | LLM 推理 |
 | **上下文管理** | 40K token 裁剪 + ontology 动态注入 | Context Window Guard | 渐进式技能加载 + checkpoint | 同 OpenClaw | 3 层记忆系统 |
 | **学习能力** | ❌ 无 | ❌ 无原生学习层 | 持久化 Memory + TIAMAT | ❌ 无 | ✅ 自我生成技能（40% 提速） |
 | **反幻觉** | ✅ **5 层验证框架（最强）** | ❌ 无 | ❌ 依赖 LLM 自身 | ❌ 无 | ❌ 依赖 LLM 自身 |
@@ -1072,7 +1083,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 |------|-----------|----------|----------|--------|------------|
 | **许可证** | 专有项目 | MIT | MIT | Apache 2.0 | MIT |
 | **生态** | 自建 MCP Servers | 3,200+ ClawHub 技能 | ByteDance 内部验证 | OpenClaw 生态 | 118 技能 + 插件系统 |
-| **LLM 支持** | MiniMax/DashScope | 任意 OpenAI 兼容 | 任意 + 中国模型优先 | 任意 OpenAI 兼容 | 200+ 模型 |
+| **LLM 支持** | BigModel/GLM (OpenAI 兼容) | 任意 OpenAI 兼容 | 任意 + 中国模型优先 | 任意 OpenAI 兼容 | 200+ 模型 |
 | **平台集成** | Matrix only | 24+ 平台 | Slack/Telegram/飞书/企微 | Matrix only | 6 平台 + Matrix |
 | **可扩展性** | MCP Server 标准 | MCP + ClawHub | Markdown 技能 + 中间件 | MCP + ClawHub | 插件 + 自生成技能 |
 | **标准协议** | Matrix + S3 + MCP | Matrix + 24 协议 | HTTP REST + SSE | Matrix + S3 + MCP | SQLite + 多协议 |
@@ -1113,9 +1124,9 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 #### 当前架构的关键短板
 
-1. **链路延迟高** — 6 跳请求路径，简单查询也要经过完整的 Manager→Worker→MCP 链路
+1. **链路延迟高** — 复杂查询仍需 6 跳（Manager→Worker→MCP）；简单查询已通过 `route-and-execute.sh` → fast-query 直通路径缩短为 3 跳（Manager→MCP），跳过 Worker
 2. **Manager 全合一容器是技术债** — 5+ 服务共用进程空间，调试和独立扩缩困难
-3. **任务路由"笨"** — 基于关键词匹配，不如 LLM 推理分解灵活
+3. **任务路由"笨"** — 基于关键词匹配 + `route-and-execute.sh` 统一路由，不如 LLM 推理分解灵活，但已消除 LLM 非确定性路由决策
 4. **无学习能力** — 每次查询从零开始，无法积累领域经验
 5. **平台集成窄** — 仅 Matrix 一个通道，缺少企业 IM（钉钉/飞书/企微）直接对接
 6. **Manager + MinIO 双单点** — 高可用方案未落地
