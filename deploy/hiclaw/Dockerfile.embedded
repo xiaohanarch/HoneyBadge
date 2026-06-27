@@ -1,5 +1,5 @@
 # deploy/hiclaw/Dockerfile.embedded
-# Built on hiclaw-embedded v1.1.0 — bundles Tuwunel + MinIO + Higress + Element Web
+# Built on hiclaw-embedded v1.1.2 — bundles Tuwunel + MinIO + Higress + Element Web
 # under upstream supervisord.
 #
 # All HoneyBadge customization is runtime — env vars at compose level

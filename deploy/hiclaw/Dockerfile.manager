@@ -1,6 +1,6 @@
 # deploy/hiclaw/Dockerfile.manager
-# Built on hiclaw-manager v1.1.0 (lightweight agent only — bundled infra moved to Dockerfile.embedded)
-# HiClaw Manager container — applies to HiClaw v1.1.0
+# Built on hiclaw-manager v1.1.2 (lightweight agent only — bundled infra moved to Dockerfile.embedded)
+# HiClaw Manager container — applies to HiClaw v1.1.2
 #
 # UPGRADE CHECKLIST (see docs/patches/hiclaw-interface-contract-v1.md):
 #   1. Verify x-honeybadge field passthrough (Manager must not strip x-honeybadge)
