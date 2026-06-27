@@ -1149,6 +1149,98 @@ Phase 3: 全面生产                24 周（~6 个月）
 4. **从 OpenClaw 借鉴**：Binding-based 路由 → 升级当前的关键词匹配为多维度路由
 5. **架构拆分**：将 Manager 全合一容器拆为独立微服务（Tuwunel、Higress、MinIO、Manager Agent 各自独立部署）
 
+### 12.7 HoneyBadge vs DeerFlow：企业 ERP 审计场景专题对比
+
+> 本节针对当前最相关的竞品 DeerFlow（ByteDance 开源，已有团队基于其构建企业级 agent）做深度对比。DeerFlow 是通用深度研究/报告生成 SuperAgent，基于 LangGraph DAG 编排；HoneyBadge 是垂直 ERP 审计助手。两者定位互补，但在"数据准确性不可妥协"的 ERP 审计场景下，架构能力差异显著。
+
+#### 12.7.1 定位与设计哲学差异
+
+| 维度 | DeerFlow | HoneyBadge |
+|------|----------|------------|
+| 设计目标 | 通用深度研究、报告生成、代码生成 | ERP 数据问答、财务反欺诈、审计追溯 |
+| 核心假设 | LLM 输出可信，重点是任务分解与编排 | LLM 会幻觉，重点是数据校验与可追溯 |
+| 数据层 | 向量检索 + 工具调用（RAG 路线） | 知识图谱（NebulaGraph）多跳关联 |
+| 输出形态 | 研究报告 / 代码 / 文档 | 结构化查询结果 + 可审计摘要 |
+| 失败代价 | 报告有瑕疵，人工修订 | 财务数字错误 → 合规事故 |
+
+**核心分歧**：DeerFlow 信任 LLM；HoneyBadge 不信任 LLM，用 5 层框架约束 LLM 只能"生成查询 + 包装格式"，不能"生成数据"。
+
+#### 12.7.2 五项不可替代能力（HoneyBadge 独有）
+
+**① 反幻觉 5 层验证框架**
+
+DeerFlow 无数据校验层，输出正确性完全依赖 LLM 自身。HoneyBadge 的 5 层：
+- L1 Cypher/nGQL 语法 parser 校验，非法查询拦截并重生成
+- L2 Schema 合规校验，防止 LLM 编造不存在的标签/边
+- L3 Cypher AST 级权限注入（非字符串拼接，等同防 SQL 注入级别）
+- L4 原始结果透传——LLM 只能包装格式，不能修改数值
+- L5 全链路审计入库（PostgreSQL）
+
+**对 ERP 审计的意义**：财务场景 LLM 编造一个金额数字即构成合规事故。DeerFlow 架构上无法阻止，HoneyBadge 在 L4 层强制阻断。
+
+**② 全链路审计可追溯**
+
+DeerFlow 的日志为 token 统计级。HoneyBadge 每条查询携带 `trace_id`，完整链路 `问题 → nGQL → 原始结果 → 摘要` 落库，可逐跳还原。
+
+**对 ERP 审计的意义**：审计师/监管要求"这个数字从何而来"时，可即时举证；DeerFlow 无法满足该合规要求。
+
+**③ 知识图谱多跳关联分析**
+
+DeerFlow 走 RAG/向量检索路线，只能返回相关文档片段。HoneyBadge 基于 NebulaGraph，原生支持多跳图查询：
+- 断供影响链分析（物料 → BOM → 订单 → 客户的传导路径）
+- 虚假交易团伙识别（供应商 → 关联方 → 资金回路）
+- 三单匹配异常（PO → Receipt → Invoice 三向比对）
+
+**对 ERP 审计的意义**：供应链风控的核心能力，RAG 架构无法实现。
+
+**④ Cypher AST 级权限注入**
+
+DeerFlow 无细粒度数据权限控制。HoneyBadge 在查询 AST 层注入用户权限边界，越权查询在执行前被拦截，且无法通过 prompt 注入绕过（不是字符串拼接）。
+
+**⑤ 零信任凭证模型**
+
+HoneyBadge Worker 永不持有真实 API 密钥（继承自 HiClaw），凭证由 Higress 网关隔离代理。DeerFlow 直连 LLM API，密钥暴露面更大。
+
+#### 12.7.3 DeerFlow 的架构长板（客观承认）
+
+| DeerFlow 优势 | HoneyBadge 现状 | 差距与应对 |
+|---------------|-----------------|-----------|
+| LangGraph DAG 真并行调度 | Manager→Worker 串行，6 跳延迟 | fast-query 直通已缩至 3 跳；Phase 2 评估 DAG 改造 |
+| LangGraph checkpoint 恢复 | result-watcher 轮询备援 | 已列入改进路线（见 12.6） |
+| 长时任务支持（分钟→小时级） | 单轮查询为主 | 场景不同，非短板 |
+| 4+ IM 集成（飞书/企微/钉钉） | 仅 Matrix | 短板，需补企业 IM 适配 |
+| 持久化 Memory + TIAMAT 学习 | 无学习能力 | 借鉴方向，见 12.6 |
+
+#### 12.7.4 场景边界与共存定位
+
+DeerFlow 与 HoneyBadge 不是替代关系，而是场景互补：
+
+| 场景 | 推荐方案 | 理由 |
+|------|---------|------|
+| 通用知识问答、研究报告、办公助手 | DeerFlow | LangGraph 编排强、IM 集成广 |
+| 代码生成、长时研究任务 | DeerFlow | Docker 沙箱 + checkpoint |
+| **ERP 数据查询、财务问答** | **HoneyBadge** | 反幻觉 + 图谱关联 |
+| **财务反欺诈、三单匹配** | **HoneyBadge** | 多跳图分析 + L4 数据完整性 |
+| **审计追溯、合规举证** | **HoneyBadge** | 全链路 trace_id + AST 权限 |
+
+**推广建议**：企业内两个 agent 分工共存——DeerFlow 承担通用问答与研究，HoneyBadge 专攻 ERP 审计与风控。避免在通用赛道与 DeerFlow 正面竞争，锚定"数据不可错"的垂直场景。
+
+### 12.8 向上汇报核心口径
+
+向决策层汇报时，技术指标需翻译为业务/合规语言：
+
+| 技术能力 | 业务 / 合规价值 |
+|---------|----------------|
+| 5 层反幻觉框架 | 财务数据零幻觉，规避审计事故与合规风险 |
+| 全链路 trace_id | 满足审计师/监管的"可追溯"硬性要求 |
+| NebulaGraph 多跳关联 | 供应链断供预警、欺诈团伙识别——RAG 做不到 |
+| AST 级权限注入 | 防越权查数，等同防 SQL 注入的安全级别 |
+| 全开源栈（NebulaGraph + PG + Matrix + Higress） | 无厂商锁定，自主可控 |
+
+**一句话定位**：DeerFlow 是通用研究型 agent，强在报告生成；HoneyBadge 是 ERP 审计型助手，强在数据零幻觉与全链路可追溯。财务审计场景，LLM 编一个数字就是合规事故——这是 HoneyBadge 架构上能挡住、DeerFlow 挡不住的能力。
+
+**对照 demo 建议**：同一问题（如"某供应商上月是否存在虚假交易"）让两个 agent 分别作答——DeerFlow 版大概率会幻觉数字，HoneyBadge 数字来自 NebulaGraph 且 trace_id 可追溯、L4 原始数据可交叉验证。一个 demo 胜过十页 PPT。
+
 ---
 
 ## 快速开始
@@ -1535,6 +1627,7 @@ docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.en
 | v3.1 | 2026-04-13 | 实际部署状态说明、容器清单、10 倍流量扩容建议 |
 | v3.2 | 2026-04-16 | 合并 starter.md 与 README.md；更新 Schema 计数（34 Tags + 38 Edges）；更新 LLM 配置（qwen3.5-plus via DashScope）；新增 12 种欺诈检测模式说明；更新项目结构 |
 | v3.3 | 2026-04-23 | 新增第十二章「Agent 框架架构深度对比」：HoneyBadge vs OpenClaw / DeerFlow / HiClaw / HermesClaw，覆盖性能、智能性、开放度、健壮性四维度分析 |
+| v3.4 | 2026-06-27 | 第十二章新增 12.7「HoneyBadge vs DeerFlow 企业 ERP 审计场景专题对比」（定位差异、五项不可替代能力、DeerFlow 长板、共存定位）与 12.8「向上汇报核心口径」（技术能力→业务/合规价值映射） |
 
 ---
 
