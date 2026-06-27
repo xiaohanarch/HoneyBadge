@@ -146,6 +146,11 @@ jobs:
           bash deploy/docker/init-nebula.sh
         timeout-minutes: 5
 
+      - name: Seed NebulaGraph test data
+        run: |
+          bash deploy/docker/seed-nebula.sh
+        timeout-minutes: 5
+
       - name: Initialize HiClaw workers
         run: |
           bash deploy/hiclaw/init-workers.sh
