@@ -1296,6 +1296,25 @@ DeerFlow 与 HoneyBadge 不是替代关系，而是场景互补：
 
 #### 12.9.5 渐进切换路径
 
+**组件选型：为什么先切 analytics-worker**
+
+HoneyBadge 当前有 3 个 claw 组件，无需全量替换，按"hermes 优势匹配度 × 迁移风险"排序：
+
+| 组件 | 链路位置 | hermes 优势匹配度 | 迁移风险 | 是否先切 |
+|------|---------|------------------|---------|---------|
+| Manager Agent | 编排层（单点） | 低（协调非分析，自学习用不上） | 高（定制最深：openclaw.json 桥接、DM allowlist、SOUL.md prepend） | ❌ 不动 |
+| graph-worker | 热路径（用户问答主链路） | 中（单轮查询为主，记忆/学习发挥有限；nGQL 已被 ontology 强约束） | 高（fast-query 直通路径刚调好） | ❌ 第二步 |
+| **analytics-worker** | 非热路径（分析任务） | **高**（反欺诈/三单匹配模式可复用，自学习红利最大） | **低**（非热路径，独立验证） | ✅ **先切** |
+
+**analytics-worker 优先的 4 条理由**：
+
+1. **hermes 自学习/记忆优势在这里发挥最大** —— 反欺诈分析、三单匹配有大量可复用模式（"供应商→关联方→资金回路"检测套路、"PO→Receipt→Invoice"三单比对），openclaw 每次从零开始，hermes 能积累成技能，越用越强。
+2. **非热路径，迁移风险最低** —— analytics 不在用户问答直接链路（Manager→graph-worker），出问题不影响主流程，是天然试点沙箱。
+3. **Python 同语言红利最大** —— analytics 与 permission_service / validator / 分析逻辑同 Python 栈，换 hermes 后省去 shell 桥接层。
+4. **长时任务匹配** —— analytics 是分钟级多步分析，hermes 的同步对话循环 + 长时任务支持比 openclaw 单进程更适合。
+
+**切换路径**：
+
 1. 先在 **analytics-worker**（非热路径）试点 hermes，graph-worker 保留 openclaw。
 2. 把 `route-and-execute.sh` 逻辑移植为 hermes skill（Python）。
 3. 验证 L3 权限的 Matrix metadata 提取在 hermes adapter 下是否仍可用。
