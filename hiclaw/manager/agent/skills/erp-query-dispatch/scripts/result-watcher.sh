@@ -63,9 +63,18 @@ while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
         _log "result.json found, forwarding to user"
 
         # Build summary text from result.md (first 400 chars)
+        # Use Python for character-aware truncation — `head -c 400` cuts
+        # mid-multibyte UTF-8, producing invalid bytes that Python decodes
+        # as lone surrogates (U+D800-DFFF), which Tuwunel rejects (M_BAD_JSON).
         SUMMARY_TEXT="查询已完成，结果如下。"
         if [ -f "$TASK_DIR/result.md" ]; then
-            MD_CONTENT=$(head -c 400 "$TASK_DIR/result.md" 2>/dev/null || true)
+            MD_CONTENT=$(python3 -c "
+import sys
+try:
+    print(open(sys.argv[1], 'r', errors='replace').read()[:400])
+except Exception:
+    pass
+" "$TASK_DIR/result.md" 2>/dev/null || true)
             [ -n "$MD_CONTENT" ] && SUMMARY_TEXT="$MD_CONTENT"
         fi
 
