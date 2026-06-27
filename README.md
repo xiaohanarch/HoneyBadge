@@ -4,7 +4,7 @@
 
 基于 ERP 系统（Oracle EBS / 定制 ERP）构建的自然语言问答系统，支持采购/供应链数据查询、欺诈检测和三单匹配异常检测。
 
-> 文档版本：v3.4 · 最后更新：2026-06-27
+> 文档版本：v3.5 · 最后更新：2026-06-27
 
 [![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/xiaohanarch/HoneyBadge)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
@@ -1241,6 +1241,66 @@ DeerFlow 与 HoneyBadge 不是替代关系，而是场景互补：
 
 **对照 demo 建议**：同一问题（如"某供应商上月是否存在虚假交易"）让两个 agent 分别作答——DeerFlow 版大概率会幻觉数字，HoneyBadge 数字来自 NebulaGraph 且 trace_id 可追溯、L4 原始数据可交叉验证。一个 demo 胜过十页 PPT。
 
+### 12.9 Worker Runtime 选型：OpenClaw vs Hermes
+
+> HiClaw v1.1.2 内置三种 worker runtime（OpenClaw / Hermes / Copaw，见 manager 容器 `/opt/hiclaw/agent/` 下的 `worker-agent` / `hermes-worker-agent` / `copaw-worker-agent`）。本节给出 HoneyBadge 场景下 OpenClaw 与 Hermes 的选型建议。
+
+#### 12.9.1 实际版本与现状
+
+- **OpenClaw**：容器内 `/opt/openclaw/package.json` 确认版本为 **`2026.4.14`**（commit 2f35b6f），采用日期版本号——**并非 v1.1.2**。v1.1.2 是 HiClaw 发行版版本（`.builtin-version`），openclaw 自身用日期版本号。代码注释中出现的"OpenClaw v1.1.2"属误标。
+- **Hermes**：Python-based，powered by `hermes-agent`，经自定义 Matrix adapter 集成；配置从 `openclaw.json` 桥接生成 `~/.hermes/config.yaml` + `.env`，桥接键每次启动重写。
+- **当前现状**：HoneyBadge 使用 OpenClaw（已跑通 E2E + 生产 ECS 15 pods running），Hermes 内置支持但**未启用**。
+
+#### 12.9.2 两者对比
+
+| 维度 | OpenClaw（当前） | Hermes |
+|------|------------------|--------|
+| 语言 | Node.js | **Python**（与 HoneyBadge 后端同语言） |
+| 工作区 | `~/`（SOUL.md, openclaw.json, memory/, skills/） | `~/.hermes/`（config.yaml, .env, SOUL.md, skills/, sessions/） |
+| 配置来源 | 直接读 openclaw.json | 从 openclaw.json **桥接**生成 config.yaml + .env |
+| 共享文件同步 | 手动 `mc cp` / `mc mirror` | **自动同步**（每 5 分钟从 MinIO mirror） |
+| 冷启动 | ~6s | **~2s** |
+| 内存占用 | ~394MB | **~300MB** |
+| 学习能力 | ❌ 无 | ✅ **自我生成技能**（约 40% 提速） |
+| 记忆 | memory/ 日记 + MEMORY.md | 3 层记忆系统 |
+| 安全沙箱 | ❌ 9 个 CVE（含 CVSS 9.9，2026.3） | ✅ **硬件级沙箱**（Landlock + Seccomp）+ OPA 策略 |
+| 生态 | 3,200+ ClawHub 技能（20% 含恶意代码） | 118 技能 + 插件系统 |
+| MCP 工具 | mcporter-servers.json | mcporter（config/mcporter.json） |
+| 反幻觉 | ❌ 依赖 LLM 自身 | ❌ 依赖 LLM 自身（两者相同） |
+| HiClaw 成熟度 | 默认 runtime，本项目已跑通 | 内置支持，本项目未启用 / 未验证 |
+
+> **注**：HoneyBadge 的 5 层反幻觉框架位于 MCP Server + 项目代码层，与 worker runtime 无关——OpenClaw 与 Hermes 均同等享受该能力。换 runtime 不带来反幻觉增强。
+
+#### 12.9.3 推荐：短期继续 OpenClaw，中长期评估 Hermes
+
+**短期理由——迁移成本远大于收益**：
+
+1. **已跑通**：E2E 全链路调通、生产 ECS 15 pods running、CI 绿。切 runtime 等于推倒重来。
+2. **所有定制绑定 openclaw 体系**，切 hermes 全部需用 Python 重写：
+   - `route-and-execute.sh` 统一路由 + fast-query 直通路径
+   - 自定义 SOUL.md（prepend before builtin + ZERO-STEP RULE）
+   - L3 权限：从 Matrix metadata 提取用户身份 → AST 注入
+   - `forward-to-user.sh` + fallback trace_id
+   - analytics-worker `result.json` 结构化交付
+3. **核心价值与 runtime 无关**：5 层反幻觉、NebulaGraph 多跳、全链路审计、AST 权限均在 MCP 层，换 runtime 不增强这些能力。
+4. hermes 配置虽从 openclaw.json 桥接，但**行为层**（skills / SOUL / 路由）不兼容，需重新实现。
+
+#### 12.9.4 切换触发条件（中长期）
+
+当以下任一条件成为痛点时，值得切换：
+
+1. **openclaw 的 CVSS 9.9 CVE 成为安全阻塞项** —— hermes 的硬件级沙箱是硬优势。
+2. **需要自学习积累 nGQL 模板经验** —— hermes 的技能自生成可解决 12.6 指出的"每次查询从零开始"短板。
+3. **想要 Python 同语言定制** —— 当前用 shell 桥接 Node runtime 是技术债。
+4. **资源敏感场景** —— hermes 更轻（300MB vs 394MB，2s vs 6s）。
+
+#### 12.9.5 渐进切换路径
+
+1. 先在 **analytics-worker**（非热路径）试点 hermes，graph-worker 保留 openclaw。
+2. 把 `route-and-execute.sh` 逻辑移植为 hermes skill（Python）。
+3. 验证 L3 权限的 Matrix metadata 提取在 hermes adapter 下是否仍可用。
+4. E2E 全套通过后再切 graph-worker，完成全量迁移。
+
 ---
 
 ## 快速开始
@@ -1628,6 +1688,7 @@ docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.en
 | v3.2 | 2026-04-16 | 合并 starter.md 与 README.md；更新 Schema 计数（34 Tags + 38 Edges）；更新 LLM 配置（qwen3.5-plus via DashScope）；新增 12 种欺诈检测模式说明；更新项目结构 |
 | v3.3 | 2026-04-23 | 新增第十二章「Agent 框架架构深度对比」：HoneyBadge vs OpenClaw / DeerFlow / HiClaw / HermesClaw，覆盖性能、智能性、开放度、健壮性四维度分析 |
 | v3.4 | 2026-06-27 | 第十二章新增 12.7「HoneyBadge vs DeerFlow 企业 ERP 审计场景专题对比」（定位差异、五项不可替代能力、DeerFlow 长板、共存定位）与 12.8「向上汇报核心口径」（技术能力→业务/合规价值映射） |
+| v3.5 | 2026-06-27 | 第十二章新增 12.9「Worker Runtime 选型：OpenClaw vs Hermes」：核实 openclaw 实际版本 2026.4.14（非 v1.1.2）、两者对比表、短期继续 OpenClaw / 长期评估 Hermes 推荐及渐进切换路径 |
 
 ---
 
