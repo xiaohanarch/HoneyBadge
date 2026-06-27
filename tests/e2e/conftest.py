@@ -240,8 +240,11 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
                 }}
 
                 // 3: streaming stable — last new-message body length unchanged
-                //    for 10s.  Only fires if text > 100 chars AND min_wait_ms
+                //    for 25s.  Only fires if text > 100 chars AND min_wait_ms
                 //    has elapsed AND last message is NOT stale.
+                //    25s window gives the Manager time to complete Bash tool calls
+                //    (MCP queries take ~15s) and produce a structured reply (cond1)
+                //    before the test accepts a text-only response (cond3).
                 if (elapsed >= {min_wait_ms}) {{
                     const last = msgs[msgs.length - 1];
                     if (isStale(last)) return false;  // last message is stale — keep waiting
@@ -253,7 +256,7 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
                         window.__hbStability = {{ len: len, ts: now }};
                         return false;
                     }}
-                    if ((now - window.__hbStability.ts) >= 10000) {{
+                    if ((now - window.__hbStability.ts) >= 25000) {{
                         window.__hbSettleReason = 'cond3_stable len=' + len + ' elapsed=' + elapsed;
                         return true;
                     }}
