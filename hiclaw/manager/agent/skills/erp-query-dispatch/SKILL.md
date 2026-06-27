@@ -8,6 +8,19 @@ assign_when: User asks about ERP data (供应商, 采购, 发票, 付款, 库存
 
 Full dispatch procedure for ERP questions. Uses `dispatch-to-worker.sh` to send @mentions to the correct Worker room via Matrix API.
 
+## ⚠️ Step 0 — MANDATORY Pre-Routing Check (Run BEFORE Step 1)
+
+**BEFORE** following any steps below, you MUST run the router script:
+
+```bash
+ROUTE=$(bash /opt/honeybadge/config/manager/agent/skills/fast-query/router.sh "$USER_QUESTION")
+```
+
+- If `$ROUTE` is `fast-query`: **STOP here. DO NOT use this skill.** Instead, call `fast-query.sh` as described in SOUL.md → "Route: fast-query". The fast-query path enforces L3 permission checks; this dispatch skill does NOT.
+- If `$ROUTE` is `graph-worker` or `analytics-worker`: continue to Step 1 below.
+
+**Why:** This skill dispatches to Workers, which do NOT enforce L3 permissions. The fast-query path does. Routing a permission-restricted query (e.g., analyst querying OTC data) through this skill bypasses permission enforcement and leaks data the user should not see.
+
 ## Step 1 — Route to Worker
 
 Determine the target worker based on the user's intent:
