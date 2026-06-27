@@ -19,68 +19,107 @@ from tests.e2e.selectors import (
 )
 
 MANAGER_CONTAINER = "honeybadge-hiclaw-manager"
-SESSION_DIR = "/root/manager-workspace/.openclaw/agents/main/sessions"
+GRAPH_WORKER_CONTAINER = "honeybadge-graph-worker"
+ANALYTICS_WORKER_CONTAINER = "honeybadge-analytics-worker"
+# Manager lives under /root/manager-workspace; workers (hiclaw-worker image)
+# live under /root/.openclaw.  Both share the same internal layout.
+MANAGER_SESSION_DIR = "/root/manager-workspace/.openclaw/agents/main/sessions"
+WORKER_SESSION_DIR = "/root/.openclaw/agents/main/sessions"
 
 
-def reset_manager_sessions():
-    """Clear all Manager OpenClaw sessions and restart the container.
+def _reset_openclaw_sessions(container, session_dir):
+    """Clear OpenClaw session transcripts in a container and restart it.
 
-    The Manager LLM (glm-5.2) enters repetition loops after 5-10 queries in
-    the same session.  E2E permission tests send 20+ queries to the same DM
-    rooms, accumulating context that triggers the loop.  This function:
-      1. Deletes all session transcript files (*.jsonl)
-      2. Resets sessions.json to an empty store
-      3. Restarts the Manager container so in-memory session caches are freed
-      4. Waits for the OpenClaw process to come back up
-
-    Call this between tests that would otherwise inherit a bloated session.
+    Deletes all *.jsonl transcripts, resets sessions.json to an empty store,
+    and restarts the container so in-memory session caches are freed.  Waits
+    for the openclaw process to come back up.  Used by reset_manager_sessions
+    for the Manager and both worker containers.
     """
     # 1. Delete session transcript files
     subprocess.run(
-        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
-         f"rm -f {SESSION_DIR}/*.jsonl"],
+        ["docker", "exec", container, "bash", "-c",
+         f"rm -f {session_dir}/*.jsonl"],
         capture_output=True, timeout=10,
     )
 
     # 2. Reset sessions.json to empty
     subprocess.run(
-        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
-         f'echo "{{}}" > {SESSION_DIR}/sessions.json'],
+        ["docker", "exec", container, "bash", "-c",
+         f'echo "{{}}" > {session_dir}/sessions.json'],
         capture_output=True, timeout=10,
     )
 
-    # 2b. Clean stale task directories so the Manager LLM doesn't reuse
-    # old worker results instead of making a fresh query
+    # 3. Restart the container
     subprocess.run(
-        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
-         "rm -rf /root/hiclaw-fs/shared/tasks/erp-* /root/hiclaw-fs/shared/tasks/fast-* 2>/dev/null"],
-        capture_output=True, timeout=10,
-    )
-
-    # 3. Restart the Manager container
-    subprocess.run(
-        ["docker", "restart", MANAGER_CONTAINER],
+        ["docker", "restart", container],
         capture_output=True, timeout=30,
     )
 
-    # 4. Wait for the OpenClaw process to be running
+    # 4. Wait for the openclaw process to be running
     for _ in range(30):
         result = subprocess.run(
-            ["docker", "exec", MANAGER_CONTAINER, "pgrep", "-f", "openclaw"],
+            ["docker", "exec", container, "pgrep", "-f", "openclaw"],
             capture_output=True, timeout=5,
         )
         if result.returncode == 0:
             break
         time.sleep(1)
     else:
-        print("[reset_manager_sessions] WARNING: Manager process not detected after 30s")
+        print(f"[reset_sessions] WARNING: openclaw process not detected in {container} after 30s")
 
-    # 5. Wait for the Matrix client to connect to the homeserver.
+
+def reset_manager_sessions():
+    """Clear all HiClaw LLM sessions (Manager + Workers) and restart containers.
+
+    The Manager LLM (glm-5.2) enters repetition loops after 5-10 queries in
+    the same session, and worker LLMs (graph-worker, analytics-worker)
+    accumulate stale context that causes hallucinations like "MCP服务不可用"
+    even when MCP servers are healthy.  E2E permission and isolation tests
+    send 20+ queries to the same DM rooms, accumulating context that
+    triggers both failure modes.  This function:
+      1. Resets Manager sessions (transcripts + sessions.json)
+      2. Cleans stale task directories so the Manager doesn't reuse old
+         worker results instead of making a fresh query
+      3. Resets graph-worker and analytics-worker sessions
+      4. Restarts all three containers so in-memory caches are freed
+      5. Waits for the Manager's Matrix client to reconnect to Tuwunel
+
+    Call this between tests that would otherwise inherit a bloated session.
+    """
+    # 1. Clean stale task directories BEFORE any container restart, while the
+    #    Manager is still running and the MinIO-backed shared FS is guaranteed
+    #    mounted.  Doing this after restart is risky: the container is up
+    #    (pgrep confirmed) but the bind mount may not be fully ready, causing
+    #    the rm to silently no-op and leaving stale results for the LLM to
+    #    reuse instead of making a fresh query.
+    subprocess.run(
+        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
+         "rm -rf /root/hiclaw-fs/shared/tasks/erp-* /root/hiclaw-fs/shared/tasks/fast-* 2>/dev/null"],
+        capture_output=True, timeout=10,
+    )
+
+    # 2. Reset Manager session (transcripts + sessions.json + restart + wait).
+    _reset_openclaw_sessions(MANAGER_CONTAINER, MANAGER_SESSION_DIR)
+
+    # 3. Worker session cleanup (graph + analytics).
+    #    Workers accumulate stale context across tests — e.g. graph-worker
+    #    reached 107K tokens / 2.26MB transcript, forceFlushByTranscriptSize
+    #    fired, and the LLM began hallucinating "MCP服务不可用" despite MCP
+    #    servers being healthy.  Resetting both workers before tc310-tc314
+    #    prevents this pollution from carrying over.
+    _reset_openclaw_sessions(GRAPH_WORKER_CONTAINER, WORKER_SESSION_DIR)
+    _reset_openclaw_sessions(ANALYTICS_WORKER_CONTAINER, WORKER_SESSION_DIR)
+
+    # 4. Wait for the Manager's Matrix client to connect to the homeserver.
     #    The Manager takes ~22s after restart to join rooms and connect to
     #    the gateway.  Without this wait, the first query after restart may
     #    time out because the Matrix message isn't delivered.
     #    We use a fixed wait because docker logs --tail=N only shows the last
     #    N lines, which may not include the startup "connected to gateway" msg.
+    #    Workers restart concurrently during this 25s window: their
+    #    worker-init-wrapper.sh performs MinIO sync + Matrix reconnection
+    #    (~10-15s typical), so by the time the Manager is ready to dispatch,
+    #    workers have reconnected and are ready to receive queries.
     time.sleep(25)
 
 
