@@ -173,15 +173,20 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
            (format: TRC-YYYYMMDD-HHMMSS-xxxxx), we reliably distinguish stale from new.
       2. Denial marker text (权限不足/permission denied/无权/Forbidden/access denied)
          — always immediate so permission tests fail fast.
-      3. Last new-message body length (>100 chars) stable for 10000ms (streaming finished)
-         — only after `min_wait_ms` AND only if the last message's trace_id timestamp
-           is >= ``query_send_ts`` (or has no trace_id).
+      3. Last new-message body length (>100 chars) stable for 10000ms PLUS a
+         5000ms "cond1 grace period" (streaming finished + no structured reply
+         arrived within 5s of stability).  Only after `min_wait_ms` AND only if
+         the last message's trace_id timestamp is >= ``query_send_ts`` (or has
+         no trace_id).  The grace period prevents cond3 from racing with cond1
+         when the MCP pipeline delivers a structured reply at ~15s — the same
+         moment the 10s stability window expires.
 
     Exits silently on timeout — callers must let the test assertion fail naturally.
     Debug info is printed to stdout via ``[SETTLE]`` prefix.
     """
     page_obj.evaluate(
-        f"() => {{ window.__hbStability = null; window.__hbSettleReason = ''; "
+        f"() => {{ window.__hbStability = null; window.__hbCond3Pending = null; "
+        f"window.__hbSettleReason = ''; "
         f"window.__hbSettleStart = Date.now(); "
         f"window.__hbQuerySendTs = {query_send_ts}; }}"
     )
@@ -240,11 +245,19 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
                 }}
 
                 // 3: streaming stable — last new-message body length unchanged
-                //    for 25s.  Only fires if text > 100 chars AND min_wait_ms
-                //    has elapsed AND last message is NOT stale.
-                //    25s window gives the Manager time to complete Bash tool calls
-                //    (MCP queries take ~15s) and produce a structured reply (cond1)
-                //    before the test accepts a text-only response (cond3).
+                //    for 10s, PLUS a 5s "cond1 grace period".  Only fires if
+                //    text > 100 chars AND min_wait_ms has elapsed AND last
+                //    message is NOT stale.
+                //
+                //    The grace period gives cond1 (structured worker reply) a
+                //    5s window to fire AFTER the text stabilizes but BEFORE
+                //    cond3 accepts.  The MCP pipeline takes ~15s (generate nGQL
+                //    + execute + forward).  The Manager emits text at ~5s, text
+                //    stabilizes at ~5s, cond3 stability (10s) is met at ~15s —
+                //    exactly when the structured reply arrives.  Without the
+                //    grace period, cond3 and cond1 race.  With 5s grace, cond1
+                //    is checked first in each 200ms cycle and fires before
+                //    cond3 accepts at ~20s.
                 if (elapsed >= {min_wait_ms}) {{
                     const last = msgs[msgs.length - 1];
                     if (isStale(last)) return false;  // last message is stale — keep waiting
@@ -254,11 +267,22 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
                     const now = Date.now();
                     if (!window.__hbStability || window.__hbStability.len !== len) {{
                         window.__hbStability = {{ len: len, ts: now }};
+                        window.__hbCond3Pending = null;  // text changed — reset grace
                         return false;
                     }}
-                    if ((now - window.__hbStability.ts) >= 25000) {{
-                        window.__hbSettleReason = 'cond3_stable len=' + len + ' elapsed=' + elapsed;
-                        return true;
+                    if ((now - window.__hbStability.ts) >= 10000) {{
+                        // Stability window met — start cond1 grace period.
+                        // cond1 is checked at the TOP of each cycle, so if a
+                        // structured reply arrives during this 5s window, cond1
+                        // fires first.  Only accept cond3 if no cond1 for 5s.
+                        if (!window.__hbCond3Pending) {{
+                            window.__hbCond3Pending = now;
+                            return false;
+                        }}
+                        if ((now - window.__hbCond3Pending) >= 5000) {{
+                            window.__hbSettleReason = 'cond3_stable len=' + len + ' elapsed=' + elapsed;
+                            return true;
+                        }}
                     }}
                 }}
 
