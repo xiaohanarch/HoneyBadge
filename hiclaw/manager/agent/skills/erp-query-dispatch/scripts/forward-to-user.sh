@@ -232,6 +232,19 @@ def safe_for_matrix(obj):
         return [safe_for_matrix(v) for v in obj]
     return obj
 
+def strip_surrogates(obj):
+    """Remove lone surrogates (U+D800-DFFF) that json.dumps escapes as
+    \\uXXXX, producing invalid JSON that Tuwunel rejects (M_BAD_JSON).
+    These enter the pipeline when bash truncates multi-byte UTF-8
+    mid-sequence (e.g. head -c 400) and Python decodes via surrogateescape."""
+    if isinstance(obj, str):
+        return obj.encode('utf-8', 'replace').decode('utf-8')
+    if isinstance(obj, dict):
+        return {k: strip_surrogates(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [strip_surrogates(v) for v in obj]
+    return obj
+
 body = {
     'msgtype': 'm.text',
     'body': content,
@@ -265,7 +278,7 @@ if result_json_path and os.path.isfile(result_json_path):
     except Exception:
         pass  # fall through to plain text if result.json is unreadable
 
-data = json.dumps(safe_for_matrix(body)).encode('utf-8')
+data = json.dumps(strip_surrogates(safe_for_matrix(body))).encode('utf-8')
 req = urllib.request.Request(url, data=data, method='PUT', headers={
     'Authorization': f'Bearer {token}',
     'Content-Type': 'application/json',

@@ -19,68 +19,107 @@ from tests.e2e.selectors import (
 )
 
 MANAGER_CONTAINER = "honeybadge-hiclaw-manager"
-SESSION_DIR = "/root/manager-workspace/.openclaw/agents/main/sessions"
+GRAPH_WORKER_CONTAINER = "honeybadge-graph-worker"
+ANALYTICS_WORKER_CONTAINER = "honeybadge-analytics-worker"
+# Manager lives under /root/manager-workspace; workers (hiclaw-worker image)
+# live under /root/.openclaw.  Both share the same internal layout.
+MANAGER_SESSION_DIR = "/root/manager-workspace/.openclaw/agents/main/sessions"
+WORKER_SESSION_DIR = "/root/.openclaw/agents/main/sessions"
 
 
-def reset_manager_sessions():
-    """Clear all Manager OpenClaw sessions and restart the container.
+def _reset_openclaw_sessions(container, session_dir):
+    """Clear OpenClaw session transcripts in a container and restart it.
 
-    The Manager LLM (glm-5.2) enters repetition loops after 5-10 queries in
-    the same session.  E2E permission tests send 20+ queries to the same DM
-    rooms, accumulating context that triggers the loop.  This function:
-      1. Deletes all session transcript files (*.jsonl)
-      2. Resets sessions.json to an empty store
-      3. Restarts the Manager container so in-memory session caches are freed
-      4. Waits for the OpenClaw process to come back up
-
-    Call this between tests that would otherwise inherit a bloated session.
+    Deletes all *.jsonl transcripts, resets sessions.json to an empty store,
+    and restarts the container so in-memory session caches are freed.  Waits
+    for the openclaw process to come back up.  Used by reset_manager_sessions
+    for the Manager and both worker containers.
     """
     # 1. Delete session transcript files
     subprocess.run(
-        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
-         f"rm -f {SESSION_DIR}/*.jsonl"],
+        ["docker", "exec", container, "bash", "-c",
+         f"rm -f {session_dir}/*.jsonl"],
         capture_output=True, timeout=10,
     )
 
     # 2. Reset sessions.json to empty
     subprocess.run(
-        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
-         f'echo "{{}}" > {SESSION_DIR}/sessions.json'],
+        ["docker", "exec", container, "bash", "-c",
+         f'echo "{{}}" > {session_dir}/sessions.json'],
         capture_output=True, timeout=10,
     )
 
-    # 2b. Clean stale task directories so the Manager LLM doesn't reuse
-    # old worker results instead of making a fresh query
+    # 3. Restart the container
     subprocess.run(
-        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
-         "rm -rf /root/hiclaw-fs/shared/tasks/erp-* /root/hiclaw-fs/shared/tasks/fast-* 2>/dev/null"],
-        capture_output=True, timeout=10,
-    )
-
-    # 3. Restart the Manager container
-    subprocess.run(
-        ["docker", "restart", MANAGER_CONTAINER],
+        ["docker", "restart", container],
         capture_output=True, timeout=30,
     )
 
-    # 4. Wait for the OpenClaw process to be running
+    # 4. Wait for the openclaw process to be running
     for _ in range(30):
         result = subprocess.run(
-            ["docker", "exec", MANAGER_CONTAINER, "pgrep", "-f", "openclaw"],
+            ["docker", "exec", container, "pgrep", "-f", "openclaw"],
             capture_output=True, timeout=5,
         )
         if result.returncode == 0:
             break
         time.sleep(1)
     else:
-        print("[reset_manager_sessions] WARNING: Manager process not detected after 30s")
+        print(f"[reset_sessions] WARNING: openclaw process not detected in {container} after 30s")
 
-    # 5. Wait for the Matrix client to connect to the homeserver.
+
+def reset_manager_sessions():
+    """Clear all HiClaw LLM sessions (Manager + Workers) and restart containers.
+
+    The Manager LLM (glm-5.2) enters repetition loops after 5-10 queries in
+    the same session, and worker LLMs (graph-worker, analytics-worker)
+    accumulate stale context that causes hallucinations like "MCP服务不可用"
+    even when MCP servers are healthy.  E2E permission and isolation tests
+    send 20+ queries to the same DM rooms, accumulating context that
+    triggers both failure modes.  This function:
+      1. Resets Manager sessions (transcripts + sessions.json)
+      2. Cleans stale task directories so the Manager doesn't reuse old
+         worker results instead of making a fresh query
+      3. Resets graph-worker and analytics-worker sessions
+      4. Restarts all three containers so in-memory caches are freed
+      5. Waits for the Manager's Matrix client to reconnect to Tuwunel
+
+    Call this between tests that would otherwise inherit a bloated session.
+    """
+    # 1. Clean stale task directories BEFORE any container restart, while the
+    #    Manager is still running and the MinIO-backed shared FS is guaranteed
+    #    mounted.  Doing this after restart is risky: the container is up
+    #    (pgrep confirmed) but the bind mount may not be fully ready, causing
+    #    the rm to silently no-op and leaving stale results for the LLM to
+    #    reuse instead of making a fresh query.
+    subprocess.run(
+        ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
+         "rm -rf /root/hiclaw-fs/shared/tasks/erp-* /root/hiclaw-fs/shared/tasks/fast-* 2>/dev/null"],
+        capture_output=True, timeout=10,
+    )
+
+    # 2. Reset Manager session (transcripts + sessions.json + restart + wait).
+    _reset_openclaw_sessions(MANAGER_CONTAINER, MANAGER_SESSION_DIR)
+
+    # 3. Worker session cleanup (graph + analytics).
+    #    Workers accumulate stale context across tests — e.g. graph-worker
+    #    reached 107K tokens / 2.26MB transcript, forceFlushByTranscriptSize
+    #    fired, and the LLM began hallucinating "MCP服务不可用" despite MCP
+    #    servers being healthy.  Resetting both workers before tc310-tc314
+    #    prevents this pollution from carrying over.
+    _reset_openclaw_sessions(GRAPH_WORKER_CONTAINER, WORKER_SESSION_DIR)
+    _reset_openclaw_sessions(ANALYTICS_WORKER_CONTAINER, WORKER_SESSION_DIR)
+
+    # 4. Wait for the Manager's Matrix client to connect to the homeserver.
     #    The Manager takes ~22s after restart to join rooms and connect to
     #    the gateway.  Without this wait, the first query after restart may
     #    time out because the Matrix message isn't delivered.
     #    We use a fixed wait because docker logs --tail=N only shows the last
     #    N lines, which may not include the startup "connected to gateway" msg.
+    #    Workers restart concurrently during this 25s window: their
+    #    worker-init-wrapper.sh performs MinIO sync + Matrix reconnection
+    #    (~10-15s typical), so by the time the Manager is ready to dispatch,
+    #    workers have reconnected and are ready to receive queries.
     time.sleep(25)
 
 
@@ -173,15 +212,20 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
            (format: TRC-YYYYMMDD-HHMMSS-xxxxx), we reliably distinguish stale from new.
       2. Denial marker text (权限不足/permission denied/无权/Forbidden/access denied)
          — always immediate so permission tests fail fast.
-      3. Last new-message body length (>100 chars) stable for 10000ms (streaming finished)
-         — only after `min_wait_ms` AND only if the last message's trace_id timestamp
-           is >= ``query_send_ts`` (or has no trace_id).
+      3. Last new-message body length (>100 chars) stable for 10000ms PLUS a
+         5000ms "cond1 grace period" (streaming finished + no structured reply
+         arrived within 5s of stability).  Only after `min_wait_ms` AND only if
+         the last message's trace_id timestamp is >= ``query_send_ts`` (or has
+         no trace_id).  The grace period prevents cond3 from racing with cond1
+         when the MCP pipeline delivers a structured reply at ~15s — the same
+         moment the 10s stability window expires.
 
     Exits silently on timeout — callers must let the test assertion fail naturally.
     Debug info is printed to stdout via ``[SETTLE]`` prefix.
     """
     page_obj.evaluate(
-        f"() => {{ window.__hbStability = null; window.__hbSettleReason = ''; "
+        f"() => {{ window.__hbStability = null; window.__hbCond3Pending = null; "
+        f"window.__hbSettleReason = ''; "
         f"window.__hbSettleStart = Date.now(); "
         f"window.__hbQuerySendTs = {query_send_ts}; }}"
     )
@@ -240,11 +284,19 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
                 }}
 
                 // 3: streaming stable — last new-message body length unchanged
-                //    for 25s.  Only fires if text > 100 chars AND min_wait_ms
-                //    has elapsed AND last message is NOT stale.
-                //    25s window gives the Manager time to complete Bash tool calls
-                //    (MCP queries take ~15s) and produce a structured reply (cond1)
-                //    before the test accepts a text-only response (cond3).
+                //    for 10s, PLUS a 5s "cond1 grace period".  Only fires if
+                //    text > 100 chars AND min_wait_ms has elapsed AND last
+                //    message is NOT stale.
+                //
+                //    The grace period gives cond1 (structured worker reply) a
+                //    5s window to fire AFTER the text stabilizes but BEFORE
+                //    cond3 accepts.  The MCP pipeline takes ~15s (generate nGQL
+                //    + execute + forward).  The Manager emits text at ~5s, text
+                //    stabilizes at ~5s, cond3 stability (10s) is met at ~15s —
+                //    exactly when the structured reply arrives.  Without the
+                //    grace period, cond3 and cond1 race.  With 5s grace, cond1
+                //    is checked first in each 200ms cycle and fires before
+                //    cond3 accepts at ~20s.
                 if (elapsed >= {min_wait_ms}) {{
                     const last = msgs[msgs.length - 1];
                     if (isStale(last)) return false;  // last message is stale — keep waiting
@@ -254,11 +306,22 @@ def _wait_for_response_settled(page_obj, existing_count: int, timeout_ms: int = 
                     const now = Date.now();
                     if (!window.__hbStability || window.__hbStability.len !== len) {{
                         window.__hbStability = {{ len: len, ts: now }};
+                        window.__hbCond3Pending = null;  // text changed — reset grace
                         return false;
                     }}
-                    if ((now - window.__hbStability.ts) >= 25000) {{
-                        window.__hbSettleReason = 'cond3_stable len=' + len + ' elapsed=' + elapsed;
-                        return true;
+                    if ((now - window.__hbStability.ts) >= 10000) {{
+                        // Stability window met — start cond1 grace period.
+                        // cond1 is checked at the TOP of each cycle, so if a
+                        // structured reply arrives during this 5s window, cond1
+                        // fires first.  Only accept cond3 if no cond1 for 5s.
+                        if (!window.__hbCond3Pending) {{
+                            window.__hbCond3Pending = now;
+                            return false;
+                        }}
+                        if ((now - window.__hbCond3Pending) >= 5000) {{
+                            window.__hbSettleReason = 'cond3_stable len=' + len + ' elapsed=' + elapsed;
+                            return true;
+                        }}
                     }}
                 }}
 
@@ -295,16 +358,24 @@ def _wait_for_new_response(page_obj, existing_count: int, timeout: int = 120000,
     # to the new query.  With glm-5.2 at ~30-60s per LLM step, total time from
     # query to first response can be 2-3 minutes.
     stage1_timeout = max(timeout, 240000)
-    page_obj.wait_for_function(
-        f"""() => {{
-            const msgs = document.querySelectorAll('.chat-message.message-assistant');
-            if (msgs.length <= {existing_count}) return false;
-            const last = msgs[msgs.length - 1];
-            const body = last.querySelector('.message-body') || last;
-            return body && body.textContent.trim().length > 10;
-        }}""",
-        timeout=stage1_timeout,
-    )
+    for _attempt in range(2):
+        try:
+            page_obj.wait_for_function(
+                f"""() => {{
+                    const msgs = document.querySelectorAll('.chat-message.message-assistant');
+                    if (msgs.length <= {existing_count}) return false;
+                    const last = msgs[msgs.length - 1];
+                    const body = last.querySelector('.message-body') || last;
+                    return body && body.textContent.trim().length > 10;
+                }}""",
+                timeout=stage1_timeout,
+            )
+            break
+        except Exception as e:
+            if "Execution context was destroyed" not in str(e) or _attempt == 1:
+                raise
+            print(f"[STAGE1] navigation destroyed context, retrying: {str(e)[:120]}]")
+            page_obj.wait_for_timeout(500)  # brief pause for navigation to settle
     if settle_timeout_ms > 0:
         _wait_for_response_settled(page_obj, existing_count, timeout_ms=settle_timeout_ms,
                                    min_wait_ms=min_wait_ms,
@@ -393,6 +464,28 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "routing: worker routing tests")
 
 
+def _setup_matrix_route(page_obj):
+    """Patch Matrix homeserver URL so the browser uses the SSH tunnel
+    (localhost:7167) instead of the blocked external NodePort 30167."""
+    matrix_local = os.getenv("MATRIX_HOMESERVER_LOCAL", "http://localhost:7167")
+
+    def _patch_login(route):
+        response = route.fetch()
+        try:
+            body = response.json()
+            if "matrix_homeserver" in body:
+                body["matrix_homeserver"] = matrix_local
+            route.fulfill(
+                status=response.status,
+                content_type="application/json",
+                body=json.dumps(body),
+            )
+        except Exception:
+            route.fulfill(response=response)
+
+    page_obj.route("**/login", _patch_login)
+
+
 @pytest.fixture(scope="session")
 def browser():
     """Launch browser for entire test session."""
@@ -419,23 +512,7 @@ def page(browser: Browser):
 
     # Patch Matrix homeserver URL so the local Playwright browser uses the SSH tunnel
     # (port 7167 forwarded locally) instead of the blocked external NodePort 30167.
-    matrix_local = os.getenv("MATRIX_HOMESERVER_LOCAL", "http://localhost:7167")
-
-    def _patch_login(route):
-        response = route.fetch()
-        try:
-            body = response.json()
-            if "matrix_homeserver" in body:
-                body["matrix_homeserver"] = matrix_local
-            route.fulfill(
-                status=response.status,
-                content_type="application/json",
-                body=json.dumps(body),
-            )
-        except Exception:
-            route.fulfill(response=response)
-
-    page.route("**/login", _patch_login)
+    _setup_matrix_route(page)
 
     # Debug: log requests to matrix/7167 to verify connectivity
     page.on("request", lambda req: print(f"[NET] {req.method} {req.url[:80]}") if any(x in req.url for x in ["7167", "30167", "matrix", "_matrix"]) else None)
@@ -578,6 +655,12 @@ def create_user_page(browser: Browser):
         )
         p = context.new_page()
         p.set_default_timeout(30000)
+        # Patch Matrix homeserver URL — same as the `page` fixture. Without
+        # this, the login response returns the external NodePort 30167 URL,
+        # the Matrix SDK tries to connect to the unreachable host, and the
+        # resulting reconnection attempts cause navigation/reload during
+        # long wait_for_function polls ("Execution context was destroyed").
+        _setup_matrix_route(p)
         p.goto(f"{BASE_URL}/login")
         p.wait_for_selector(LOGIN_BUTTON, timeout=15000)
         p.fill(LOGIN_USERNAME, username)

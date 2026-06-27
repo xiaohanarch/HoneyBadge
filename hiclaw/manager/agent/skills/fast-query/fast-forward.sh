@@ -121,6 +121,18 @@ enc_room = urllib.parse.quote(room_id, safe='')
 enc_txn  = urllib.parse.quote(txn_id,  safe='')
 send_url = f'{tuwunel}/_matrix/client/v3/rooms/{enc_room}/send/m.room.message/{enc_txn}'
 
+def strip_surrogates(obj):
+    """Remove lone surrogates (U+D800-DFFF) that json.dumps escapes as
+    \\uXXXX, producing invalid JSON that Tuwunel rejects (M_BAD_JSON).
+    See forward-to-user.sh for full rationale."""
+    if isinstance(obj, str):
+        return obj.encode('utf-8', 'replace').decode('utf-8')
+    if isinstance(obj, dict):
+        return {k: strip_surrogates(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [strip_surrogates(v) for v in obj]
+    return obj
+
 body = {
     'msgtype': 'm.text',
     'body': summary,
@@ -139,7 +151,7 @@ body = {
     },
 }
 
-data = json.dumps(body).encode('utf-8')
+data = json.dumps(strip_surrogates(body)).encode('utf-8')
 req = urllib.request.Request(send_url, data=data, method='PUT', headers={
     'Authorization': f'Bearer {token}',
     'Content-Type': 'application/json',
