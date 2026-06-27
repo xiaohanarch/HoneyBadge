@@ -272,7 +272,7 @@ class TestUserIsolation:
     # 大领导(admin)权限大，可以看到全公司问题(万级数据)
     # 小领导(subsidiary/analyst)权限小，只能看到本组织问题(百级数据)
 
-    def test_tc310_high_risk_po_data_volume_isolation(self, create_user_page):
+    def test_tc310_high_risk_po_data_volume_isolation(self, reset_manager, create_user_page):
         """TC-310: 高风险采购订单数据量差异 - 体现权限视野差异
 
         RBP+LLM核心场景:
@@ -280,6 +280,11 @@ class TestUserIsolation:
         - subsidiary查询"高风险采购订单" → 只返回org1011的高风险(少)
 
         断言: admin >> subsidiary (体现权限差距)
+
+        reset_manager clears Manager + graph-worker + analytics-worker
+        sessions to prevent stale worker context (e.g. "MCP服务不可用"
+        hallucinations from forceFlushByTranscriptSize) from polluting
+        the dispatch.
         """
         # admin查询
         admin_page = create_user_page("admin", "admin123")
@@ -298,7 +303,7 @@ class TestUserIsolation:
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"权限差距: admin看全公司，subsidiary只看org1011。"
 
-    def test_tc311_large_amount_po_isolation(self, create_user_page):
+    def test_tc311_large_amount_po_isolation(self, reset_manager, create_user_page):
         """TC-311: 大额采购订单数据量差异
 
         - admin: 全org大额PO
@@ -318,7 +323,7 @@ class TestUserIsolation:
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"大领导能看到全公司大额PO，小领导只能看本org。"
 
-    def test_tc312_abnormal_po_isolation(self, create_user_page):
+    def test_tc312_abnormal_po_isolation(self, reset_manager, create_user_page):
         """TC-312: 异常采购订单数据量差异
 
         admin权限大能看到更多异常，subsidiary权限小只能看本org异常
@@ -337,7 +342,7 @@ class TestUserIsolation:
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"admin可发现全公司异常，subsidiary只能发现本org异常。"
 
-    def test_tc313_supplier_issues_isolation(self, create_user_page):
+    def test_tc313_supplier_issues_isolation(self, reset_manager, create_user_page):
         """TC-313: 供应商问题数据量差异
 
         体现: 大领导可发现跨多个org的供应商问题，小领导只能看到本org
@@ -356,7 +361,7 @@ class TestUserIsolation:
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"RBP权限差异体现在数据可见量上。"
 
-    def test_tc314_payment_issues_isolation(self, create_user_page):
+    def test_tc314_payment_issues_isolation(self, reset_manager, create_user_page):
         """TC-314: 付款异常数据量差异
 
         admin看到所有org的付款异常，subsidiary只看到org1011的
