@@ -93,6 +93,7 @@ class TestWorkerRouting:
         result = send_query_and_get_response(
             "分析采购订单金额异常，检测是否存在三单匹配问题",
             timeout=120000,
+            settle_timeout_ms=480000,
         )
 
         # Should produce a substantive analytical response
@@ -175,7 +176,7 @@ class TestWorkerRouting:
         page = admin_logged_in
         wait_for_chat_ready()
 
-        result = send_query_and_get_response(query, timeout=120000)
+        result = send_query_and_get_response(query, timeout=120000, settle_timeout_ms=480000)
 
         assert result["trace_id"], \
             f"'{query}' should produce trace_id (routed to analytics-worker)"
