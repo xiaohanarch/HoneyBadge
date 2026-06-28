@@ -1,4 +1,9 @@
-"""Anomaly detection patterns — replaces prose in anomaly-detection/SKILL.md."""
+"""Anomaly detection patterns — replaces prose in anomaly-detection/SKILL.md.
+
+All nGQL queries use MATCH/LOOKUP syntax (never GO/FETCH/FIND PATH/GET SUBGRAPH)
+so the L3 PermissionEnforcer can inject org_id filters for org-scoped users.
+See mcp-servers/honeybadge-nebula-mcp/permission_enforcer.py for details.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,11 +35,14 @@ def detect_three_way_mismatch(ctx: DetectionContext, po_id: str) -> list[Anomaly
 
     Flags when invoice_amount > po_amount * THREE_WAY_TOLERANCE.
     """
-    result = ctx.client.validate_and_execute(
-        f'GO FROM "{po_id}" OVER po_line YIELD po_line.amount AS po_amount, '
-        f'po_line.invoice_amount AS invoice_amount',
-        user_id=ctx.user_id,
+    ngql = (
+        f'MATCH (po:PurchaseOrder)-[:HAS_INVOICE]->(inv:Invoice) '
+        f'WHERE po.PurchaseOrder.po_number == "{po_id}" '
+        f'RETURN po.PurchaseOrder.total_amount AS po_amount, '
+        f'inv.Invoice.total_amount AS invoice_amount '
+        f'LIMIT 100'
     )
+    result = ctx.client.validate_and_execute(ngql, user_id=ctx.user_id)
     anomalies: list[Anomaly] = []
     for row in result.rows:
         po_amount = float(row.get("po_amount", 0))
@@ -64,11 +72,22 @@ def detect_duplicate_invoices(
     ctx: DetectionContext, supplier_id: str | None = None
 ) -> list[Anomaly]:
     """Detect duplicate invoices grouped by (supplier, amount, date)."""
+    supplier_filter = (
+        f'WHERE sup.Supplier.supplier_number == "{supplier_id}" '
+        if supplier_id
+        else ''
+    )
     ngql = (
-        'GET SUBGRAPH WITH PROP 3 FROM "invoice_root" YIELD '
-        'vertices AS v, edges AS e | UNWIND v AS invoice | '
-        'RETURN invoice.supplier AS supplier, invoice.amount AS amount, '
-        'invoice.invoice_date AS invoice_date, count(*) AS cnt'
+        'MATCH (po:PurchaseOrder)-[:HAS_INVOICE]->(inv:Invoice), '
+        '(po)-[:PLACED_WITH]->(sup:Supplier) '
+        f'{supplier_filter}'
+        'WITH sup.Supplier.supplier_name AS supplier, '
+        'inv.Invoice.total_amount AS amount, '
+        'inv.Invoice.invoice_date AS invoice_date, '
+        'count(*) AS count '
+        'WHERE count > 1 '
+        'RETURN supplier, amount, invoice_date, count '
+        'LIMIT 100'
     )
     result = ctx.client.validate_and_execute(ngql, user_id=ctx.user_id)
     anomalies: list[Anomaly] = []
@@ -94,11 +113,21 @@ def detect_duplicate_invoices(
 def detect_unusual_payments(
     ctx: DetectionContext, days: int = 90
 ) -> list[Anomaly]:
-    """Detect payments exceeding 2x supplier's historical average."""
+    """Detect payments exceeding 2x supplier's historical average.
+
+    Uses PAYS_INVOICE edge (Payment→Invoice) and HAS_INVOICE edge
+    (PurchaseOrder→Invoice) to link payments to suppliers via their POs.
+    The avg_amount is computed per supplier using nGQL aggregation.
+    """
     ngql = (
-        f'GO FROM "payment_root" OVER payment YIELD '
-        f'payment.supplier AS supplier, payment.amount AS amount, '
-        f'payment.avg_amount AS avg_amount'
+        'MATCH (pay:Payment)-[:PAYS_INVOICE]->(inv:Invoice)'
+        '<-[:HAS_INVOICE]-(po:PurchaseOrder)-[:PLACED_WITH]->(sup:Supplier) '
+        'WITH sup.Supplier.supplier_name AS supplier, '
+        'avg(pay.Payment.amount) AS avg_amount, '
+        'collect(pay.Payment.amount) AS amounts '
+        'UNWIND amounts AS amount '
+        'RETURN supplier, amount, avg_amount '
+        'LIMIT 100'
     )
     result = ctx.client.validate_and_execute(ngql, user_id=ctx.user_id)
     anomalies: list[Anomaly] = []
@@ -129,13 +158,37 @@ def detect_unusual_payments(
 def detect_supplier_concentration(
     ctx: DetectionContext, category: str | None = None
 ) -> list[Anomaly]:
-    """Detect suppliers exceeding 60% of category spend."""
-    ngql = (
-        'GO FROM "category_root" OVER category_spend YIELD '
-        'category_spend.supplier AS supplier, '
-        'category_spend.spend AS category_spend, '
-        'category_spend.total AS total_spend'
-    )
+    """Detect suppliers exceeding 60% of category spend.
+
+    Groups PurchaseOrder amounts by supplier, computing each supplier's
+    share of total spend. An optional category filter restricts to a
+    specific Item category via the ORDERS_ITEM edge.
+    """
+    if category:
+        ngql = (
+            'MATCH (po:PurchaseOrder)-[:ORDERS_ITEM]->(item:Item), '
+            '(po)-[:PLACED_WITH]->(sup:Supplier) '
+            f'WHERE item.Item.category == "{category}" '
+            'WITH sup.Supplier.supplier_name AS supplier, '
+            'sum(po.PurchaseOrder.total_amount) AS category_spend '
+            'MATCH (po2:PurchaseOrder)-[:ORDERS_ITEM]->(item2:Item) '
+            f'WHERE item2.Item.category == "{category}" '
+            'WITH supplier, category_spend, '
+            'sum(po2.PurchaseOrder.total_amount) AS total_spend '
+            'RETURN supplier, category_spend, total_spend '
+            'LIMIT 100'
+        )
+    else:
+        ngql = (
+            'MATCH (po:PurchaseOrder)-[:PLACED_WITH]->(sup:Supplier) '
+            'WITH sup.Supplier.supplier_name AS supplier, '
+            'sum(po.PurchaseOrder.total_amount) AS category_spend '
+            'MATCH (po2:PurchaseOrder) '
+            'WITH supplier, category_spend, '
+            'sum(po2.PurchaseOrder.total_amount) AS total_spend '
+            'RETURN supplier, category_spend, total_spend '
+            'LIMIT 100'
+        )
     result = ctx.client.validate_and_execute(ngql, user_id=ctx.user_id)
     anomalies: list[Anomaly] = []
     for row in result.rows:

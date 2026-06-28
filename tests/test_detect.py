@@ -21,7 +21,7 @@ from anomaly_detection.lib.detect import (
 
 def _make_result(rows, trace_id="t1"):
     return QueryResult(
-        trace_id=trace_id, ngql="GO", columns=["c"], rows=rows,
+        trace_id=trace_id, ngql="MATCH", columns=["c"], rows=rows,
         row_count=len(rows), execution_time_ms=1, success=True,
     )
 
