@@ -571,16 +571,16 @@ done
 #     the worker config (direct SSE to the MCP containers), we write the
 #     file ourselves and sync to MinIO.
 #
-#     Note: FastMCP exposes /sse (Server-Sent Events) on port 8000.
+#     Note: FastMCP exposes /mcp (streamable-http transport) on port 8000.
 #     mcporter detects transport from the URL path.
 # ---------------------------------------------------------------------------
-log "Provisioning Manager mcporter.json (direct SSE, unprefixed names)..."
+log "Provisioning Manager mcporter.json (streamable-http, unprefixed names)..."
 
 MANAGER_MCPORTER_JSON='{
   "mcpServers": {
-    "honeybadge-nebula": { "baseUrl": "http://honeybadge-nebula-mcp:8000/sse" },
-    "honeybadge-audit":  { "baseUrl": "http://honeybadge-audit-mcp:8000/sse"  },
-    "honeybadge-cache":  { "baseUrl": "http://honeybadge-cache-mcp:8000/sse"  }
+    "honeybadge-nebula": { "baseUrl": "http://honeybadge-nebula-mcp:8000/mcp" },
+    "honeybadge-audit":  { "baseUrl": "http://honeybadge-audit-mcp:8000/mcp"  },
+    "honeybadge-cache":  { "baseUrl": "http://honeybadge-cache-mcp:8000/mcp"  }
   }
 }'
 
