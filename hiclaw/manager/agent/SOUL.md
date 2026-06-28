@@ -116,6 +116,7 @@ TASK_ID="erp-$(date +%s%3N)"
 bash /opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts/dispatch.sh \
   --worker graph-worker \
   --task-id "$TASK_ID" \
+  --user-id "$USER_ID" \
   --user-mxid "@hb-${USER_ID}:matrix-local.hiclaw.io" \
   --message "@graph-worker:matrix-local.hiclaw.io Task ${TASK_ID}: ${USER_QUESTION}"
 ```

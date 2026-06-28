@@ -42,8 +42,9 @@ mcporter call honeybadge-nebula.generate_query \
   --args '{"question":"..."}'
 
 # Validate and execute nGQL (user_context is MANDATORY)
+# user_id is extracted from spec.md — see Step 2 for the deterministic extraction.
 mcporter call honeybadge-nebula.validate_and_execute \
-  --args '{"ngql":"...","user_context":{"user_id":"<USER_ID>"}}'
+  --args '{"ngql":"...","user_context":{"user_id":"$USER_ID"}}'
 
 # Write audit log
 mcporter call honeybadge-audit.write-audit-log \
@@ -64,7 +65,7 @@ You decompose complex questions into multiple graph queries, cross-reference res
 - Fraud and anomaly detection
 - Trend analysis and comparison
 
-**Auth Context (MANDATORY)**: You MUST always pass `user_context: {"user_id": "<username>"}` to `validate_and_execute`. The `user_id` comes from the task spec. If the task spec does not include a `user_id`, use `"unknown"` as the user_id — this ensures L3 permission enforcement (org_id filtering) is activated. Never omit `user_context` — doing so bypasses permission checks and causes a data leak.
+**Auth Context (MANDATORY)**: `user_id` is extracted from `spec.md` in Step 2 using a shell `grep` command — do NOT manually substitute it. The extraction sets `$USER_ID` which is passed to `validate_and_execute` via `jq`. If `spec.md` has no `user_id`, the fallback is `"unknown"` which activates L3 with restrictive defaults. Never omit `user_context` — doing so bypasses permission checks and causes a data leak.
 
 # Constraints
 
@@ -93,32 +94,44 @@ cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md || \
 
 **Save every MCP response to /tmp so Step 3b can parse it without LLM guessing.**
 
+**Do NOT use `2>&1` when redirecting mcporter output** — use only `>`. The `2>&1` suffix mixes stderr log lines into the JSON file and breaks Python parsing, causing retry loops that exhaust your turn budget.
+
+**Use `python3 -c` to extract fields from MCP responses** — it is always available and reliable for JSON parsing.
+
 ```bash
 TASK_DIR="/root/hiclaw-fs/shared/tasks/{task-id}"
 mkdir -p "$TASK_DIR"
 
+# Extract user_id from spec.md (written deterministically by dispatch-to-worker.sh).
+# This is CRITICAL for L3 permission enforcement — never omit user_context.
+# Fallback to "unknown" ensures L3 is activated even if spec.md is missing.
+USER_ID=$(grep '^user_id:' "$TASK_DIR/spec.md" 2>/dev/null | head -1 | sed 's/^user_id:[[:space:]]*//' || true)
+USER_ID="${USER_ID:-unknown}"
+
 # 2a — Generate nGQL (overwrite each round; last successful response wins)
+QUESTION=$(grep '^question:' "$TASK_DIR/spec.md" 2>/dev/null | head -1 | sed 's/^question:[[:space:]]*//' || true)
+QUESTION="${QUESTION:-<QUESTION FROM SPEC>}"
 mcporter call honeybadge-nebula.generate_query \
-  --args '{"question":"<QUESTION FROM SPEC>"}' \
+  --args "$(python3 -c "import json,sys; print(json.dumps({'question':sys.argv[1]}))" "$QUESTION")" \
   > /tmp/mcp_generate.json
 
 # 2b — Execute (overwrite each round; last successful response wins)
-#      user_context is MANDATORY — never omit it. If the task spec has no
-#      user_id, use "unknown" to ensure L3 permission enforcement is activated.
+#      user_context is MANDATORY — user_id is extracted deterministically above.
+NGQL=$(python3 -c "import json; print(json.load(open('/tmp/mcp_generate.json')).get('ngql',''))")
 mcporter call honeybadge-nebula.validate_and_execute \
-  --args '{"ngql":"<NGQL FROM GENERATE RESPONSE>","user_context":{"user_id":"<USER_ID>"}}' \
+  --args "$(python3 -c "import json,sys; print(json.dumps({'ngql':sys.argv[1],'user_context':{'user_id':sys.argv[2]}}))" "$NGQL" "$USER_ID")" \
   > /tmp/mcp_execute.json
 ```
 
 Decompose complex questions into multiple queries:
 1. Generate initial nGQL using `generate_query` (saved to `/tmp/mcp_generate.json`)
 2. Execute using `validate_and_execute` (saved to `/tmp/mcp_execute.json`)
-3. If anomalies detected, run follow-up queries (max 3 rounds total) — each round overwrites the /tmp files
+3. If anomalies detected, run follow-up queries (max 2 rounds total) — each round overwrites the /tmp files
 4. Summarize results in Chinese
 
-**TIME BUDGET: Complete all queries within 3 rounds. Do NOT over-explore. Each API call costs ~20s; you have a 240s window.**
+**TIME BUDGET: Complete all queries within 2 rounds. Do NOT over-explore. Each API call costs ~20s; you have a 240s window. If a query fails, retry at most ONCE, then proceed to Step 3 with whatever you have — NEVER skip Step 3.**
 
-If `validate_and_execute` returns `"success": false`, fix the nGQL and retry. Each retry overwrites `/tmp/mcp_generate.json` and `/tmp/mcp_execute.json`.
+If `validate_and_execute` returns `"success": false`, fix the nGQL and retry ONCE. If it still fails, proceed to Step 3 and record the error in the Summary section. **Step 3 MUST always run** — without result.md and result.json, the Manager cannot deliver any result to the user and the task hangs until timeout.
 
 **After each query round**, persist anomalies for cross-round deduplication:
 

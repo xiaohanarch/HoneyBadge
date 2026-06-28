@@ -21,6 +21,7 @@ WORKER_NAME=""
 TASK_ID=""
 MESSAGE=""
 USER_MXID=""
+USER_ID=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -28,6 +29,7 @@ while [[ $# -gt 0 ]]; do
         --task-id)    TASK_ID="$2";     shift 2 ;;
         --message)    MESSAGE="$2";     shift 2 ;;
         --user-mxid)  USER_MXID="$2";  shift 2 ;;
+        --user-id)    USER_ID="$2";    shift 2 ;;
         *)            echo "DISPATCH_ERROR: Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -95,6 +97,8 @@ fi
 
 # 3. Create task directory and meta.json so result-watcher / forward-to-user.sh
 #    can resolve the user's DM room when the Worker result arrives.
+#    Also write spec.md with user_id so the Worker can extract it deterministically
+#    (not relying on LLM substitution for L3 permission enforcement).
 if [ -n "$TASK_ID" ] && [ -n "$USER_MXID" ]; then
     TASK_META_DIR="/root/hiclaw-fs/shared/tasks/$TASK_ID"
     mkdir -p "$TASK_META_DIR"
@@ -106,6 +110,24 @@ with open(sys.argv[2], 'w') as f:
 " "$USER_MXID" "$TASK_META_DIR/meta.json" \
         && echo "META_CREATED $TASK_META_DIR/meta.json" >&2 \
         || echo "META_CREATE_FAILED (continuing)" >&2
+
+    # Write spec.md with user_id for L3 permission enforcement.
+    # The Worker reads this to extract user_id for mcporter validate_and_execute.
+    if [ -n "$USER_ID" ]; then
+        cat > "$TASK_META_DIR/spec.md" << SPECEOF
+# Task: $TASK_ID
+user_id: $USER_ID
+question: $MESSAGE
+## Expected Output
+Query results with L3 permission filtering applied for user "$USER_ID".
+SPECEOF
+        echo "SPEC_CREATED $TASK_META_DIR/spec.md (user_id=$USER_ID)" >&2
+
+        # Sync spec.md to MinIO so the Worker can pull it
+        mc cp "$TASK_META_DIR/spec.md" \
+            "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/spec.md" 2>/dev/null \
+            || echo "SPEC_MINIO_SYNC_FAILED (continuing)" >&2
+    fi
 fi
 
 # 4. Send message to worker's room via Matrix API
