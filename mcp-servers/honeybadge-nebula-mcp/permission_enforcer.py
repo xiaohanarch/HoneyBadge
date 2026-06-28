@@ -53,23 +53,24 @@ def _inject_org_filter(ngql: str, var: str, tag: str, org_ids: list[int]) -> str
     # If WHERE already exists, append AND
     # Note: leading space before AND/WHERE guards against token-run-together if
     # the preceding character is not whitespace.
+    # Insert before the first clause boundary keyword (WITH/RETURN/YIELD).
+    # WITH is critical: it ends the current WHERE scope. If we insert after
+    # WITH (e.g. before RETURN), the variable is out of scope and the query
+    # silently returns 0 results.
     # Limitation: pipe-chained queries (|) are not supported — insert targets
-    # the first RETURN/YIELD, which may be inside a subquery, not at the root.
+    # the first boundary keyword, which may be inside a subquery, not at root.
+    boundary_re = re.compile(r'\b(WITH|RETURN|YIELD)\b', re.IGNORECASE)
     where_re = re.compile(r'\bWHERE\b', re.IGNORECASE)
     if where_re.search(ngql):
-        # Insert before RETURN/YIELD by finding the first of those keywords
-        return_re = re.compile(r'\b(RETURN|YIELD)\b', re.IGNORECASE)
-        match = return_re.search(ngql)
+        match = boundary_re.search(ngql)
         if match:
             insert_pos = match.start()
             return ngql[:insert_pos] + f" AND {condition} " + ngql[insert_pos:]
         # Fallback: append at end (only reachable for syntactically incomplete
-        # queries that lack RETURN/YIELD; these should be rejected by L1 first)
+        # queries that lack WITH/RETURN/YIELD; these should be rejected by L1 first)
         return ngql + f" AND {condition}"
     else:
-        # Insert WHERE before RETURN/YIELD
-        return_re = re.compile(r'\b(RETURN|YIELD)\b', re.IGNORECASE)
-        match = return_re.search(ngql)
+        match = boundary_re.search(ngql)
         if match:
             insert_pos = match.start()
             return ngql[:insert_pos] + f" WHERE {condition} " + ngql[insert_pos:]
