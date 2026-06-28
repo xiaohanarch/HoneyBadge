@@ -39,7 +39,7 @@ You decompose complex questions into multiple graph queries, cross-reference res
 - Fraud and anomaly detection
 - Trend analysis and comparison
 
-**Auth Context**: If `user_id` is available, pass `user_context: {"user_id": "<username>"}` to `validate_and_execute`. If no user_id, omit.
+**Auth Context (MANDATORY)**: You MUST always pass `user_context: {"user_id": "<username>"}` to `validate_and_execute`. The `user_id` comes from the task spec. If the task spec does not include a `user_id`, use `"unknown"` as the user_id — this ensures L3 permission enforcement (org_id filtering) is activated. Never omit `user_context` — doing so bypasses permission checks and causes a data leak.
 
 # Constraints
 
@@ -78,7 +78,8 @@ mcporter call honeybadge-nebula.generate_query \
   > /tmp/mcp_generate.json
 
 # 2b — Execute (overwrite each round; last successful response wins)
-#      Include user_context if user_id was provided in the task spec.
+#      user_context is MANDATORY — never omit it. If the task spec has no
+#      user_id, use "unknown" to ensure L3 permission enforcement is activated.
 mcporter call honeybadge-nebula.validate_and_execute \
   --args '{"ngql":"<NGQL FROM GENERATE RESPONSE>","user_context":{"user_id":"<USER_ID>"}}' \
   > /tmp/mcp_execute.json
