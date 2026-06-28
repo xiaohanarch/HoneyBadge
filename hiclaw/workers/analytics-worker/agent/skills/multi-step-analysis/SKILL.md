@@ -5,44 +5,35 @@ description: Use when the user asks for analysis that requires decomposing a com
 
 # Multi-Step Analysis Skill
 
-## How to Call MCP Tools (CRITICAL)
+## How to Run Analysis (CRITICAL)
 
-You call MCP tools via the `exec` tool using the `mcporter` CLI.
+Call the Python analysis modules:
 
-**nebula-mcp** (honeybadge-nebula):
-```
-mcporter call honeybadge-nebula.generate_query --args '{"question":"..."}'
-mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"...","user_context":{"user_id":"..."}}'
-mcporter call honeybadge-nebula.explain_ngql --args '{"ngql":"..."}'
-mcporter call honeybadge-nebula.summarize_query_results --args '{"question":"...","columns":[...],"rows":[...]}'
-```
+```bash
+# Decompose a complex question into sub-queries
+python3 -m multi_step_analysis.lib.decompose --question "对比2025年和2026年Q1的采购金额变化"
 
-**audit-mcp** (honeybadge-audit):
-```
-mcporter call honeybadge-audit.write_audit_log --args '{"trace_id":"...","question":"...","ngql":"...","raw_result":{...},"summary":"..."}'
-```
-
-**cache-mcp** (honeybadge-cache):
-```
-mcporter call honeybadge-cache.check_cache --args '{"key":"..."}'
-mcporter call honeybadge-cache.cache_result --args '{"key":"...","value":{...},"ttl":300}'
+# Cross-reference results from multiple rounds
+python3 -m multi_step_analysis.lib.decompose cross-reference \
+  --results-dir /tmp/mcp_results/
 ```
 
 ## Execution Flow
 
 ### Step 1: Decompose
-Break the complex question into 2-5 sub-queries.
-
-Example: "对比2025年和2026年Q1的采购金额变化"
-- Sub 1: Query 2025 Q1 PO amounts by month
-- Sub 2: Query 2026 Q1 PO amounts by month
-- Sub 3: Compare results
+```bash
+python3 -m multi_step_analysis.lib.decompose --question "<QUESTION>"
+```
+Breaks the complex question into 2-5 sub-queries with round numbers.
 
 ### Step 2: Execute Sub-queries
-For each sub-query: generate_query → validate_and_execute
+For each sub-query: use `common.mcp_client` to generate_query -> validate_and_execute.
 
 ### Step 3: Cross-reference Results
-Find patterns, trends, or anomalies across sub-queries.
+```bash
+python3 -m multi_step_analysis.lib.decompose cross-reference --results-dir /tmp/
+```
+Finds patterns, trends, or anomalies across sub-query results.
 
 ### Step 4: Synthesize
 Present findings with severity levels:
