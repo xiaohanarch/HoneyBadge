@@ -223,7 +223,7 @@ class TestGetUserPermissions:
     async def test_subsidiary_lead_permissions(self):
         result = await get_user_permissions_impl("subsidiary_lead")
         assert result["user_id"] == "subsidiary_lead"
-        assert result["org_ids"] == [2]
+        assert result["org_ids"] == [1021]
 
     @pytest.mark.asyncio
     async def test_unknown_user_returns_restrictive_default(self):
@@ -351,7 +351,7 @@ class TestValidateAndExecuteWithPermissions:
         assert "warnings" in result
         assert any("PERMISSION WARNING" in w for w in result["warnings"])
         # Verify the org_id filter was actually present in the query sent to NebulaGraph
-        assert "po.org_id IN [2]" in nebula.last_ngql
+        assert "po.PurchaseOrder.org_id IN [2]" in nebula.last_ngql
 
     @pytest.mark.asyncio
     async def test_allowed_query_with_full_access_has_empty_warnings(self, nebula, validator):

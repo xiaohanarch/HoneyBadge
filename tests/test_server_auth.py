@@ -50,15 +50,15 @@ class TestDemoUsers:
         assert user["username"] == "procurement_lead"
         assert user["display_name"] == "采购部门领导"
         assert "analyst" in user["roles"]
-        assert user["org_id"] == 1
+        assert user["org_id"] == 1000
 
     def test_subsidiary_lead_fields(self):
-        """subsidiary_lead should have correct fields and org_id=2."""
+        """subsidiary_lead should have correct fields and org_id=1021."""
         user = DEMO_USERS["subsidiary_lead"]
         assert user["username"] == "subsidiary_lead"
         assert user["display_name"] == "子公司领导"
         assert "analyst" in user["roles"]
-        assert user["org_id"] == 2
+        assert user["org_id"] == 1021
 
     def test_admin_fields(self):
         """admin user should have correct fields."""
@@ -67,7 +67,7 @@ class TestDemoUsers:
         assert "password_hash" in user
         assert user["display_name"] == "系统管理员"
         assert "admin" in user["roles"]
-        assert user["org_id"] == 1
+        assert user["org_id"] == 1000
 
     def test_analyst_fields(self):
         """analyst user should have correct fields."""
@@ -75,7 +75,7 @@ class TestDemoUsers:
         assert user["username"] == "analyst"
         assert user["display_name"] == "数据分析师"
         assert "analyst" in user["roles"]
-        assert user["org_id"] == 1
+        assert user["org_id"] == 1000
 
     def test_auditor_fields(self):
         """auditor user should have correct fields."""
@@ -83,7 +83,7 @@ class TestDemoUsers:
         assert user["username"] == "auditor"
         assert user["display_name"] == "审计员"
         assert "auditor" in user["roles"]
-        assert user["org_id"] == 1
+        assert user["org_id"] == 1000
 
     def test_passwords_are_hashed(self):
         """password_hash should not be plaintext."""
@@ -283,7 +283,7 @@ class TestUserToResponse:
         """Response should include org_id."""
         user = DEMO_USERS["admin"]
         response = user_to_response(user)
-        assert response["org_id"] == 1
+        assert response["org_id"] == 1000
 
     def test_original_user_unchanged(self):
         """user_to_response should not mutate the original user dict."""
