@@ -117,9 +117,14 @@ if [ -n "${MATRIX_PASSWORD}" ]; then
             -H 'Content-Type: application/json' \
             -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"'"${WORKER_NAME}"'"},"password":"'"${MATRIX_PASSWORD}"'"}' 2>/dev/null) || true
         NEW_TOKEN=$(echo "${LOGIN_RESP}" | jq -r '.access_token // empty' 2>/dev/null)
+        NEW_USER_ID=$(echo "${LOGIN_RESP}" | jq -r '.user_id // empty' 2>/dev/null)
         if [ -n "${NEW_TOKEN}" ] && [ "${NEW_TOKEN}" != "null" ]; then
             sed -i "s|^MATRIX_ACCESS_TOKEN=.*|MATRIX_ACCESS_TOKEN=${NEW_TOKEN}|" "${HERMES_HOME}/.env"
             sed -i "s|access_token:.*|access_token: ${NEW_TOKEN}|" "${HERMES_HOME}/config.yaml"
+            if [ -n "${NEW_USER_ID}" ] && [ "${NEW_USER_ID}" != "null" ]; then
+                sed -i "s|^MATRIX_USER_ID=.*|MATRIX_USER_ID=${NEW_USER_ID}|" "${HERMES_HOME}/.env"
+                sed -i "s|user_id:.*|user_id: \"${NEW_USER_ID}\"|" "${HERMES_HOME}/config.yaml"
+            fi
             log "Matrix re-login successful (token prefix: ${NEW_TOKEN:0:10}...)"
         else
             log "WARNING: Matrix re-login failed, using existing token"
@@ -128,8 +133,26 @@ if [ -n "${MATRIX_PASSWORD}" ]; then
     MATRIX_PASSWORD=""
 fi
 
-# --- Step 8: Launch hermes-agent ---
-log "Starting Hermes Agent: ${WORKER_NAME}"
+# --- Step 8: Launch hermes gateway (foreground, for Docker) ---
+log "Starting Hermes Gateway: ${WORKER_NAME}"
 cd "${HERMES_HOME}"
 
-exec hermes-agent --config "${HERMES_HOME}/config.yaml"
+# Ensure model is set in hermes's internal state (config bridge writes config.yaml,
+# but hermes model selection also needs this for the gateway runtime)
+MODEL_FROM_CONFIG=$(python3 -c "
+import yaml
+try:
+    with open('${HERMES_HOME}/config.yaml') as f:
+        print(yaml.safe_load(f).get('model', ''))
+except Exception:
+    pass
+" 2>/dev/null || true)
+
+if [ -n "$MODEL_FROM_CONFIG" ]; then
+    export HERMES_ACCEPT_HOOKS=1
+    hermes config set model "$MODEL_FROM_CONFIG" 2>/dev/null || true
+    log "Model set: ${MODEL_FROM_CONFIG}"
+fi
+
+# Run gateway in foreground (recommended for Docker/WSL/Termux)
+exec hermes gateway run --accept-hooks

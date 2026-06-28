@@ -8,7 +8,8 @@ FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
 # The base image has Python 3.12 but no pip
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3-pip \
-    && pip3 install --no-cache-dir --break-system-packages hermes-agent \
+    && pip3 install --no-cache-dir --break-system-packages \
+        hermes-agent 'mautrix[encryption]' asyncpg aiosqlite Markdown aiohttp-socks \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
