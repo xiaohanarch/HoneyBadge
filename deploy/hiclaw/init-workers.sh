@@ -212,9 +212,12 @@ for worker in graph-worker analytics-worker; do
     # Upload skills if they exist
     SKILLS_DIR="$PROJECT_ROOT/hiclaw/workers/$worker/agent/skills"
     if [ -d "$SKILLS_DIR" ]; then
-        docker cp "$SKILLS_DIR" "$EMBEDDED_CONTAINER:/tmp/${worker}-skills"
+        # Trailing slash on source copies directory CONTENTS (not the dir itself),
+        # matching the Manager skills sync pattern above. Without it, docker cp
+        # creates a nested skills/skills/ path in MinIO.
+        docker cp "$SKILLS_DIR/" "$EMBEDDED_CONTAINER:/tmp/${worker}-skills/"
         docker exec "$EMBEDDED_CONTAINER" bash -c \
-            "mc mirror /tmp/${worker}-skills/ hiclaw/hiclaw-storage/agents/${worker}/skills/"
+            "mc mirror /tmp/${worker}-skills/ hiclaw/hiclaw-storage/agents/${worker}/skills/ --overwrite"
         log "  → ${worker}/skills/ uploaded to MinIO"
     fi
 done
