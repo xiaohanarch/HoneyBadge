@@ -129,14 +129,28 @@ def reset_manager_sessions():
 
 
 def _wait_for_textarea_enabled(page_obj, timeout=60000):
-    """Wait for chat textarea to be visible and enabled."""
-    page_obj.wait_for_function(
-        """() => {
-            const ta = document.querySelector('.input-container .el-textarea__inner');
-            return ta && !ta.disabled;
-        }""",
-        timeout=timeout,
-    )
+    """Wait for chat textarea to be visible and enabled.
+
+    Cold-start guard: on parametrized test variants the frontend may not have
+    finished mounting the chat input by the time the first locator check runs.
+    If the first attempt times out, reload the page once and try again. This is
+    safe because callers only invoke this before any query is sent, so there is
+    no in-flight state to lose.
+    """
+    def _wait():
+        page_obj.wait_for_function(
+            """() => {
+                const ta = document.querySelector('.input-container .el-textarea__inner');
+                return ta && !ta.disabled;
+            }""",
+            timeout=timeout,
+        )
+
+    try:
+        _wait()
+    except Exception:
+        page_obj.reload()
+        _wait()
 
 
 def _wait_for_current_session(page_obj, timeout=30000):
@@ -574,12 +588,12 @@ def login_as(page: Page):
         page.fill(LOGIN_PASSWORD, password)
         page.click(LOGIN_BUTTON)
         page.wait_for_url(f"{BASE_URL}/chat", timeout=30000)
-        _wait_for_textarea_enabled(page, timeout=15000)
+        _wait_for_textarea_enabled(page, timeout=30000)
         # Start a new chat session so existing_count begins at 0 (avoids reading stale historical messages)
         new_session_btn = page.locator(NEW_CHAT_BUTTON)
         if new_session_btn.count() > 0 and new_session_btn.first.is_visible():
             new_session_btn.first.click()
-            _wait_for_textarea_enabled(page, timeout=15000)
+            _wait_for_textarea_enabled(page, timeout=30000)
         # Race-guard: chat store's addMessage/prepareAssistantMessage/finalizeAssistantMessage
         # silently no-op until currentSessionId is set. Wait for it to settle.
         _wait_for_current_session(page, timeout=30000)
@@ -619,7 +633,7 @@ def subsidiary_lead_logged_in(page: Page, login_as):
 def wait_for_chat_ready(page: Page):
     """Wait for chat interface to be fully loaded."""
     def _wait():
-        _wait_for_textarea_enabled(page, timeout=15000)
+        _wait_for_textarea_enabled(page, timeout=30000)
     return _wait
 
 

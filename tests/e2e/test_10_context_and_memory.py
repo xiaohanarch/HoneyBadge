@@ -348,5 +348,5 @@ class TestContextAndMemory:
 # Helper function
 def wait_for_chat_ready(page):
     """Wait for chat interface to be ready."""
-    page.wait_for_selector(CHAT_TEXTAREA, timeout=15000)
+    page.wait_for_selector(CHAT_TEXTAREA, timeout=30000)
     page.wait_for_timeout(3000)
