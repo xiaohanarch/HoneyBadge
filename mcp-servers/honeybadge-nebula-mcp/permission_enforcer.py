@@ -29,6 +29,17 @@ _TAG_VAR_RE = re.compile(r'\((\w+):(\w+)\)')
 # Regex to extract TagName from LOOKUP ON TagName clauses
 _LOOKUP_TAG_RE = re.compile(r'\bLOOKUP\s+ON\s+(\w+)', re.IGNORECASE)
 
+# Regex to detect unsupported nGQL operations that bypass L3 org_id injection.
+# GO, FETCH, FIND PATH use syntax without (var:Tag) patterns, so the enforcer
+# cannot inject org_id filters. The LLM prompt restricts to MATCH/LOOKUP; this
+# regex is the hard-reject safety net for when the LLM doesn't comply.
+_FORBIDDEN_OPS_RE = re.compile(
+    r'\bGO\s+(?:\d+\s+STEPS\s+)?FROM\b'
+    r'|\bFETCH\s+PROP\s+ON\b'
+    r'|\bFIND\s+(?:SHORTEST\s+|ALL\s+)?PATH\b',
+    re.IGNORECASE,
+)
+
 
 def _get_tag_category(tag: str) -> str | None:
     """Return 'PTP', 'OTC', 'MASTER', or None if unknown tag."""
@@ -123,8 +134,19 @@ class PermissionEnforcer:
             (modified_ngql, warnings) where modified_ngql has org filters injected.
 
         Raises:
-            PermissionViolationError: if the query accesses a forbidden process tag.
+            PermissionViolationError: if the query accesses a forbidden process
+            tag or uses an unsupported nGQL operation.
         """
+        # --- 0. Reject unsupported operations (defense in depth) ---
+        # GO, FETCH, FIND PATH bypass L3 org_id injection because their syntax
+        # doesn't use (var:Tag) patterns. The LLM prompt restricts to MATCH/LOOKUP;
+        # this hard-rejects any query that slips through.
+        if _FORBIDDEN_OPS_RE.search(ngql):
+            raise PermissionViolationError(
+                "不支持的查询操作: GO/FETCH/FIND PATH 无法注入 org_id 权限过滤，"
+                "请使用 MATCH 或 LOOKUP 重写查询"
+            )
+
         warnings: list[str] = []
         tag_vars = _TAG_VAR_RE.findall(ngql)  # list of (var, tag) tuples from MATCH
         lookup_tags = _LOOKUP_TAG_RE.findall(ngql)  # list of tag names from LOOKUP ON

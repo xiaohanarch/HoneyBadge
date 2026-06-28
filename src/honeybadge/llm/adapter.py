@@ -722,7 +722,7 @@ async def generate_ngql(
 # 严格规则
 
 1. **只生成 nGQL 查询**，不要回答问题，不要解释，不要猜测数据
-2. **只使用 READ 操作**：MATCH, LOOKUP, GO, FETCH, FIND PATH
+2. **只使用 READ 操作**：MATCH, LOOKUP（禁止 GO、FETCH、FIND PATH — 这些语法无法注入 org_id 权限过滤）
 3. **禁止 WRITE 操作**：INSERT, UPDATE, UPSERT, DELETE, DROP, CREATE, ALTER
 4. **每个查询必须有 LIMIT**（默认 LIMIT 100，除非用户指定数量或使用聚合函数）
 5. **遍历深度不超过 5 跳**

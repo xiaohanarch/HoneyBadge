@@ -241,3 +241,61 @@ class TestLookupOnOrgFilterInjection:
         result_ngql, warnings = enforcer.enforce(ngql, ctx)
         assert result_ngql == ngql
         assert warnings == []
+
+
+class TestForbiddenOperationsRejected:
+    """GO, FETCH, FIND PATH bypass L3 org_id injection — hard-rejected.
+
+    These operations use syntax without (var:Tag) patterns, so the enforcer
+    cannot inject org_id filters. The LLM prompt restricts to MATCH/LOOKUP;
+    this is the safety net for when the LLM doesn't comply.
+    """
+
+    def test_go_query_rejected(self, enforcer):
+        ngql = 'GO 1 STEPS FROM "po:1021-00001" OVER PLACED_WITH YIELD $$.Supplier.supplier_name'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError) as exc:
+            enforcer.enforce(ngql, ctx)
+        assert "GO" in str(exc.value) or "不支持" in str(exc.value)
+
+    def test_go_without_steps_rejected(self, enforcer):
+        ngql = 'GO FROM "po:1021-00001" OVER PLACED_WITH YIELD id(vertex)'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_fetch_prop_rejected(self, enforcer):
+        ngql = 'FETCH PROP ON PurchaseOrder "po:1021-00001" YIELD PurchaseOrder.po_number'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError) as exc:
+            enforcer.enforce(ngql, ctx)
+        assert "FETCH" in str(exc.value) or "不支持" in str(exc.value)
+
+    def test_find_path_rejected(self, enforcer):
+        ngql = 'FIND SHORTEST PATH FROM "po:1021-00001" TO "sup:0001" OVER PLACED_WITH YIELD path'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError) as exc:
+            enforcer.enforce(ngql, ctx)
+        assert "FIND" in str(exc.value) or "不支持" in str(exc.value)
+
+    def test_find_all_path_rejected(self, enforcer):
+        ngql = 'FIND ALL PATH FROM "po:1000-00001" TO "sup:0001" OVER * YIELD path'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_go_rejected_even_for_admin(self, enforcer):
+        """GO is rejected even for admin (org_ids=None) — it's a syntax
+        restriction, not a permission scope issue."""
+        ngql = 'GO FROM "po:1000-00001" OVER PLACED_WITH YIELD id(vertex)'
+        ctx = _ctx(org_ids=None)
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_match_still_works_alongside_forbidden(self, enforcer):
+        """Ensure the forbidden-ops check doesn't false-positive on MATCH."""
+        ngql = "MATCH (po:PurchaseOrder) WHERE po.PurchaseOrder.org_id == 1021 RETURN po.PurchaseOrder.po_number AS po_number LIMIT 10"
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "MATCH" in result_ngql
+        assert "GO" not in result_ngql.upper().split("MATCH")[0]
