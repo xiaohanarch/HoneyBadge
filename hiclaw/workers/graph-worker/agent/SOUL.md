@@ -161,7 +161,7 @@ rows = exe.get("rows", [])
 
 result = {
     "trace_id":          exe.get("trace_id", ""),
-    "cypher":            gen.get("ngql", ""),
+    "cypher":            exe.get("ngql", gen.get("ngql", "")),
     "columns":           exe.get("columns", []),
     "raw_data":          rows,
     "row_count":         exe.get("row_count", len(rows)),
