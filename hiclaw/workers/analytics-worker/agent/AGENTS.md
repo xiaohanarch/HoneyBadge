@@ -23,6 +23,8 @@ Non-bridge-owned keys are preserved.
 ### common.mcp_client
 Typed wrapper over mcporter. CLI: `python3 -m common.mcp_client <tool> [args]`
 
+> **Prefer `mcporter call` directly** (as shown in SOUL.md Step 2). Use `common.mcp_client` only for Python interop scenarios where you need to import the client as a module.
+
 ### common.result_builder
 Builds result.json from MCP responses. CLI: `python3 -m common.result_builder --task-id ... --generate-file ... --execute-file ... --result-md ... --output ...`
 
