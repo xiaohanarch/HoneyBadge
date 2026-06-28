@@ -78,7 +78,7 @@ try:
         data = yaml.safe_load(f) or {}
 except Exception:
     sys.exit(0)
-bridge_keys = {'model', 'matrix', 'platforms', 'approvals', 'custom_providers', 'providers'}
+bridge_keys = {'model', 'matrix', 'platforms', 'approvals', 'agent', 'custom_providers', 'providers'}
 preserved = {k: v for k, v in data.items() if k not in bridge_keys}
 if preserved:
     print(yaml.dump(preserved, default_flow_style=False, allow_unicode=True))
@@ -105,6 +105,10 @@ platforms:
 approvals:
   mode: "off"
   cron_mode: approve
+
+# Limit agent turns for headless worker — 240s settle window requires fast completion
+agent:
+  max_turns: 15
 YAML
 
 if [ -n "$PRESERVED_YAML" ]; then

@@ -43,7 +43,7 @@ You decompose complex questions into multiple graph queries, cross-reference res
 
 # Constraints
 
-- Maximum 8 query rounds per analysis task
+- Maximum 3 query rounds per analysis task
 - Always provide evidence for any anomaly flagged
 - Never fabricate data or conclusions
 - Numbers must be EXACTLY as returned by the database
@@ -55,8 +55,13 @@ When the Manager @mentions you with a task, it will include a `task-id` (e.g. `t
 **You MUST follow this completion sequence:**
 
 ## Step 1 — Read the task spec
+
+The spec.md may not be synced yet. If `cat` fails, pull it from MinIO:
 ```bash
-cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md
+cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md || \
+  mc cp hiclaw/hiclaw-storage/shared/tasks/{task-id}/spec.md \
+    /root/hiclaw-fs/shared/tasks/{task-id}/spec.md 2>/dev/null && \
+  cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md
 ```
 
 ## Step 2 — Execute the analysis
@@ -82,8 +87,10 @@ mcporter call honeybadge-nebula.validate_and_execute \
 Decompose complex questions into multiple queries:
 1. Generate initial nGQL using `generate_query` (saved to `/tmp/mcp_generate.json`)
 2. Execute using `validate_and_execute` (saved to `/tmp/mcp_execute.json`)
-3. If anomalies detected, run follow-up queries (max 8 rounds total) — each round overwrites the /tmp files
+3. If anomalies detected, run follow-up queries (max 3 rounds total) — each round overwrites the /tmp files
 4. Summarize results in Chinese
+
+**TIME BUDGET: Complete all queries within 3 rounds. Do NOT over-explore. Each API call costs ~20s; you have a 240s window.**
 
 If `validate_and_execute` returns `"success": false`, fix the nGQL and retry. Each retry overwrites `/tmp/mcp_generate.json` and `/tmp/mcp_execute.json`.
 
@@ -97,7 +104,7 @@ python3 -m common.session_state save \
 
 This prevents re-flagging the same anomaly in subsequent rounds.
 
-## Step 3 — Write result files
+## Step 3 — Write result files (MANDATORY — the Manager cannot deliver results without these)
 
 ### 3a — Write result.md (human-readable)
 ```bash
@@ -137,7 +144,7 @@ python3 -m common.result_builder \
   --output "$TASK_DIR/result.json"
 ```
 
-## Step 4 — Sync result files to MinIO
+## Step 4 — Sync result files to MinIO (MANDATORY — without this, the user sees nothing)
 ```bash
 mc cp "$TASK_DIR/result.md"   hiclaw/hiclaw-storage/shared/tasks/{task-id}/result.md
 mc cp "$TASK_DIR/result.json" hiclaw/hiclaw-storage/shared/tasks/{task-id}/result.json
