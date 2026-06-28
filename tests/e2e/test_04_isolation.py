@@ -286,17 +286,14 @@ class TestUserIsolation:
         hallucinations from forceFlushByTranscriptSize) from polluting
         the dispatch.
         """
-        # NOTE: 原查询"查询高风险的采购订单"含"风险"关键词，触发analytics-worker
-        # 路由。analytics-worker的L3权限注入存在缺陷（不注入org_id过滤），
-        # 导致admin和subsidiary看到相同数据。改用"信用评级BB或B"表述避免
-        # analytics关键词，路由到fast-query路径（L3正确注入org_id）。
+        # admin查询
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计供应商信用评级为BB或B的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "查询高风险的采购订单", timeout=120000, settle_timeout_ms=480000)
         admin_count = self._extract_count(admin_text)
 
         # subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计供应商信用评级为BB或B的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询高风险的采购订单", timeout=120000, settle_timeout_ms=480000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # 断言: 体现权限差距
@@ -334,11 +331,11 @@ class TestUserIsolation:
         admin权限大能看到更多异常，subsidiary权限小只能看本org异常
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计状态为APPROVED的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "查询异常的采购订单", timeout=120000, settle_timeout_ms=480000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计状态为APPROVED的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询异常的采购订单", timeout=120000, settle_timeout_ms=480000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
@@ -354,11 +351,11 @@ class TestUserIsolation:
         体现: 大领导可发现跨多个org的供应商问题，小领导只能看到本org
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计供应商信用评级为BBB的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "查询有问题的供应商", timeout=120000, settle_timeout_ms=480000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计供应商信用评级为BBB的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询有问题的供应商", timeout=120000, settle_timeout_ms=480000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
@@ -374,11 +371,11 @@ class TestUserIsolation:
         admin看到所有org的付款异常，subsidiary只看到org1011的
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计供应商信用评级为A的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "查询付款异常的发票", timeout=120000, settle_timeout_ms=480000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计供应商信用评级为A的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "查询付款异常的发票", timeout=120000, settle_timeout_ms=480000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"

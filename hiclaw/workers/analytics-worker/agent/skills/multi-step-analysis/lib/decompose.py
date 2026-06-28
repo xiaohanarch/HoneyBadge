@@ -98,3 +98,62 @@ def compare_trends(
         "baseline_sum": baseline_sum,
         "comparison_sum": comparison_sum,
     }
+
+
+if __name__ == "__main__":
+    import argparse
+    import json
+    import sys
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(
+        prog="decompose",
+        description="Multi-step analysis: decompose questions or cross-reference results",
+    )
+    sub = parser.add_subparsers(dest="command", required=False)
+
+    # Default (no subcommand): decompose mode
+    parser.add_argument(
+        "--question",
+        help="Complex question to decompose into sub-queries",
+    )
+
+    # cross-reference subcommand
+    xref = sub.add_parser("cross-reference", help="Cross-reference results from multiple rounds")
+    xref.add_argument(
+        "--results-dir",
+        default="/tmp/",
+        help="Directory containing mcp_execute.json result files",
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "cross-reference":
+        results_dir = Path(args.results_dir)
+        results: list[QueryResult] = []
+        for json_file in sorted(results_dir.glob("mcp_execute*.json")):
+            try:
+                data = json.loads(json_file.read_text(encoding="utf-8"))
+                results.append(QueryResult(
+                    trace_id=data.get("trace_id", ""),
+                    ngql=data.get("ngql", ""),
+                    columns=data.get("columns", []),
+                    rows=data.get("rows", []),
+                    row_count=data.get("row_count", 0),
+                    execution_time_ms=data.get("execution_time_ms", 0),
+                    success=data.get("success", True),
+                ))
+            except (json.JSONDecodeError, KeyError) as exc:
+                print(f"Skip {json_file.name}: {exc}", file=sys.stderr)
+        patterns = cross_reference(results)
+        print(json.dumps(patterns, ensure_ascii=False, indent=2))
+    elif args.question:
+        client = MCPClient()
+        sub_queries = decompose(args.question, client)
+        print(json.dumps(
+            [{"description": sq.description, "question": sq.question, "round": sq.round} for sq in sub_queries],
+            ensure_ascii=False, indent=2,
+        ))
+    else:
+        parser.print_help(sys.stderr)
+        sys.exit(2)

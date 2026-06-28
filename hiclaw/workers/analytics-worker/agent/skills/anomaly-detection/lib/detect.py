@@ -213,3 +213,51 @@ def detect_supplier_concentration(
     if anomalies:
         ctx.tracker.save(anomalies)
     return anomalies
+
+
+if __name__ == "__main__":
+    import argparse
+    import json
+    import sys
+    from dataclasses import asdict
+
+    from common.session_state import AnomalyTracker
+
+    parser = argparse.ArgumentParser(
+        prog="detect",
+        description="Run anomaly detection patterns (L3-compliant, org_id injected)",
+    )
+    parser.add_argument(
+        "pattern",
+        choices=["three-way", "duplicate-invoices", "unusual-payments", "supplier-concentration"],
+        help="Detection pattern to run",
+    )
+    parser.add_argument("--po-id", help="PO ID (for three-way mismatch)")
+    parser.add_argument("--supplier-id", help="Supplier ID filter (for duplicate invoices)")
+    parser.add_argument("--days", type=int, default=90, help="Lookback days (for unusual payments)")
+    parser.add_argument("--category", help="Category filter (for supplier concentration)")
+    parser.add_argument(
+        "--user-id",
+        default="unknown",
+        help="User ID for L3 permission enforcement (default: unknown)",
+    )
+    parser.add_argument("--task-id", default="cli-detect", help="Task ID for anomaly tracking")
+    args = parser.parse_args()
+
+    client = MCPClient()
+    tracker = AnomalyTracker(task_id=args.task_id)
+    ctx = DetectionContext(client=client, tracker=tracker, user_id=args.user_id)
+
+    if args.pattern == "three-way":
+        if not args.po_id:
+            print("--po-id is required for three-way pattern", file=sys.stderr)
+            sys.exit(2)
+        result = detect_three_way_mismatch(ctx, args.po_id)
+    elif args.pattern == "duplicate-invoices":
+        result = detect_duplicate_invoices(ctx, args.supplier_id)
+    elif args.pattern == "unusual-payments":
+        result = detect_unusual_payments(ctx, args.days)
+    elif args.pattern == "supplier-concentration":
+        result = detect_supplier_concentration(ctx, args.category)
+
+    print(json.dumps([asdict(a) for a in result], ensure_ascii=False, indent=2))
