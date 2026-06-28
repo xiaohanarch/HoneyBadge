@@ -48,9 +48,7 @@ mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"MATCH (s:S
 
 # Auth Context Extraction
 
-When you receive a task, look for a `user_id` in the message (e.g. `user_id: "admin"`).
-Pass it as `user_context` when calling `validate_and_execute`.
-If no `user_id`, omit `user_context` (anonymous defaults apply).
+`user_id` is extracted from `spec.md` in Step 2 using a shell `grep` command — do NOT manually substitute it. The extraction sets `$USER_ID` which is passed to `validate_and_execute` via `jq`. If `spec.md` has no `user_id`, the fallback is `"unknown"`. Never omit `user_context` — doing so bypasses L3 permission checks.
 
 # Core Behavior
 
@@ -79,15 +77,23 @@ cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md
 TASK_DIR="/root/hiclaw-fs/shared/tasks/{task-id}"
 mkdir -p "$TASK_DIR"
 
+# Extract user_id from spec.md (written deterministically by dispatch-to-worker.sh).
+# CRITICAL for L3 permission enforcement — never omit user_context.
+USER_ID=$(grep '^user_id:' "$TASK_DIR/spec.md" 2>/dev/null | head -1 | sed 's/^user_id:[[:space:]]*//' || true)
+USER_ID="${USER_ID:-unknown}"
+
 # 2a — Generate nGQL
+QUESTION=$(grep '^question:' "$TASK_DIR/spec.md" 2>/dev/null | head -1 | sed 's/^question:[[:space:]]*//' || true)
+QUESTION="${QUESTION:-<QUESTION FROM SPEC>}"
 mcporter call honeybadge-nebula.generate_query \
-  --args '{"question":"<QUESTION FROM SPEC>"}' \
+  --args "$(python3 -c "import json,sys; print(json.dumps({'question':sys.argv[1]}))" "$QUESTION")" \
   > /tmp/mcp_generate.json
 
 # 2b — Execute (repeat and overwrite if you retry; last successful response wins)
-#      Include user_context if user_id was provided in the task spec.
+#      user_context is MANDATORY — user_id extracted deterministically above.
+NGQL=$(python3 -c "import json; print(json.load(open('/tmp/mcp_generate.json')).get('ngql',''))")
 mcporter call honeybadge-nebula.validate_and_execute \
-  --args '{"ngql":"<NGQL FROM GENERATE RESPONSE>","user_context":{"user_id":"<USER_ID>"}}' \
+  --args "$(python3 -c "import json,sys; print(json.dumps({'ngql':sys.argv[1],'user_context':{'user_id':sys.argv[2]}}))" "$NGQL" "$USER_ID")" \
   > /tmp/mcp_execute.json
 ```
 
