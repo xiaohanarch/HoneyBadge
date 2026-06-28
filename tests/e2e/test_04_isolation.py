@@ -272,6 +272,7 @@ class TestUserIsolation:
     # 大领导(admin)权限大，可以看到全公司问题(万级数据)
     # 小领导(subsidiary/analyst)权限小，只能看到本组织问题(百级数据)
 
+    @pytest.mark.timeout(600)
     def test_tc310_high_risk_po_data_volume_isolation(self, reset_manager, create_user_page):
         """TC-310: 高风险采购订单数据量差异 - 体现权限视野差异
 
@@ -304,6 +305,7 @@ class TestUserIsolation:
             f"权限差距: admin看全公司，subsidiary只看org1021。" \
             f"Admin响应: {admin_text[:300]}; Subsidiary响应: {subsidiary_text[:300]}"
 
+    @pytest.mark.timeout(600)
     def test_tc311_large_amount_po_isolation(self, reset_manager, create_user_page):
         """TC-311: 大额采购订单数据量差异
 
@@ -325,6 +327,7 @@ class TestUserIsolation:
             f"大领导能看到全公司大额PO，小领导只能看本org。" \
             f"Admin响应: {admin_text[:300]}; Subsidiary响应: {subsidiary_text[:300]}"
 
+    @pytest.mark.timeout(600)
     def test_tc312_abnormal_po_isolation(self, reset_manager, create_user_page):
         """TC-312: 异常采购订单数据量差异
 
@@ -345,6 +348,7 @@ class TestUserIsolation:
             f"admin可发现全公司异常，subsidiary只能发现本org异常。" \
             f"Admin响应: {admin_text[:300]}; Subsidiary响应: {subsidiary_text[:300]}"
 
+    @pytest.mark.timeout(600)
     def test_tc313_supplier_issues_isolation(self, reset_manager, create_user_page):
         """TC-313: 供应商问题数据量差异
 
@@ -365,6 +369,7 @@ class TestUserIsolation:
             f"RBP权限差异体现在数据可见量上。" \
             f"Admin响应: {admin_text[:300]}; Subsidiary响应: {subsidiary_text[:300]}"
 
+    @pytest.mark.timeout(600)
     def test_tc314_payment_issues_isolation(self, reset_manager, create_user_page):
         """TC-314: 付款异常数据量差异
 

@@ -229,6 +229,7 @@ class TestPermissions:
                 assert admin_response.status_code in (401, 403), \
                     f"Analyst accessing /api/admin/users should get 401/403, got {admin_response.status_code}"
 
+    @pytest.mark.timeout(600)
     def test_tc408_org_id_filter_verification(self, reset_manager, create_user_page):
         """TC-408: Verify org_id filter is correctly applied to queries.
 
@@ -284,6 +285,7 @@ class TestPermissions:
         assert 200 < subsidiary_count < 500, \
             f"Subsidiary should see ~280 records from org 1011. Got: {subsidiary_count}"
 
+    @pytest.mark.timeout(600)
     def test_tc408b_analyst_vs_subsidiary_data_different(self, reset_manager, create_user_page):
         """TC-408b: Verify analyst and subsidiary see DIFFERENT org data.
 
@@ -314,6 +316,7 @@ class TestPermissions:
     # subsidiary_lead/analyst因权限小只能看到本org数据(百级)
     # 差异可达30-40倍
 
+    @pytest.mark.timeout(600)
     def test_tc409_high_risk_procurement_admin_vs_subsidiary(self, reset_manager, create_user_page):
         """TC-409: 采购订单org过滤验证 - admin看全量，subsidiary只能看本org
 
@@ -342,6 +345,7 @@ class TestPermissions:
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
             f"admin有全部org权限，subsidiary只有org1011权限。"
 
+    @pytest.mark.timeout(600)
     def test_tc410_large_amount_po_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-410: 采购订单org过滤验证 - admin看全量，analyst只能看本org
 
@@ -370,6 +374,7 @@ class TestPermissions:
             f"Admin({admin_count})应看到>analyst({analyst_count})。" \
             f"admin无org限制，analyst只有org1000权限。"
 
+    @pytest.mark.timeout(600)
     def test_tc411_abnormal_transactions_admin_vs_subsidiary(self, reset_manager, create_user_page):
         """TC-411: 采购订单org过滤独立验证 - admin vs subsidiary再次确认
 
@@ -394,6 +399,7 @@ class TestPermissions:
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
             f"admin看全公司，subsidiary只看org1011。"
 
+    @pytest.mark.timeout(600)
     def test_tc412_recent_po_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-412: 采购订单org过滤独立验证 - admin vs analyst再次确认
 
@@ -418,6 +424,7 @@ class TestPermissions:
             f"Admin({admin_count})应>analyst({analyst_count})。" \
             f"admin无org过滤，analyst只有org1000。"
 
+    @pytest.mark.timeout(600)
     def test_tc413_pending_approval_po_admin_vs_subsidiary(self, reset_manager, create_user_page):
         """TC-413: 采购订单org过滤稳定性验证 - admin vs subsidiary
 
@@ -441,6 +448,7 @@ class TestPermissions:
             f"Admin({admin_count})应>subsidiary({subsidiary_count})。" \
             f"admin无org限制，subsidiary只有org1011。"
 
+    @pytest.mark.timeout(600)
     def test_tc414_supplier_qualifications_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-414: 采购订单org过滤并发验证 - admin vs analyst
 
