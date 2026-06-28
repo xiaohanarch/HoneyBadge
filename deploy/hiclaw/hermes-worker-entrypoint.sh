@@ -15,6 +15,24 @@ log() {
     echo "[hermes-worker $(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
+# Create underscore symlinks for hyphenated skill directories.
+# Python cannot import directories with hyphens (e.g. anomaly-detection),
+# but SKILL.md/SOUL.md reference python3 -m anomaly_detection.lib.detect.
+create_skill_symlinks() {
+    local skills_dir="${HERMES_HOME}/skills"
+    [ -d "$skills_dir" ] || return 0
+    for d in "$skills_dir"/*/; do
+        [ -d "$d" ] || continue
+        local name=$(basename "$d")
+        case "$name" in
+            *-*)
+                local underscored=$(echo "$name" | tr '-' '_')
+                ln -sfn "$name" "$skills_dir/$underscored" 2>/dev/null || true
+                ;;
+        esac
+    done
+}
+
 # --- Step 0: Set timezone ---
 if [ -n "${TZ}" ] && [ -f "/usr/share/zoneinfo/${TZ}" ]; then
     ln -sf "/usr/share/zoneinfo/${TZ}" /etc/localtime
@@ -63,6 +81,7 @@ cp "${WORKSPACE}/SOUL.md" "${HERMES_HOME}/SOUL.md"
 if [ -d "${WORKSPACE}/skills" ]; then
     mkdir -p "${HERMES_HOME}/skills"
     cp -r "${WORKSPACE}/skills/"* "${HERMES_HOME}/skills/" 2>/dev/null || true
+    create_skill_symlinks
     log "Skills copied to ${HERMES_HOME}/skills/"
 fi
 
@@ -99,6 +118,7 @@ log "Local->Remote sync started (PID: $!)"
         sleep 300
         mc mirror "hiclaw/hiclaw-storage/shared/" "${HICLAW_ROOT}/shared/" --overwrite --newer-than "5m" 2>/dev/null || true
         mc mirror "hiclaw/hiclaw-storage/agents/${WORKER_NAME}/skills/" "${HERMES_HOME}/skills/" --overwrite 2>/dev/null || true
+        create_skill_symlinks
         find "${HERMES_HOME}/skills" -name '*.py' -exec chmod +x {} + 2>/dev/null || true
         find "${HERMES_HOME}/skills" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
         touch "${PULL_MARKER}"
