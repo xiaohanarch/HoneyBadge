@@ -174,14 +174,17 @@ def seed_master(session):
          "created_at", "updated_at", "etl_batch_id", "source_system", "is_active"],
         org_rows)
 
-    # Suppliers
+    # Suppliers — assign varied credit_ratings so isolation tests can
+    # distinguish high-risk (BB/B) from investment-grade (AAA/AA/A/BBB) POs.
+    SUPPLIER_RATINGS = ["BB", "B", "BB", "BBB", "A", "AA", "BBB", "B", "AAA", "BB"]
     sup_rows = []
     for i, name in enumerate(SUPPLIER_NAMES, 1):
+        rating = SUPPLIER_RATINGS[(i - 1) % len(SUPPLIER_RATINGS)]
         sup_rows.append(
             f'"sup:{i:04d}":("SUP{i:04d}", "{name}", "ENTERPRISE", "ACTIVE", '
             f'"CN", "北京", "北京市朝阳区", "采购联系人{i}", "010-{i:08d}", '
             f'"supplier{i}@example.com", "62280{i:06d}", "中国工商银行", '
-            f'"91110000{i:08d}", "CNY", "NET30", "A", '
+            f'"91110000{i:08d}", "CNY", "NET30", "{rating}", '
             f'{ts(i)}, {ts(i + 90)}, 1000, 0, "ALL", '
             f'{ts()}, {ts()}, "SEED-001", "SEED", true)'
         )
