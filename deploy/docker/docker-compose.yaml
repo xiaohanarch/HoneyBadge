@@ -470,13 +470,14 @@ services:
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   hiclaw-analytics-worker:
-    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
+    image: honeybadge/hiclaw-hermes-worker:v1.1.2-1
     container_name: honeybadge-analytics-worker
     hostname: hiclaw-analytics-worker
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/opt/honeybadge/init/worker-init-wrapper.sh"]
     environment:
       - HICLAW_WORKER_NAME=analytics-worker
+      - HICLAW_WORKER_RUNTIME=hermes
       - HICLAW_FS_ENDPOINT=http://hiclaw-embedded:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
@@ -492,6 +493,7 @@ services:
         condition: service_started
     labels:
       com.honeybadge.service: "hiclaw-analytics-worker"
+      com.honeybadge.runtime: "hermes"
       com.honeybadge.version: "${IMAGE_TAG:-latest}"
 
   # =============================================================================

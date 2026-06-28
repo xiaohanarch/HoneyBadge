@@ -5,62 +5,54 @@ description: Use when the user asks about fraud detection, three-way matching an
 
 # Anomaly Detection Skill
 
-## How to Call MCP Tools (CRITICAL)
+## How to Run Detection (CRITICAL)
 
-You call MCP tools via the `exec` tool using the `mcporter` CLI.
+Call the Python detection modules instead of raw mcporter CLI:
 
-**nebula-mcp** (honeybadge-nebula):
-```
-mcporter call honeybadge-nebula.generate_query --args '{"question":"..."}'
-mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"...","user_context":{"user_id":"..."}}'
-mcporter call honeybadge-nebula.explain_ngql --args '{"ngql":"..."}'
-mcporter call honeybadge-nebula.summarize_query_results --args '{"question":"...","columns":[...],"rows":[...]}'
-```
+```bash
+# Three-way matching (PO vs Receipt vs Invoice)
+python3 -m anomaly_detection.lib.detect three-way --po-id "PO-2026-001"
 
-**audit-mcp** (honeybadge-audit):
-```
-mcporter call honeybadge-audit.write_audit_log --args '{"trace_id":"...","question":"...","ngql":"...","raw_result":{...},"summary":"..."}'
-```
+# Duplicate invoice detection
+python3 -m anomaly_detection.lib.detect duplicate-invoices --supplier-id "S001"
 
-**cache-mcp** (honeybadge-cache):
-```
-mcporter call honeybadge-cache.cache_result --args '{"key":"...","value":{...},"ttl":300}'
+# Unusual payment patterns (last 90 days)
+python3 -m anomaly_detection.lib.detect unusual-payments --days 90
+
+# Supplier concentration risk
+python3 -m anomaly_detection.lib.detect supplier-concentration --category "IT"
 ```
 
 ## Detection Patterns
 
+Pattern definitions and thresholds are in `lib/patterns.py`.
+Implementation is in `lib/detect.py`.
+
 ### Three-Way Matching (PO vs Receipt vs Invoice)
-1. Query PO amounts per line
-2. Query Receipt quantities per PO
-3. Query Invoice amounts per PO
-4. Compare: flag where Invoice amount > PO amount × 1.10 (10% tolerance)
+- Tolerance: Invoice > PO x 1.10 -> WARNING
+- Alert: Invoice > PO x 1.30 -> ALERT
 
 ### Duplicate Invoice Detection
-1. Query invoices grouped by (supplier, amount, invoice_date)
-2. Flag groups with count > 1
+- Flag: groups with count > 1
 
 ### Unusual Payment Patterns
-1. Query payments in last 90 days
-2. Flag payments > 2× supplier's historical average
-3. Flag payments to new suppliers (registration < 90 days) above threshold
+- Warning: payment > 2x historical average
+- Alert: payment > 3x historical average
 
 ### Supplier Concentration Risk
-1. Query total spend per supplier for a category
-2. Flag if any single supplier > 60% of category spend
+- Warning: supplier > 60% of category spend
+- Alert: supplier > 80% of category spend
 
 ## Execution Flow
 
 1. Identify which detection pattern matches the question
-2. Execute relevant sub-queries (2-5 rounds)
-3. Apply flagging logic based on data returned
-4. Present findings with severity:
-   - **INFO**: Within normal range
-   - **WARNING**: Exceeds soft threshold
-   - **ALERT**: Exceeds hard threshold
-5. Write audit log with full evidence chain
+2. Call the corresponding Python module
+3. Review returned anomalies (already deduplicated by AnomalyTracker)
+4. Present findings with severity levels
+5. Audit log is written by the detection module
 
 ## CRITICAL
 
-- Thresholds are approximate guidelines — flagging is based on actual query data
-- Never state "fraud detected" — only flag anomalies for human review
+- Thresholds are in `lib/patterns.py` -- do not hardcode in prompts
+- Never state "fraud detected" -- only flag anomalies for human review
 - Always show the specific data that triggered each flag
