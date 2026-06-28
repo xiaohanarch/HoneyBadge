@@ -44,7 +44,16 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_SCOPES = "openid email profile"
 
-_STATE_SECRET = os.getenv("STATE_SECRET", "change-me-in-production")
+_STATE_SECRET_DEFAULT = "change-me-in-production"
+
+
+def _get_state_secret() -> str:
+    """Read STATE_SECRET from environment on each call.
+
+    Reading at call time (not module import) ensures secret rotation
+    takes effect without restarting the process.
+    """
+    return os.getenv("STATE_SECRET", _STATE_SECRET_DEFAULT)
 
 
 def _build_state() -> str:
@@ -54,7 +63,7 @@ def _build_state() -> str:
     """
     random_bytes = secrets.token_bytes(32)
     signature = hmac.new(
-        _STATE_SECRET.encode(),
+        _get_state_secret().encode(),
         random_bytes,
         hashlib.sha256,
     ).digest()
@@ -75,7 +84,7 @@ def _verify_state(state: str) -> bool:
         sig_b64 = parts[1] + "=="
         random_bytes = base64.urlsafe_b64decode(random_b64)
         sig_bytes = base64.urlsafe_b64decode(sig_b64)
-        expected_sig = hmac.new(_STATE_SECRET.encode(), random_bytes, hashlib.sha256).digest()
+        expected_sig = hmac.new(_get_state_secret().encode(), random_bytes, hashlib.sha256).digest()
         return hmac.compare_digest(sig_bytes, expected_sig)
     except Exception:
         return False
