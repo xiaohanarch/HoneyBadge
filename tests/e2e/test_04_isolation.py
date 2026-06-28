@@ -372,19 +372,19 @@ class TestUserIsolation:
 
     @pytest.mark.timeout(600)
     def test_tc314_payment_issues_isolation(self, reset_manager, create_user_page):
-        """TC-314: 待处理采购订单数据量差异
+        """TC-314: 已批准采购订单数据量差异
 
-        admin看到所有org的待处理采购订单，subsidiary只看到org1011的。
-        用"统计待处理的采购订单数量"避免Invoice/Supplier的L3过滤不稳定问题
-        (Invoice标签无Tag Index，Supplier查询有时绕过org_id过滤)。
+        admin看到所有org的已批准采购订单，subsidiary只看到org1011的。
+        用"统计已批准的采购订单数量"——APPROVED是最常见状态(7181/8297)，
+        确保subsidiary在org_id=1011范围内有数据。
         PO查询的L3过滤最为稳定。
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计待处理的采购订单数量", timeout=120000, settle_timeout_ms=180000)
+        admin_text = send_query_on_page(admin_page, "统计已批准的采购订单数量", timeout=120000, settle_timeout_ms=180000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计待处理的采购订单数量", timeout=120000, settle_timeout_ms=180000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计已批准的采购订单数量", timeout=120000, settle_timeout_ms=180000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
