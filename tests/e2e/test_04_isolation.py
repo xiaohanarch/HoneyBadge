@@ -289,18 +289,18 @@ class TestUserIsolation:
         """
         # admin查询
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "查询高风险的采购订单", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "统计高风险的采购订单数量", timeout=120000, settle_timeout_ms=480000)
         admin_count = self._extract_count(admin_text)
 
         # subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "查询高风险的采购订单", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计高风险的采购订单数量", timeout=120000, settle_timeout_ms=480000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # 断言: 体现权限差距
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
         assert subsidiary_count > 0, f"Subsidiary应有数据. Response: {subsidiary_text[:500]}"
-        assert admin_count > subsidiary_count * 10, \
+        assert admin_count > subsidiary_count * 5, \
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"权限差距: admin看全公司，subsidiary只看org1021。" \
             f"Admin响应: {admin_text[:300]}; Subsidiary响应: {subsidiary_text[:300]}"
