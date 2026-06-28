@@ -65,17 +65,17 @@ class TestPermissionConfig:
         assert ctx.allowed_processes == ["PTP"]
         assert ctx.org_ids is None
 
-    def test_subsidiary_lead_restricted_to_org_2(self):
+    def test_subsidiary_lead_restricted_to_org_1021(self):
         ctx = PERMISSION_CONFIG["subsidiary_lead"]
         assert "PTP" in ctx.allowed_processes
         assert "OTC" in ctx.allowed_processes
-        assert ctx.org_ids == [2]
+        assert ctx.org_ids == [1021]
         assert ctx.data_scope == "ORG"
 
-    def test_analyst_restricted_to_org_1(self):
+    def test_analyst_restricted_to_org_1000(self):
         ctx = PERMISSION_CONFIG["analyst"]
         assert ctx.allowed_processes == ["PTP"]
-        assert ctx.org_ids == [1]
+        assert ctx.org_ids == [1000]
 
     def test_auditor_all_processes_no_restriction(self):
         ctx = PERMISSION_CONFIG["auditor"]
@@ -113,7 +113,7 @@ class TestPermissionServiceAPI:
         r = client.get("/permissions/subsidiary_lead")
         assert r.status_code == 200
         data = r.json()
-        assert data["org_ids"] == [2]
+        assert data["org_ids"] == [1021]
         assert data["data_scope"] == "ORG"
 
     def test_unknown_user_returns_404(self, client):
