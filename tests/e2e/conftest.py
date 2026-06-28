@@ -39,33 +39,38 @@ def _reset_openclaw_sessions(container, session_dir):
     subprocess.run(
         ["docker", "exec", container, "bash", "-c",
          f"rm -f {session_dir}/*.jsonl"],
-        capture_output=True, timeout=10,
+        capture_output=True, timeout=30,
     )
 
     # 2. Reset sessions.json to empty
     subprocess.run(
         ["docker", "exec", container, "bash", "-c",
          f'echo "{{}}" > {session_dir}/sessions.json'],
-        capture_output=True, timeout=10,
+        capture_output=True, timeout=30,
     )
 
     # 3. Restart the container
     subprocess.run(
         ["docker", "restart", container],
-        capture_output=True, timeout=30,
+        capture_output=True, timeout=60,
     )
 
-    # 4. Wait for the openclaw process to be running
-    for _ in range(30):
-        result = subprocess.run(
-            ["docker", "exec", container, "pgrep", "-f", "openclaw"],
-            capture_output=True, timeout=5,
-        )
-        if result.returncode == 0:
-            break
-        time.sleep(1)
+    # 4. Wait for the openclaw process to be running.
+    #    On Windows, docker exec can take 3-5s per call, so use a generous
+    #    timeout and catch TimeoutExpired to avoid crashing the fixture.
+    for _ in range(20):
+        try:
+            result = subprocess.run(
+                ["docker", "exec", container, "pgrep", "-f", "openclaw"],
+                capture_output=True, timeout=15,
+            )
+            if result.returncode == 0:
+                break
+        except subprocess.TimeoutExpired:
+            pass  # Container still restarting, retry
+        time.sleep(2)
     else:
-        print(f"[reset_sessions] WARNING: openclaw process not detected in {container} after 30s")
+        print(f"[reset_sessions] WARNING: openclaw process not detected in {container} after 40s")
 
 
 def reset_manager_sessions():
