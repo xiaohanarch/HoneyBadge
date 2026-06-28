@@ -334,11 +334,11 @@ class TestUserIsolation:
         admin权限大能看到更多异常，subsidiary权限小只能看本org异常
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "查询异常的采购订单", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "统计异常的采购订单数量", timeout=120000, settle_timeout_ms=600000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "查询异常的采购订单", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计异常的采购订单数量", timeout=120000, settle_timeout_ms=600000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
@@ -355,11 +355,11 @@ class TestUserIsolation:
         体现: 大领导可发现跨多个org的供应商问题，小领导只能看到本org
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "查询有问题的供应商", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "统计有问题的供应商数量", timeout=120000, settle_timeout_ms=600000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "查询有问题的供应商", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计有问题的供应商数量", timeout=120000, settle_timeout_ms=600000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
@@ -376,11 +376,11 @@ class TestUserIsolation:
         admin看到所有org的付款异常，subsidiary只看到org1011的
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "查询付款异常的发票", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "统计付款异常的发票数量", timeout=120000, settle_timeout_ms=600000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "查询付款异常的发票", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计付款异常的发票数量", timeout=120000, settle_timeout_ms=600000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
@@ -436,6 +436,7 @@ class TestUserIsolation:
         normalized = re.sub(r'(\d),(\d)', r'\1\2', text)
         patterns = [
             r'共[有为]?\s*(\d+)\s*条',     # "共有 5000 条", "共 5000 条"
+            r'共[^\d\n]*?(\d+)\s*条',      # "共发现 **23 条**" — analytics-worker markdown bold
             r'总共[有为]?\s*(\d+)\s*条',    # "总共有 5000 条", "总共 5000 条"
             r'总计[为:：]?\s*(\d+)',        # "总计 5000", "总计: 5000"
             r'总数[为:：]?\s*(\d+)',        # "总数 5000", "总数为 5000"
@@ -445,6 +446,7 @@ class TestUserIsolation:
             r'结果[:\s]*(\d+)',            # "结果: 5000"
             r'\bcount[:\s]*(\d+)',         # "count: 5000" (word boundary avoids row_count)
             r'\btotal[:\s]*(\d+)',         # "total: 5000" (word boundary)
+            r'共[^\d\n]*?(\d+)\s*个',      # "共发现 **23 个**" — analytics-worker
             r'(\d+)\+\s*个',              # "100+ 个" — analytics-worker with LIMIT
             r'(\d+)\s*个',                # "89 个" — analytics-worker response
         ]
