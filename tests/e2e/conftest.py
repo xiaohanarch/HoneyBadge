@@ -701,7 +701,7 @@ def create_user_page(browser: Browser):
 @pytest.fixture
 def send_query_and_get_response(page: Page):
     """Send query, wait for full response, return structured data."""
-    def _send(query: str, timeout: int = 120000):
+    def _send(query: str, timeout: int = 120000, settle_timeout_ms: int = 240000):
         _wait_for_textarea_enabled(page, timeout=timeout)
         textarea = page.locator(CHAT_TEXTAREA).first
         existing_count = _wait_for_msg_count_stable(page)
@@ -712,6 +712,7 @@ def send_query_and_get_response(page: Page):
         # only after the response has settled (structured worker reply, denial marker,
         # or stable text length). No separate 120s wait needed here.
         _wait_for_new_response(page, existing_count, timeout=timeout,
+                               settle_timeout_ms=settle_timeout_ms,
                                query_send_ts=query_send_ts)
 
         all_msgs = page.locator(MSG_ASSISTANT)
