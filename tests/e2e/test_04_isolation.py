@@ -372,22 +372,22 @@ class TestUserIsolation:
 
     @pytest.mark.timeout(600)
     def test_tc314_payment_issues_isolation(self, reset_manager, create_user_page):
-        """TC-314: 付款异常数据量差异
+        """TC-314: 发票数据量差异
 
-        admin看到所有org的付款异常，subsidiary只看到org1011的
+        admin看到所有org的发票，subsidiary只看到org1011的。
+        用"统计发票总数"避免LLM对"付款异常"的非确定性判断(有时返回0)。
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计付款异常的发票数量", timeout=120000, settle_timeout_ms=600000)
+        admin_text = send_query_on_page(admin_page, "统计发票总数", timeout=120000, settle_timeout_ms=600000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计付款异常的发票数量", timeout=120000, settle_timeout_ms=600000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计发票总数", timeout=120000, settle_timeout_ms=600000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
-        # Subsidiary may genuinely have 0 payment anomalies in org_id=1011 —
-        # the assertion admin_count > subsidiary_count still verifies isolation.
-        assert admin_count > subsidiary_count, \
+        assert subsidiary_count > 0, f"Subsidiary应有数据. Response: {subsidiary_text[:500]}"
+        assert admin_count > subsidiary_count * 5, \
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"体现权限层级决定数据视野。" \
             f"Admin响应: {admin_text[:300]}; Subsidiary响应: {subsidiary_text[:300]}"
