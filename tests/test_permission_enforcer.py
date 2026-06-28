@@ -167,3 +167,77 @@ class TestOrgFilterInjection:
             f"Full result: {result_ngql}"
         )
         assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
+
+
+class TestLookupOnOrgFilterInjection:
+    """Tests for LOOKUP ON Tag queries — previously bypassed L3 entirely.
+
+    The _TAG_VAR_RE regex only matches (var:Tag) from MATCH clauses.
+    Without _LOOKUP_TAG_RE, LOOKUP ON queries had no org_id injection,
+    causing a CRITICAL data leak (subsidiary sees all orgs' data).
+    """
+
+    def test_lookup_with_where_gets_org_filter_appended(self, enforcer):
+        """LOOKUP ON with existing WHERE should get AND org_id appended."""
+        ngql = (
+            "LOOKUP ON PurchaseOrder "
+            "WHERE PurchaseOrder.total_amount > 800000 "
+            "YIELD id(vertex) AS po_id, PurchaseOrder.org_id AS org_id"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "PurchaseOrder.org_id IN [1021]" in result_ngql
+        assert "PurchaseOrder.total_amount > 800000" in result_ngql
+        assert len(warnings) == 1
+
+    def test_lookup_without_where_gets_where_inserted(self, enforcer):
+        """LOOKUP ON without WHERE should get WHERE org_id before YIELD."""
+        ngql = "LOOKUP ON PurchaseOrder YIELD id(vertex) AS po_id"
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "WHERE PurchaseOrder.org_id IN [1021]" in result_ngql
+        assert "YIELD" in result_ngql
+        assert len(warnings) == 1
+
+    def test_lookup_no_injection_when_org_filter_present(self, enforcer):
+        """LOOKUP ON with existing org_id filter should not be double-injected."""
+        ngql = (
+            "LOOKUP ON PurchaseOrder "
+            "WHERE PurchaseOrder.org_id IN [1021] "
+            "YIELD id(vertex) AS po_id"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert result_ngql.count("PurchaseOrder.org_id IN") == 1
+        assert warnings == []
+
+    def test_lookup_master_tag_not_filtered_by_org(self, enforcer):
+        """LOOKUP ON Supplier (MASTER) should not get org_id injection."""
+        ngql = "LOOKUP ON Supplier YIELD id(vertex) AS sup_id"
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "org_id" not in result_ngql
+        assert warnings == []
+
+    def test_lookup_forbidden_tag_rejected(self, enforcer):
+        """LOOKUP on a forbidden process tag should raise PermissionViolationError."""
+        ngql = "LOOKUP ON SalesOrder YIELD id(vertex) AS so_id"
+        ctx = _ctx(allowed_processes=["PTP"])
+        with pytest.raises(PermissionViolationError) as exc:
+            enforcer.enforce(ngql, ctx)
+        assert "SalesOrder" in str(exc.value)
+
+    def test_lookup_multiple_org_ids(self, enforcer):
+        """LOOKUP ON with multiple org_ids."""
+        ngql = "LOOKUP ON PurchaseOrder YIELD id(vertex) AS po_id"
+        ctx = _ctx(org_ids=[1, 2])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "PurchaseOrder.org_id IN [1, 2]" in result_ngql
+
+    def test_lookup_no_injection_when_org_ids_none(self, enforcer):
+        """LOOKUP ON with org_ids=None (full access) should not be modified."""
+        ngql = "LOOKUP ON PurchaseOrder YIELD id(vertex) AS po_id"
+        ctx = _ctx(org_ids=None)
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert result_ngql == ngql
+        assert warnings == []
