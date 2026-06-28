@@ -1,6 +1,7 @@
 """L3 hard enforcement for NebulaGraph queries.
 
-Parses (var:Tag) patterns from MATCH clauses and:
+Parses (var:Tag) patterns from MATCH clauses and TagName from LOOKUP ON
+clauses, then:
   1. Hard-rejects forbidden process tags
   2. Auto-injects missing org_id filters for org-scoped users
 """
@@ -24,6 +25,9 @@ class PermissionViolationError(Exception):
 
 # Regex to extract (varname:TagName) from MATCH clauses
 _TAG_VAR_RE = re.compile(r'\((\w+):(\w+)\)')
+
+# Regex to extract TagName from LOOKUP ON TagName clauses
+_LOOKUP_TAG_RE = re.compile(r'\bLOOKUP\s+ON\s+(\w+)', re.IGNORECASE)
 
 
 def _get_tag_category(tag: str) -> str | None:
@@ -77,6 +81,29 @@ def _inject_org_filter(ngql: str, var: str, tag: str, org_ids: list[int]) -> str
         return ngql + f" WHERE {condition}"
 
 
+def _inject_org_filter_lookup(ngql: str, tag: str, org_ids: list[int]) -> str:
+    """Inject org_id filter into a LOOKUP ON Tag query.
+
+    LOOKUP syntax uses TagName.property (no variable prefix), so the
+    condition is TagName.org_id IN [...] (not var.TagName.org_id).
+    Insertion targets the YIELD keyword (mandatory in LOOKUP).
+    """
+    ids_str = ", ".join(str(i) for i in org_ids)
+    condition = f"{tag}.org_id IN [{ids_str}]"
+
+    where_re = re.compile(r'\bWHERE\b', re.IGNORECASE)
+    yield_re = re.compile(r'\bYIELD\b', re.IGNORECASE)
+    match = yield_re.search(ngql)
+    insert_pos = match.start() if match else len(ngql)
+
+    if where_re.search(ngql):
+        # WHERE already exists before YIELD — append AND
+        return ngql[:insert_pos] + f" AND {condition} " + ngql[insert_pos:]
+    else:
+        # No WHERE — insert WHERE before YIELD
+        return ngql[:insert_pos] + f" WHERE {condition} " + ngql[insert_pos:]
+
+
 class PermissionEnforcer:
     """Hard enforcement gate for NebulaGraph queries.
 
@@ -98,10 +125,13 @@ class PermissionEnforcer:
             PermissionViolationError: if the query accesses a forbidden process tag.
         """
         warnings: list[str] = []
-        tag_vars = _TAG_VAR_RE.findall(ngql)  # list of (var, tag) tuples
+        tag_vars = _TAG_VAR_RE.findall(ngql)  # list of (var, tag) tuples from MATCH
+        lookup_tags = _LOOKUP_TAG_RE.findall(ngql)  # list of tag names from LOOKUP ON
 
         # --- 1. Process tag check (hard reject) ---
-        for var, tag in tag_vars:
+        # Check tags from both MATCH (var:Tag) and LOOKUP ON Tag patterns
+        all_tags = set(tag for _, tag in tag_vars) | set(lookup_tags)
+        for tag in all_tags:
             category = _get_tag_category(tag)
             if category is None or category == "MASTER":
                 continue  # unknown or master tags are always allowed
@@ -114,6 +144,7 @@ class PermissionEnforcer:
         if ctx.org_ids is None:
             return ngql, warnings  # full org access, no injection needed
 
+        # 2a. Inject for MATCH (var:Tag) patterns
         for var, tag in tag_vars:
             category = _get_tag_category(tag)
             if category is None or category == "MASTER":
@@ -124,6 +155,19 @@ class PermissionEnforcer:
                 warnings.append(
                     f"[PERMISSION WARNING] 自动注入 org_id 过滤条件: {var}:{tag} "
                     f"WHERE {var}.{tag}.org_id IN [{ids_str}]"
+                )
+
+        # 2b. Inject for LOOKUP ON Tag patterns
+        for tag in lookup_tags:
+            category = _get_tag_category(tag)
+            if category is None or category == "MASTER":
+                continue  # master data: no org filter required
+            if not _has_org_filter(ngql, tag):
+                ngql = _inject_org_filter_lookup(ngql, tag, ctx.org_ids)
+                ids_str = ", ".join(str(i) for i in ctx.org_ids)
+                warnings.append(
+                    f"[PERMISSION WARNING] 自动注入 org_id 过滤条件: LOOKUP ON {tag} "
+                    f"WHERE {tag}.org_id IN [{ids_str}]"
                 )
 
         return ngql, warnings
