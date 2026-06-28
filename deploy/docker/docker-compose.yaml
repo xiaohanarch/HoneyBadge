@@ -471,6 +471,10 @@ services:
 
   hiclaw-analytics-worker:
     image: honeybadge/hiclaw-hermes-worker:v1.1.2-1
+    build:
+      context: ../hiclaw
+      dockerfile: Dockerfile.hermes-worker
+    pull_policy: never
     container_name: honeybadge-analytics-worker
     hostname: hiclaw-analytics-worker
     restart: unless-stopped
