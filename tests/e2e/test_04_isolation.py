@@ -420,6 +420,11 @@ class TestUserIsolation:
         "总数 N") over generic "N 条" so that a response mentioning both a
         LIMIT-capped row count ("显示前 100 条") and the true total
         ("共 5000 条") yields the total, not the cap.
+
+        Analytics-worker (Hermes) responses use "N 个" instead of "N 条"
+        (e.g. "89 个已批准采购订单", "100+ 个采购订单"). These are matched
+        after the 条/记录 patterns so that graph-worker responses still
+        prefer the higher-priority total-count indicators.
         """
         import re
         # Normalize: remove thousand separators so "13,000" becomes "13000"
@@ -435,6 +440,8 @@ class TestUserIsolation:
             r'结果[:\s]*(\d+)',            # "结果: 5000"
             r'\bcount[:\s]*(\d+)',         # "count: 5000" (word boundary avoids row_count)
             r'\btotal[:\s]*(\d+)',         # "total: 5000" (word boundary)
+            r'(\d+)\+\s*个',              # "100+ 个" — analytics-worker with LIMIT
+            r'(\d+)\s*个',                # "89 个" — analytics-worker response
         ]
         for pattern in patterns:
             match = re.search(pattern, normalized, re.IGNORECASE)
