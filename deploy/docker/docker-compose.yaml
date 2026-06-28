@@ -485,9 +485,11 @@ services:
       - HICLAW_FS_ENDPOINT=http://hiclaw-embedded:9000
       - HICLAW_FS_ACCESS_KEY=${HICLAW_ADMIN_USER:-admin}
       - HICLAW_FS_SECRET_KEY=${HICLAW_ADMIN_PASSWORD:-admin1234}
+      - HERMES_MAX_TURNS=25
       - TZ=Asia/Shanghai
     volumes:
       - ../hiclaw/worker-init-wrapper.sh:/opt/honeybadge/init/worker-init-wrapper.sh:ro
+      - ../hiclaw/hermes-config-bridge.sh:/opt/honeybadge/init/hermes-config-bridge.sh:ro
     networks:
       - honeybadge-net
     depends_on:

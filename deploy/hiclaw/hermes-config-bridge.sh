@@ -106,9 +106,12 @@ approvals:
   mode: "off"
   cron_mode: approve
 
-# Limit agent turns for headless worker — 240s settle window requires fast completion
+# Limit agent turns for headless worker.
+# Default 15 (graph-worker); analytics-worker overrides to 25 via HERMES_MAX_TURNS
+# for the multi-step SOUL.md workflow (read spec → generate nGQL → execute →
+# write result.md → write result.json → sync MinIO → notify).
 agent:
-  max_turns: 15
+  max_turns: ${HERMES_MAX_TURNS:-15}
 YAML
 
 if [ -n "$PRESERVED_YAML" ]; then

@@ -122,6 +122,8 @@ spec:
               value: "matrix-local.hiclaw.io"
             - name: TZ
               value: "Asia/Shanghai"
+            - name: HERMES_MAX_TURNS
+              value: "25"
             - name: NODE_OPTIONS
               value: "--max-old-space-size=1536"
           resources:
@@ -135,6 +137,10 @@ spec:
             - name: init-scripts
               mountPath: /opt/honeybadge/init/worker-init-wrapper.sh
               subPath: worker-init-wrapper.sh
+              readOnly: true
+            - name: init-scripts
+              mountPath: /opt/honeybadge/init/hermes-config-bridge.sh
+              subPath: hermes-config-bridge.sh
               readOnly: true
       volumes:
         - name: init-scripts
