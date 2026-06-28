@@ -103,7 +103,7 @@ platforms:
 
 # Auto-approve all terminal commands — headless worker has no user to prompt
 approvals:
-  mode: off
+  mode: "off"
   cron_mode: approve
 YAML
 
