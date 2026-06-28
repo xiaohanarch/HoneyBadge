@@ -115,8 +115,8 @@ log "Local->Remote sync started (PID: $!)"
 
 (
     while true; do
-        sleep 300
-        mc mirror "hiclaw/hiclaw-storage/shared/" "${HICLAW_ROOT}/shared/" --overwrite --newer-than "5m" 2>/dev/null || true
+        sleep 30
+        mc mirror "hiclaw/hiclaw-storage/shared/" "${HICLAW_ROOT}/shared/" --overwrite --newer-than "2m" 2>/dev/null || true
         mc mirror "hiclaw/hiclaw-storage/agents/${WORKER_NAME}/skills/" "${HERMES_HOME}/skills/" --overwrite 2>/dev/null || true
         create_skill_symlinks
         find "${HERMES_HOME}/skills" -name '*.py' -exec chmod +x {} + 2>/dev/null || true
@@ -124,7 +124,7 @@ log "Local->Remote sync started (PID: $!)"
         touch "${PULL_MARKER}"
     done
 ) &
-log "Remote->Local fallback sync started (every 5m, PID: $!)"
+log "Remote->Local fallback sync started (every 30s, PID: $!)"
 
 # --- Step 7: Matrix re-login for fresh E2EE token ---
 MATRIX_PASSWORD_FILE="hiclaw/hiclaw-storage/agents/${WORKER_NAME}/credentials/matrix/password"
