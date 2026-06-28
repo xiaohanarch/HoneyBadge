@@ -1,11 +1,11 @@
 # Analytics Worker Skill Definition
-# Version: v1.0
-# Date: 2026-04-04
+# Version: v1.1
+# Date: 2026-06-28
 
 worker:
   name: analytics-worker
   group: analytics
-  runtime: openclaw
+  runtime: hermes
   replicas: 1
 
   skills:
@@ -37,10 +37,10 @@ worker:
 
   mcp_tools:
     - name: nebula-query
-      description: "Execute nGQL queries"
-      server: nebula-mcp-server
+      description: "Validate and execute nGQL queries (includes L1-L3 permission enforcement)"
+      server: honeybadge-nebula
       tools:
-        - execute_ngql
+        - validate_and_execute
         - get_schema
 
     - name: llm-generate
