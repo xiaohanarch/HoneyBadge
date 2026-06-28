@@ -152,13 +152,22 @@ When a Worker @mentions you with completion in its worker room, **你必须用 `
 
 ```bash
 FORWARD_SCRIPT="/opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts/forward-to-user.sh"
+TASK_DIR="/root/hiclaw-fs/shared/tasks/$TASK_ID"
+
+# Sync result.json from MinIO so forward-to-user.sh can attach the x-honeybadge
+# structured payload (trace_id, raw_data, columns, cypher) to the Matrix message.
+# Without --result-json, the message is plain text with no trace_id, and the
+# frontend cannot render the structured result panel or link to the audit trail.
+mkdir -p "$TASK_DIR"
+mc mirror "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/" "$TASK_DIR/" --overwrite 2>/dev/null || true
+
 SUMMARY=$(cat << 'SUM'
 ✅ 任务 $TASK_ID 已完成
 
 <Worker 结果的精炼摘要，不超过 200 字。完整报告见 MinIO>
 SUM
 )
-FWD_OUT=$(echo "$SUMMARY" | bash "$FORWARD_SCRIPT" --task-id "$TASK_ID" --content -)
+FWD_OUT=$(echo "$SUMMARY" | bash "$FORWARD_SCRIPT" --task-id "$TASK_ID" --content - --result-json "$TASK_DIR/result.json")
 echo "$FWD_OUT"
 
 if echo "$FWD_OUT" | grep -q "FORWARD_OK"; then

@@ -135,7 +135,7 @@ When a Worker reports "@manager:matrix-local.hiclaw.io Task {task-id} completed"
    ```bash
    bash /opt/hiclaw/agent/skills/task-management/scripts/manage-state.sh --action complete --task-id {task-id}
    ```
-3. **Forward result to user** using `forward-to-user.sh`. NEVER use `message`/`replyMessage` tools — they reply to the Worker room, not the user's DM.
+3. **Forward result to user** using `forward-to-user.sh` with `--result-json "/root/hiclaw-fs/shared/tasks/{task-id}/result.json"` (sync from MinIO first: `mc mirror "hiclaw/hiclaw-storage/shared/tasks/{task-id}/" "/root/hiclaw-fs/shared/tasks/{task-id}/" --overwrite`). The `--result-json` flag attaches the `x-honeybadge` payload (trace_id, raw_data, columns, cypher) so the frontend can render the structured result panel. NEVER use `message`/`replyMessage` tools — they reply to the Worker room, not the user's DM.
 
 `result-watcher.sh` (launched at dispatch time) is a BACKUP for delivery. Touch `/tmp/.watcher-delivered-{task-id}` after a successful forward to prevent duplicates.
 
