@@ -10,8 +10,18 @@
 
 set -u
 
-WORKER_ENTRYPOINT="/opt/hiclaw/scripts/worker-entrypoint.sh"
 WORKER_NAME="${HICLAW_WORKER_NAME:-unknown}"
+WORKER_RUNTIME="${HICLAW_WORKER_RUNTIME:-openclaw}"
+
+if [ "$WORKER_RUNTIME" = "hermes" ]; then
+    WORKER_ENTRYPOINT="/opt/honeybadge/init/hermes-worker-entrypoint.sh"
+    AGENT_HOME="/root/.hermes"
+    SESSIONS_FILE="${AGENT_HOME}/sessions/sessions.json"
+else
+    WORKER_ENTRYPOINT="/opt/hiclaw/scripts/worker-entrypoint.sh"
+    AGENT_HOME="/root"
+    SESSIONS_FILE="/root/.openclaw/agents/main/sessions/sessions.json"
+fi
 
 echo "[worker-init] Starting background init for $WORKER_NAME..."
 
@@ -23,8 +33,9 @@ echo "[worker-init] Starting background init for $WORKER_NAME..."
     # --- Copy custom SOUL.md from hiclaw-fs to /root/ where openclaw reads it ---
     HB_SOUL="/root/hiclaw-fs/agents/$WORKER_NAME/SOUL.md"
     if [ -f "$HB_SOUL" ]; then
-        cp "$HB_SOUL" /root/SOUL.md
-        echo "[worker-init] Copied custom SOUL.md from $HB_SOUL → /root/SOUL.md"
+        mkdir -p "$AGENT_HOME"
+        cp "$HB_SOUL" "$AGENT_HOME/SOUL.md"
+        echo "[worker-init] Copied custom SOUL.md from $HB_SOUL → $AGENT_HOME/SOUL.md"
     else
         echo "[worker-init] WARNING: Custom SOUL.md not found at $HB_SOUL"
     fi
@@ -32,7 +43,8 @@ echo "[worker-init] Starting background init for $WORKER_NAME..."
     # --- Copy custom skills from hiclaw-fs ---
     HB_SKILLS="/root/hiclaw-fs/agents/$WORKER_NAME/skills"
     if [ -d "$HB_SKILLS" ]; then
-        cp -r "$HB_SKILLS"/* /root/skills/ 2>/dev/null \
+        mkdir -p "$AGENT_HOME/skills"
+        cp -r "$HB_SKILLS"/* "$AGENT_HOME/skills/" 2>/dev/null \
             && echo "[worker-init] Copied custom skills from $HB_SKILLS" \
             || echo "[worker-init] No skills to copy from $HB_SKILLS"
     fi
@@ -48,7 +60,7 @@ echo "[worker-init] Starting background init for $WORKER_NAME..."
     # mcporter resolves ./config/mcporter.json relative to the CWD.
     # When the mcporter skill runs from /root/skills/mcporter/, it looks for
     # /root/skills/mcporter/config/mcporter.json.  Create that path if missing.
-    SKILL_DIR="/root/skills/mcporter"
+    SKILL_DIR="$AGENT_HOME/skills/mcporter"
     MCP_CONFIG_SOURCE="/root/hiclaw-fs/config/mcporter.json"
     MCP_CONFIG_DEST="$SKILL_DIR/config/mcporter.json"
     if [ -f "$MCP_CONFIG_SOURCE" ] && [ ! -f "$MCP_CONFIG_DEST" ]; then
@@ -66,20 +78,20 @@ echo "[worker-init] Starting background init for $WORKER_NAME..."
     # automatically poll pending messages. We fix this by triggering each Matrix
     # room session once with a nudge message.  Without this, the worker appears
     # "online" (heartbeat OK) but silently ignores incoming messages.
-    echo "[worker-init] Checking for stale Matrix room sessions to wake up..."
-    SESSIONS_FILE="/root/.openclaw/agents/main/sessions/sessions.json"
-    for attempt in 1 2 3 4 5; do
-        if [ -f "$SESSIONS_FILE" ] && grep -q "matrix:channel" "$SESSIONS_FILE"; then
-            break
-        fi
-        echo "[worker-init] Waiting for sessions.json... (attempt $attempt/5)"
-        sleep 5
-    done
+    if [ "$WORKER_RUNTIME" = "openclaw" ]; then
+        echo "[worker-init] Checking for stale Matrix room sessions to wake up..."
+        for attempt in 1 2 3 4 5; do
+            if [ -f "$SESSIONS_FILE" ] && grep -q "matrix:channel" "$SESSIONS_FILE"; then
+                break
+            fi
+            echo "[worker-init] Waiting for sessions.json... (attempt $attempt/5)"
+            sleep 5
+        done
 
-    if [ -f "$SESSIONS_FILE" ]; then
-        # Find all Matrix room sessions (session keys containing "matrix:channel")
-        # The file is JSON with keys like "agent:main:matrix:channel:!roomId:domain"
-        python3 - << 'PYEOF'
+        if [ -f "$SESSIONS_FILE" ]; then
+            # Find all Matrix room sessions (session keys containing "matrix:channel")
+            # The file is JSON with keys like "agent:main:matrix:channel:!roomId:domain"
+            python3 - << 'PYEOF'
 import json, subprocess, sys
 
 sessions_file = '/root/.openclaw/agents/main/sessions/sessions.json'
@@ -119,8 +131,11 @@ for key, session in sessions.items():
     except Exception as ex:
         print(f'[worker-init] Matrix session {session_id} wake-up error: {ex}')
 PYEOF
+        else
+            echo "[worker-init] sessions.json not found — skipping Matrix session wake-up."
+        fi
     else
-        echo "[worker-init] sessions.json not found — skipping Matrix session wake-up."
+        echo "[worker-init] Skipping openclaw session wake-up (runtime: $WORKER_RUNTIME)"
     fi
 
     echo "[worker-init] Background init complete for $WORKER_NAME."
