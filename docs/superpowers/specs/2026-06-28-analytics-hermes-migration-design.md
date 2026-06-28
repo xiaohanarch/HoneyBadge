@@ -39,13 +39,19 @@ This document specifies *how* to execute that migration.
 - Frontend, auth-service, honeybadge-server
 
 **Affected (changes required):**
-- `deploy/hiclaw/Dockerfile.hermes-worker` — **new** (extends worker image, installs hermes-agent)
+- `deploy/hiclaw/Dockerfile.hermes-worker` — **new** (extends worker image, installs hermes-agent + PYTHONPATH)
 - `deploy/hiclaw/hermes-worker-entrypoint.sh` — **new** (parallel to worker-entrypoint.sh)
 - `deploy/hiclaw/hermes-config-bridge.sh` — **new** (openclaw.json → config.yaml + .env)
 - `deploy/hiclaw/worker-init-wrapper.sh` — **modified** (detect runtime, branch init logic)
 - `deploy/docker/docker-compose.yaml` — **modified** (analytics-worker: image + entrypoint)
-- `hiclaw/workers/analytics-worker/agent/SOUL.md` — **minor** (identity wording)
-- `hiclaw/workers/analytics-worker/agent/AGENTS.md` — **new** (hermes-specific behavioral rules)
+- `hiclaw/workers/analytics-worker/agent/SOUL.md` — **modified** (identity + Python module references + result_builder call)
+- `hiclaw/workers/analytics-worker/agent/AGENTS.md` — **new** (hermes-specific behavioral rules + Python module reference)
+- `hiclaw/workers/analytics-worker/agent/skills/common/` — **new** (Approach B: mcp_client.py, result_builder.py, severity.py, session_state.py)
+- `hiclaw/workers/analytics-worker/agent/skills/anomaly-detection/lib/` — **new** (Approach B: detect.py, patterns.py)
+- `hiclaw/workers/analytics-worker/agent/skills/anomaly-detection/SKILL.md` — **modified** (reference Python entry points)
+- `hiclaw/workers/analytics-worker/agent/skills/multi-step-analysis/lib/` — **new** (Approach B: decompose.py, cross_reference.py)
+- `hiclaw/workers/analytics-worker/agent/skills/multi-step-analysis/SKILL.md` — **modified** (reference Python entry points)
+- `tests/test_mcp_client.py`, `tests/test_result_builder.py`, `tests/test_severity.py`, `tests/test_session_state.py`, `tests/test_detect.py`, `tests/test_decompose.py` — **new** (Approach B TDD)
 
 ---
 
@@ -83,15 +89,100 @@ Slower, fragile (network failures break startup), and violates "build artifacts 
 - Non-bridge-owned keys preserved (additions survive re-runs)
 - Bridge must run at startup AND after every config push from coordinator
 
-### 2.4 Skills porting strategy
+### 2.4 Skills porting strategy (Approach B: Python enhancement)
 
-**Decision**: Copy SKILL.md files as-is, validate behavior, only modify if hermes rejects them.
+**Decision**: Rewrite both skills to use typed Python modules instead of raw
+`mcporter` CLI strings. SKILL.md files are updated to instruct the LLM to call
+Python entry points.
 
-**Rationale**:
-- Hermes AGENTS.md: "Each skill directory contains a `SKILL.md` explaining how to use it" — same format
-- Both skills (`anomaly-detection`, `multi-step-analysis`) are pure markdown with mcporter CLI examples
-- mcporter is runtime-agnostic (CLI tool installed in both runtimes)
-- If validation fails, fallback to adapting phrasing (not full rewrite)
+**Rationale** (Approach B selected by user):
+- Hermes is Python-native — Python modules get type safety, proper error handling, testability
+- Current SKILL.md files embed `mcporter call ...` strings that the LLM must format correctly (fragile)
+- Python modules encapsulate detection logic (thresholds, severity classification) that currently lives as prose
+- Enables structured result.json via dataclass + `json.dumps` (no heredoc)
+- Enables cross-round anomaly tracking via hermes `sessions/` (openclaw cannot do this)
+
+**Current state of skills** (both are pure markdown, no scripts):
+- `anomaly-detection/SKILL.md` — 67 lines, detection patterns as prose + mcporter CLI examples
+- `multi-step-analysis/SKILL.md` — 63 lines, decomposition flow as prose + mcporter CLI examples
+
+**Target state** (Approach B):
+- Each skill gains a `lib/` directory with typed Python modules
+- SKILL.md instructs LLM to call `python3 -m anomaly_detection.detect ...` instead of raw mcporter
+- Shared `common/` package provides MCP client wrapper + result builder
+
+### 2.5 Python module architecture (Approach B)
+
+**Decision**: Add a `common/` package shared by both skills, plus per-skill `lib/` modules.
+
+```
+hiclaw/workers/analytics-worker/agent/skills/
+├── common/                          # NEW — shared library
+│   ├── __init__.py
+│   ├── mcp_client.py                # typed wrapper over mcporter subprocess
+│   ├── result_builder.py            # dataclass-based result.json builder
+│   ├── severity.py                  # INFO/WARNING/ALERT enum + threshold logic
+│   └── session_state.py             # hermes sessions/ cross-round state
+├── anomaly-detection/
+│   ├── SKILL.md                     # MODIFIED — references Python entry points
+│   └── lib/
+│       ├── __init__.py
+│       ├── detect.py                # three-way matching, duplicate invoice, etc.
+│       └── patterns.py              # pattern definitions + thresholds
+├── multi-step-analysis/
+│   ├── SKILL.md                     # MODIFIED — references Python entry points
+│   └── lib/
+│       ├── __init__.py
+│       ├── decompose.py             # question decomposition logic
+│       └── cross_reference.py       # cross-query pattern matching
+```
+
+### 2.6 result.json generation (Approach B)
+
+**Decision**: Replace the Python heredoc in SOUL.md Step 3b with a call to
+`common.result_builder.build_result_json()`.
+
+**Before** (current, in SOUL.md):
+```bash
+python3 - << 'JSONEOF'
+import json, re, os, sys
+# ... 40 lines of inline script parsing /tmp/mcp_*.json
+JSONEOF
+```
+
+**After** (Approach B):
+```bash
+python3 -m common.result_builder \
+  --task-id "{task-id}" \
+  --generate-file /tmp/mcp_generate.json \
+  --execute-file /tmp/mcp_execute.json \
+  --result-md "{task_dir}/result.md" \
+  --output "{task_dir}/result.json"
+```
+
+**Benefits**:
+- Type-safe (dataclass with mypy validation)
+- Testable in isolation (unit test with fixtures)
+- Reusable by both skills
+- Contract enforced at code level, not string-template level
+
+### 2.7 Cross-round anomaly tracking via hermes sessions/ (Approach B)
+
+**Decision**: Use hermes `~/.hermes/sessions/` to persist anomaly state across
+query rounds within a single analysis task.
+
+**Current limitation** (openclaw): Each `mcporter call` is stateless. The LLM
+must re-read /tmp files and re-derive what was already flagged. Round 3 doesn't
+"remember" round 1's findings except via LLM context.
+
+**Approach B enhancement**: `common.session_state.AnomalyTracker` persists to
+`~/.hermes/sessions/{task-id}/anomalies.json` after each round:
+- Deduplicates anomalies already flagged
+- Tracks severity escalation (INFO → WARNING → ALERT across rounds)
+- Provides a summary at task completion for the audit log
+
+**Out of scope for this migration**: Cross-task learning (persisting anomalies
+across different task IDs) — that requires a shared store and is a future enhancement.
 
 ---
 
@@ -331,15 +422,41 @@ hiclaw-analytics-worker:
     com.honeybadge.version: "${IMAGE_TAG:-latest}"
 ```
 
-### 4.6 `hiclaw/workers/analytics-worker/agent/SOUL.md` (minor edit)
+### 4.6 `hiclaw/workers/analytics-worker/agent/SOUL.md` (modified — Approach B)
 
-Two changes:
-1. Identity line: "Analytics Worker" → "Analytics Worker (Hermes runtime)"
-2. Add a note in the "How to Call MCP Tools" section: hermes uses the same
-   `mcporter` CLI; no syntax change needed.
+Changes from current SOUL.md:
 
-The `result.json` Python heredoc (Step 3b) is **kept as-is** — hermes is
-Python-native, so `python3 - << 'JSONEOF'` works identically.
+1. **Identity line**: "Analytics Worker" → "Analytics Worker (Hermes runtime)"
+2. **"How to Call MCP Tools" section**: Replace raw `mcporter call` examples with
+   Python module entry points:
+   ```bash
+   # Instead of: mcporter call honeybadge-nebula.generate_query --args '{"question":"..."}'
+   # Use:
+   python3 -m common.mcp_client generate_query --question "..."
+   python3 -m common.mcp_client validate_and_execute --ngql "..." --user-id "..."
+   ```
+3. **Step 3b (result.json)**: Replace the 40-line Python heredoc with:
+   ```bash
+   python3 -m common.result_builder \
+     --task-id "{task-id}" \
+     --generate-file /tmp/mcp_generate.json \
+     --execute-file /tmp/mcp_execute.json \
+     --result-md "$TASK_DIR/result.md" \
+     --output "$TASK_DIR/result.json"
+   ```
+4. **Step 2 (execute analysis)**: Add session state tracking:
+   ```bash
+   # After each round, persist anomalies for cross-round deduplication
+   python3 -m common.session_state save \
+     --task-id "{task-id}" \
+     --round 2 \
+     --anomalies '[{"type":"duplicate_invoice","severity":"WARNING",...}]'
+   ```
+5. **Add "Python Module Reference" section** at the end of SOUL.md documenting
+   the available `common.*` and skill-specific `lib.*` entry points.
+
+**Unchanged**: Step 1 (read spec), Step 3a (result.md heredoc), Step 4 (mc sync),
+Step 5 (notify completion), Constraints section, Core Behavior section.
 
 ### 4.7 `hiclaw/workers/analytics-worker/agent/AGENTS.md` (new)
 
@@ -350,6 +467,287 @@ Mirror the structure of `/opt/hiclaw/agent/hermes-worker-agent/AGENTS.md`
 - @mention protocol (same as openclaw)
 - NO_REPLY rules (same)
 - Task execution workflow (same 5 steps as SOUL.md)
+- **Python module reference** (Approach B): document `common.*` and skill `lib.*` entry points
+
+### 4.8 Python Enhancement Modules (Approach B — new)
+
+#### 4.8.1 `skills/common/mcp_client.py`
+
+Typed wrapper over `mcporter` subprocess calls. Replaces raw CLI strings in SKILL.md.
+
+```python
+"""Typed MCP client — wraps mcporter subprocess for analytics-worker skills."""
+from __future__ import annotations
+import json
+import subprocess
+from dataclasses import dataclass
+from typing import Any
+
+@dataclass(frozen=True)
+class QueryResult:
+    trace_id: str
+    ngql: str
+    columns: list[str]
+    rows: list[dict[str, Any]]
+    row_count: int
+    execution_time_ms: int
+    success: bool
+
+class MCPClient:
+    def __init__(self, server: str = "honeybadge-nebula"):
+        self._server = server
+
+    def call(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:
+        cmd = ["mcporter", "call", f"{self._server}.{tool}",
+               "--args", json.dumps(args, ensure_ascii=False)]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            raise RuntimeError(f"mcporter {tool} failed: {result.stderr[:200]}")
+        return json.loads(result.stdout)
+
+    def generate_query(self, question: str) -> dict:
+        return self.call("generate_query", {"question": question})
+
+    def validate_and_execute(self, ngql: str, user_id: str | None = None) -> QueryResult:
+        args = {"ngql": ngql}
+        if user_id:
+            args["user_context"] = {"user_id": user_id}
+        raw = self.call("validate_and_execute", args)
+        return QueryResult(
+            trace_id=raw.get("trace_id", ""),
+            ngql=raw.get("ngql", ngql),
+            columns=raw.get("columns", []),
+            rows=raw.get("rows", []),
+            row_count=raw.get("row_count", len(raw.get("rows", []))),
+            execution_time_ms=raw.get("execution_time_ms", 0),
+            success=raw.get("success", True),
+        )
+
+# CLI entry point: python3 -m common.mcp_client generate_query --question "..."
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("tool", choices=["generate_query", "validate_and_execute", ...])
+    parser.add_argument("--question"); parser.add_argument("--ngql"); parser.add_argument("--user-id")
+    args = parser.parse_args()
+    client = MCPClient()
+    # ... dispatch
+```
+
+#### 4.8.2 `skills/common/result_builder.py`
+
+Replaces the 40-line Python heredoc in SOUL.md Step 3b.
+
+```python
+"""Build result.json from saved MCP responses — replaces SOUL.md heredoc."""
+from __future__ import annotations
+import argparse
+import json
+import re
+import sys
+from dataclasses import dataclass, asdict
+from pathlib import Path
+
+@dataclass(frozen=True)
+class TaskResult:
+    trace_id: str
+    cypher: str
+    columns: list[str]
+    raw_data: list[dict]
+    row_count: int
+    execution_time_ms: int
+    summary: str
+
+def _parse_summary(result_md_path: Path) -> str:
+    md = result_md_path.read_text(encoding="utf-8")
+    m = re.search(r"## Summary\n(.*?)(?=\n## |\Z)", md, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+def build(generate_file: Path, execute_file: Path, result_md: Path) -> TaskResult:
+    gen = json.loads(generate_file.read_text(encoding="utf-8"))
+    exe = json.loads(execute_file.read_text(encoding="utf-8"))
+    rows = exe.get("rows", [])
+    return TaskResult(
+        trace_id=exe.get("trace_id", ""),
+        cypher=gen.get("ngql", ""),
+        columns=exe.get("columns", []),
+        raw_data=rows,
+        row_count=exe.get("row_count", len(rows)),
+        execution_time_ms=exe.get("execution_time_ms", 0),
+        summary=_parse_summary(result_md),
+    )
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task-id", required=True)
+    parser.add_argument("--generate-file", required=True)
+    parser.add_argument("--execute-file", required=True)
+    parser.add_argument("--result-md", required=True)
+    parser.add_argument("--output", required=True)
+    a = parser.parse_args()
+    result = build(Path(a.generate_file), Path(a.execute_file), Path(a.result_md))
+    Path(a.output).write_text(json.dumps(asdict(result), ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"result.json written ({result.row_count} rows, trace={result.trace_id})")
+```
+
+#### 4.8.3 `skills/common/severity.py`
+
+```python
+"""Severity classification for anomaly detection."""
+from enum import Enum
+
+class Severity(str, Enum):
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ALERT = "ALERT"
+
+def classify(value: float, soft_threshold: float, hard_threshold: float) -> Severity:
+    if value >= hard_threshold:
+        return Severity.ALERT
+    if value >= soft_threshold:
+        return Severity.WARNING
+    return Severity.INFO
+```
+
+#### 4.8.4 `skills/common/session_state.py`
+
+Cross-round anomaly tracking via hermes `~/.hermes/sessions/`.
+
+```python
+"""Persist anomaly state across query rounds within a task."""
+from __future__ import annotations
+import json
+from pathlib import Path
+from dataclasses import dataclass, asdict
+
+@dataclass(frozen=True)
+class Anomaly:
+    type: str
+    severity: str
+    evidence: dict
+    round: int
+
+class AnomalyTracker:
+    def __init__(self, task_id: str, sessions_dir: str = "~/.hermes/sessions"):
+        self._path = Path(sessions_dir).expanduser() / task_id / "anomalies.json"
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+
+    def save(self, anomalies: list[Anomaly]) -> None:
+        existing = self.load()
+        # Deduplicate by (type, severity) — keep highest round
+        seen = {(a.type, a.severity) for a in existing}
+        for a in anomalies:
+            if (a.type, a.severity) not in seen:
+                existing.append(a)
+                seen.add((a.type, a.severity))
+        self._path.write_text(json.dumps([asdict(a) for a in existing], ensure_ascii=False, indent=2))
+
+    def load(self) -> list[Anomaly]:
+        if not self._path.exists():
+            return []
+        return [Anomaly(**d) for d in json.loads(self._path.read_text())]
+```
+
+#### 4.8.5 `skills/anomaly-detection/lib/detect.py`
+
+Encapsulates detection patterns currently described as prose in SKILL.md.
+
+```python
+"""Anomaly detection patterns — replaces prose in anomaly-detection/SKILL.md."""
+from __future__ import annotations
+from dataclasses import dataclass
+from common.mcp_client import MCPClient, QueryResult
+from common.severity import Severity, classify
+from common.session_state import Anomaly, AnomalyTracker
+
+# Thresholds (from current SKILL.md prose)
+THREE_WAY_TOLERANCE = 1.10  # 10% tolerance
+DUPLICATE_INVOICE_COUNT = 1  # flag if count > 1
+PAYMENT_DEVIATION_FACTOR = 2.0  # flag if > 2x historical average
+NEW_SUPPLIER_DAYS = 90
+SUPPLIER_CONCENTRATION = 0.60  # flag if > 60% of category spend
+
+@dataclass
+class DetectionContext:
+    client: MCPClient
+    tracker: AnomalyTracker
+    user_id: str | None = None
+
+def detect_three_way_mismatch(ctx: DetectionContext, po_id: str) -> list[Anomaly]:
+    # Query PO, Receipt, Invoice amounts; compare; flag if invoice > PO * tolerance
+    ...
+
+def detect_duplicate_invoices(ctx: DetectionContext, supplier_id: str | None = None) -> list[Anomaly]:
+    ...
+
+def detect_unusual_payments(ctx: DetectionContext, days: int = 90) -> list[Anomaly]:
+    ...
+
+def detect_supplier_concentration(ctx: DetectionContext, category: str | None = None) -> list[Anomaly]:
+    ...
+```
+
+#### 4.8.6 `skills/multi-step-analysis/lib/decompose.py`
+
+```python
+"""Question decomposition for multi-step analysis."""
+from __future__ import annotations
+from dataclasses import dataclass
+from common.mcp_client import MCPClient
+
+@dataclass(frozen=True)
+class SubQuery:
+    description: str
+    question: str
+    round: int
+
+def decompose(question: str, client: MCPClient) -> list[SubQuery]:
+    """Use generate_query to break a complex question into sub-queries."""
+    ...
+
+def cross_reference(results: list[QueryResult]) -> dict:
+    """Find patterns across sub-query results."""
+    ...
+```
+
+#### 4.8.7 SKILL.md modifications
+
+**`anomaly-detection/SKILL.md`** — replace the "How to Call MCP Tools" and
+"Detection Patterns" sections with references to Python modules:
+
+```markdown
+## How to Run Detection (CRITICAL)
+
+Call the Python detection modules instead of raw mcporter CLI:
+
+\```bash
+# Three-way matching
+python3 -m anomaly_detection.lib.detect three-way --po-id "PO-2026-001"
+
+# Duplicate invoices
+python3 -m anomaly_detection.lib.detect duplicate-invoices --supplier-id "S001"
+
+# Unusual payments (last 90 days)
+python3 -m anomaly_detection.lib.detect unusual-payments --days 90
+\```
+
+## Detection Patterns
+
+Pattern definitions and thresholds are in `lib/patterns.py`.
+See `lib/detect.py` for the implementation.
+```
+
+**`multi-step-analysis/SKILL.md`** — similar restructuring to reference
+`lib/decompose.py` and `lib/cross_reference.py`.
+
+#### 4.8.8 Python package layout in Dockerfile
+
+The `Dockerfile.hermes-worker` must add the skills directory to `PYTHONPATH`
+so `python3 -m common.mcp_client` resolves:
+
+```dockerfile
+ENV PYTHONPATH="${PYTHONPATH}:/root/.hermes/skills"
+```
 
 ---
 
@@ -360,10 +758,31 @@ Mirror the structure of `/opt/hiclaw/agent/hermes-worker-agent/AGENTS.md`
 - [ ] `docker run --rm honeybadge/hiclaw-hermes-worker:v1.1.2-1 hermes-agent --version` returns a version
 - [ ] Image size < 1.5GB (openclaw worker is ~1.2GB)
 
-### 5.2 Unit verification (bridge script)
+### 5.2 Unit verification
+
+#### 5.2a Bridge script
 - [ ] `hermes-config-bridge.sh` produces valid YAML given a sample openclaw.json
 - [ ] `hermes-config-bridge.sh` preserves non-bridge-owned `.env` vars across re-runs
 - [ ] `hermes-config-bridge.sh` fails loudly if openclaw.json is missing required keys
+
+#### 5.2b Python modules (Approach B) — TDD, 80%+ coverage required
+- [ ] `tests/test_mcp_client.py`: `MCPClient.call()` parses mcporter stdout correctly
+- [ ] `tests/test_mcp_client.py`: `MCPClient.call()` raises on non-zero exit code
+- [ ] `tests/test_mcp_client.py`: `validate_and_execute()` returns properly typed `QueryResult`
+- [ ] `tests/test_result_builder.py`: `build()` parses summary from result.md correctly
+- [ ] `tests/test_result_builder.py`: `build()` handles missing `## Summary` section gracefully
+- [ ] `tests/test_result_builder.py`: CLI entry point writes valid JSON to output path
+- [ ] `tests/test_severity.py`: `classify()` returns INFO/WARNING/ALERT at correct thresholds
+- [ ] `tests/test_session_state.py`: `AnomalyTracker.save()` deduplicates by (type, severity)
+- [ ] `tests/test_session_state.py`: `AnomalyTracker.load()` returns empty list for new task
+- [ ] `tests/test_session_state.py`: `AnomalyTracker` persists across instances (file-backed)
+- [ ] `tests/test_detect.py`: three-way mismatch flags when invoice > PO * 1.10
+- [ ] `tests/test_detect.py`: duplicate invoice flags when count > 1
+- [ ] `tests/test_detect.py`: unusual payment flags when amount > 2x historical average
+- [ ] `tests/test_detect.py`: supplier concentration flags when > 60% category spend
+- [ ] `tests/test_decompose.py`: `decompose()` produces 2-5 sub-queries
+- [ ] `tests/test_decompose.py`: `cross_reference()` finds patterns across results
+- [ ] `pytest --cov=common --cov=anomaly_detection --cov=multi_step_analysis` reports ≥ 80%
 
 ### 5.3 Integration verification (local docker-compose)
 - [ ] `docker compose up hiclaw-analytics-worker` starts without crash
@@ -376,8 +795,13 @@ Mirror the structure of `/opt/hiclaw/agent/hermes-worker-agent/AGENTS.md`
 - [ ] **TC-CHAT-01**: User asks analytics question → @manager routes to analytics-worker → hermes executes → result.json written → frontend renders
 - [ ] **TC-ANTIHAL-01**: L1/L2/L3/L4/L5 all pass (these are MCP-layer, runtime-agnostic)
 - [ ] **TC-ISOLATION-01**: analytics-worker (hermes) and graph-worker (openclaw) run side-by-side without interference
-- [ ] **TC-ANOMALY-01**: anomaly-detection skill triggers correctly (SKILL.md portability validation)
-- [ ] **TC-MULTISTEP-01**: multi-step-analysis skill completes 8-round query (hermes session persistence)
+- [ ] **TC-ANOMALY-01**: anomaly-detection skill triggers correctly via `python3 -m anomaly_detection.lib.detect`
+- [ ] **TC-ANOMALY-02**: three-way matching flags invoice > PO * 1.10 (Approach B Python module)
+- [ ] **TC-ANOMALY-03**: duplicate invoice detection flags count > 1 (Approach B Python module)
+- [ ] **TC-MULTISTEP-01**: multi-step-analysis skill completes 8-round query via `python3 -m multi_step_analysis.lib.decompose`
+- [ ] **TC-SESSION-01**: `AnomalyTracker` persists anomalies across rounds within a task (Approach B session state)
+- [ ] **TC-SESSION-02**: Same anomaly flagged in round 1 is not re-flagged in round 3 (deduplication)
+- [ ] **TC-RESULT-01**: result.json built by `common.result_builder` matches the contract consumed by forward-to-user.sh
 
 ### 5.5 Regression verification
 - [ ] All existing E2E tests in `tests/e2e/` pass (except analytics-specific ones, which are replaced by TC-ANOMALY-01/TC-MULTISTEP-01)
@@ -416,7 +840,9 @@ docker exec honeybadge-analytics-worker openclaw --version
 - No database schema changes → no data migration to reverse
 - No MinIO object format changes → config files readable by both runtimes
 - Matrix account `@analytics-worker` is reused (no account churn)
-- SOUL.md changes are cosmetic (identity label) → openclaw ignores the hermes label
+- SOUL.md changes (identity label + Python module references) → openclaw ignores unknown Python references; openclaw falls back to its own SOUL.md from MinIO (the hermes-modified version is in the worktree branch, not merged to master until M7)
+- Python modules (`common/`, `lib/`) are additive files → openclaw runtime never loads them; they're inert during rollback
+- `sessions/` anomaly state files are per-task JSON → harmless if left behind after rollback
 
 ---
 
@@ -430,18 +856,20 @@ docker exec honeybadge-analytics-worker openclaw --version
 | Q2 | What is the exact `config.yaml` schema hermes-agent expects? | Read hermes-agent docs or source; verify against AGENTS.md ownership table |
 | Q3 | Does hermes-agent have a health check endpoint? | `hermes-agent --help` or docs; needed for readiness reporter |
 | Q4 | How does hermes-agent handle Matrix E2EE? | AGENTS.md mentions "custom Matrix adapter" — verify crypto storage path and re-login flow |
-| Q5 | Does hermes-agent support the `exec` tool for mcporter CLI? | SKILL.md assumes `exec` tool exists; verify in hermes-agent docs |
+| Q5 | Does hermes-agent support the `exec` tool for mcporter CLI? | **Approach B makes this moot** — Python modules call mcporter via subprocess, not via hermes `exec` tool. Verify `subprocess.run(["mcporter", ...])` works in hermes-agent's Python environment |
 
 ### 7.2 Risks
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | hermes-agent not on PyPI | Medium | **Blocker** | Check HiClaw distribution; may need to extract from a hermes-enabled image |
-| SKILL.md format subtly incompatible | Low | Medium | Validation in 5.4 TC-ANOMALY-01; fallback to adapting phrasing |
+| SKILL.md Python module references not understood by hermes LLM | Low | Medium | Validation in 5.4 TC-ANOMALY-01; SKILL.md instructions are explicit CLI commands |
 | Matrix E2EE broken under hermes | Medium | High | Re-login flow in entrypoint; verify with Element Web |
 | hermes-agent crashes on startup | Low | High | Rollback procedure (6.2) is < 5 min |
-| Config bridge drops a critical key | Medium | Medium | Unit test bridge script (5.2); compare generated config.yaml against AGENTS.md spec |
+| Config bridge drops a critical key | Medium | Medium | Unit test bridge script (5.2a); compare generated config.yaml against AGENTS.md spec |
 | mcporter not on hermes PATH | Low | Medium | Dockerfile installs mcporter; verify in image build (5.1) |
+| Python modules have bugs that corrupt result.json | Medium | High | TDD with 80%+ coverage (5.2b); result.json contract test (TC-RESULT-01); rollback to heredoc if needed |
+| `sessions/` anomaly state lost on container restart | Low | Low | Per-task state is ephemeral; only matters within a single analysis task |
 
 ### 7.3 Non-blocking observations
 
@@ -457,9 +885,10 @@ docker exec honeybadge-analytics-worker openclaw --version
 |---|-----------|---------------|
 | M1 | Resolve blocking questions Q1-Q5 | All answered with citations to docs/source |
 | M2 | Build custom image | 5.1 passes |
-| M3 | Write entrypoint + bridge scripts | 5.2 passes |
+| M3 | Write entrypoint + bridge scripts | 5.2a passes |
+| **M3a** | **Write Python enhancement modules (Approach B)** | **5.2b passes (TDD, 80%+ coverage)** |
 | M4 | Local integration test | 5.3 passes |
-| M5 | E2E functional test | 5.4 passes |
+| M5 | E2E functional test | 5.4 passes (incl. TC-SESSION-01/02, TC-ANOMALY-02/03) |
 | M6 | Regression + observability | 5.5 + 5.6 pass |
 | M7 | PR review + merge | Merged to master |
 
@@ -467,15 +896,18 @@ docker exec honeybadge-analytics-worker openclaw --version
 design must be revised (possibly: wait for HiClaw to ship a hermes-enabled
 worker image, or extract hermes-agent from a different distribution).
 
+**M3a can run in parallel with M3** — Python modules don't depend on the
+hermes entrypoint/bridge scripts. TDD: write tests first (RED), implement
+(GREEN), then validate against real MCP responses in M4.
+
 ---
 
 ## 9. Out of Scope
 
 - Migrating graph-worker to hermes (stays on openclaw)
 - Migrating any worker to copaw (not evaluated)
-- Python-native skill rewrite (Approach B — future enhancement after Approach A validates)
+- Cross-task anomaly learning (persisting anomalies across different task IDs — future enhancement beyond Approach B's per-task sessions)
 - Canary/dual-run infrastructure (Approach C — unnecessary for pilot)
-- Hermes `sessions/` cross-round anomaly tracking (future enhancement)
 - Production k8s manifests update (follow-on PR after local validation)
 
 ---
@@ -485,12 +917,13 @@ worker image, or extract hermes-agent from a different distribution).
 | # | Assumption | If wrong |
 |---|------------|----------|
 | A1 | Only analytics-worker migrates; graph-worker stays openclaw | Scope expands; redo blast radius analysis |
-| A2 | Full runtime replacement, not parallel canary | If canary needed, switch to Approach C |
+| A2 | Full runtime replacement + Python enhancement (Approach B), not parallel canary | If canary needed, switch to Approach C |
 | A3 | Matrix account `@analytics-worker` is reused | If new account needed, update init-workers.sh + Manager allowlist |
-| A4 | SKILL.md files are directly portable | If not, add a skill-adaptation sub-milestone to M3 |
-| A5 | result.json contract must stay unchanged | If contract can change, simplify Step 3b (remove heredoc, use Python dataclass) |
+| A4 | SKILL.md files restructured to reference Python modules (Approach B) | If hermes rejects SKILL.md format entirely, deeper rewrite needed |
+| A5 | result.json contract stays unchanged (built by `common.result_builder` instead of heredoc) | If contract can change, simplify dataclass fields |
 | A6 | Rollback must be possible in < 5 min | If slower acceptable, simplify rollback procedure |
 | A7 | No new LLM provider; still Higress gateway | If provider changes, update bridge .env generation |
+| A8 | `mcporter` CLI is available in the hermes worker container (subprocess calls work) | If not, Dockerfile must install mcporter; verify in M2 |
 
 ---
 
