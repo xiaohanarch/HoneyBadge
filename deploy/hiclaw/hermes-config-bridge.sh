@@ -78,7 +78,7 @@ try:
         data = yaml.safe_load(f) or {}
 except Exception:
     sys.exit(0)
-bridge_keys = {'model', 'matrix', 'platforms', 'approvals', 'agent', 'custom_providers', 'providers'}
+bridge_keys = {'model', 'matrix', 'platforms', 'approvals', 'agent', 'skills', 'custom_providers', 'providers'}
 preserved = {k: v for k, v in data.items() if k not in bridge_keys}
 if preserved:
     print(yaml.dump(preserved, default_flow_style=False, allow_unicode=True))
@@ -112,6 +112,15 @@ approvals:
 # write result.md → write result.json → sync MinIO → notify).
 agent:
   max_turns: ${HERMES_MAX_TURNS:-15}
+
+# Disable background skill review — the headless worker must not waste API
+# calls on "Review the conversation above and update the skill library"
+# after each query. Without this, the review fires when _iters_since_skill
+# >= creation_nudge_interval (default 10), consuming 10+ additional API
+# calls and sending messages to the Matrix room that interfere with the
+# E2E test settle logic.
+skills:
+  creation_nudge_interval: 0
 YAML
 
 if [ -n "$PRESERVED_YAML" ]; then
