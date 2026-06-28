@@ -53,6 +53,7 @@ configMapGenerator:
       - entrypoint-wrapper.sh=../hiclaw/entrypoint-wrapper.sh
       - manager-init-internal.sh=../hiclaw/manager-init-internal.sh
       - worker-init-wrapper.sh=../hiclaw/worker-init-wrapper.sh
+      - hermes-config-bridge.sh=../hiclaw/hermes-config-bridge.sh
   - name: nebula-schema
     files:
       - nebula-schema.ngql=../docker/nebula-schema.ngql
