@@ -289,12 +289,12 @@ class TestUserIsolation:
         """
         # admin查询
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计高风险的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "统计高风险的采购订单数量", timeout=120000, settle_timeout_ms=180000)
         admin_count = self._extract_count(admin_text)
 
         # subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计高风险的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计高风险的采购订单数量", timeout=120000, settle_timeout_ms=180000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # 断言: 体现权限差距
@@ -313,11 +313,11 @@ class TestUserIsolation:
         - subsidiary: org1011大额PO
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计金额超过50万的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        admin_text = send_query_on_page(admin_page, "统计金额超过50万的采购订单数量", timeout=120000, settle_timeout_ms=180000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计金额超过50万的采购订单数量", timeout=120000, settle_timeout_ms=480000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计金额超过50万的采购订单数量", timeout=120000, settle_timeout_ms=180000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
@@ -335,11 +335,11 @@ class TestUserIsolation:
         用"统计采购订单总数"避免LLM将"异常"误解为status=='EXCEPTION'(返回0)。
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计采购订单总数", timeout=120000, settle_timeout_ms=600000)
+        admin_text = send_query_on_page(admin_page, "统计采购订单总数", timeout=120000, settle_timeout_ms=180000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单总数", timeout=120000, settle_timeout_ms=600000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单总数", timeout=120000, settle_timeout_ms=180000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
@@ -356,11 +356,11 @@ class TestUserIsolation:
         体现: 大领导可发现跨多个org的供应商问题，小领导只能看到本org
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计有问题的供应商数量", timeout=120000, settle_timeout_ms=600000)
+        admin_text = send_query_on_page(admin_page, "统计有问题的供应商数量", timeout=120000, settle_timeout_ms=180000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计有问题的供应商数量", timeout=120000, settle_timeout_ms=600000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计有问题的供应商数量", timeout=120000, settle_timeout_ms=180000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
@@ -379,11 +379,11 @@ class TestUserIsolation:
         (Invoice标签无Tag Index，LLM有时生成绕过org_id过滤的查询)。
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计所有供应商总数", timeout=120000, settle_timeout_ms=600000)
+        admin_text = send_query_on_page(admin_page, "统计所有供应商总数", timeout=120000, settle_timeout_ms=180000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计所有供应商总数", timeout=120000, settle_timeout_ms=600000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计所有供应商总数", timeout=120000, settle_timeout_ms=180000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
