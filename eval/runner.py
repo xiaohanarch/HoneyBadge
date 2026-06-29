@@ -44,7 +44,7 @@ def build_llm_adapter() -> Any:
         "endpoint": os.environ.get("LLM_ENDPOINT", "http://localhost:8080"),
         "api_key": os.environ.get("LLM_API_KEY", ""),
         "model": os.environ.get("LLM_MODEL", "glm-4-flash"),
-        "timeout": int(os.environ.get("LLM_TIMEOUT", "300")),
+        "timeout": _parse_timeout("LLM_TIMEOUT"),
     }
     return OpenAICompatibleAdapter(config, None)
 
@@ -61,7 +61,7 @@ def build_judge_adapter() -> Any:
         "endpoint": os.environ.get("JUDGE_LLM_ENDPOINT", os.environ.get("LLM_ENDPOINT", "http://localhost:8080")),
         "api_key": os.environ.get("JUDGE_LLM_API_KEY", os.environ.get("LLM_API_KEY", "")),
         "model": os.environ.get("JUDGE_LLM_MODEL", os.environ.get("LLM_MODEL", "glm-4-flash")),
-        "timeout": int(os.environ.get("JUDGE_LLM_TIMEOUT", "300")),
+        "timeout": _parse_timeout("JUDGE_LLM_TIMEOUT"),
     }
     return OpenAICompatibleAdapter(config, None)
 
@@ -111,10 +111,29 @@ def _build_user_context(user_context: str) -> dict | None:
     return profiles.get(user_context)
 
 
+def _parse_timeout(env_var: str, default: int = 300) -> int:
+    """Parse a timeout value from an environment variable.
+
+    Returns the default if the env var is unset or non-numeric,
+    logging a warning in the latter case so misconfiguration is visible.
+    """
+    raw = os.environ.get(env_var, str(default))
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(
+            "invalid_timeout_env",
+            env_var=env_var,
+            raw_value=raw,
+            default=default,
+        )
+        return default
+
+
 def _strip_fences(text: str) -> str:
     """Strip markdown code fences and <think> blocks from LLM output."""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    text = re.sub(r"^```(?:ngql|cypher)?\s*", "", text.strip())
+    text = re.sub(r"^```\w*\s*", "", text.strip())
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
 
@@ -152,51 +171,69 @@ async def run_offline_eval(
         rule_failures: list[str] = []
         judge_reasons: list[str] = []
 
-        case_runs = case.offline.judge.runs or runs
+        case_runs = case.offline.judge.runs if case.offline.judge.runs is not None else runs
         for run_idx in range(case_runs):
-            # 1. Generate nGQL with real LLM
-            llm_resp = await generate_ngql(
-                adapter,
-                case.question,
-                schema_info=schema_info,
-                ontology_info=render_ontology(case.question),
-                user_context=ctx,
-            )
-            generated_ngql = _strip_fences(llm_resp.content)
-
-            # 2. Rule scoring (skip if no ci section)
-            all_rules_pass = True
-            if case.ci:
-                for check in case.ci.checks:
-                    check_dict = {"type": check.type, **check.params}
-                    result = run_check(check_dict, generated_ngql, ctx)
-                    if not result.passed:
-                        all_rules_pass = False
-                        rule_failures.append(f"{check.type}: {result.detail}")
-
-            # 3. LLM-as-judge (only if rules pass — save API cost)
-            if all_rules_pass:
-                score, reason = await judge.evaluate(
-                    question=case.question,
-                    generated_ngql=generated_ngql,
-                    rubric=case.offline.judge.rubric,
+            try:
+                # 1. Generate nGQL with real LLM
+                llm_resp = await generate_ngql(
+                    adapter,
+                    case.question,
+                    schema_info=schema_info,
+                    ontology_info=render_ontology(case.question),
+                    user_context=ctx,
                 )
-                run_scores.append(score)
-                judge_reasons.append(reason)
-                passed = score >= case.offline.judge.pass_criteria
-            else:
-                run_scores.append(0)
-                judge_reasons.append("Skipped — rule check failed")
-                passed = False
+                generated_ngql = _strip_fences(llm_resp.content)
 
-            run_passes.append(passed)
-            logger.debug(
-                "eval_run_complete",
-                case_id=case.id,
-                run=run_idx + 1,
-                passed=passed,
-                rules_pass=all_rules_pass,
-            )
+                # 2. Rule scoring (skip if no ci section)
+                all_rules_pass = True
+                if case.ci:
+                    for check in case.ci.checks:
+                        check_dict = {"type": check.type, **check.params}
+                        result = run_check(check_dict, generated_ngql, ctx)
+                        if not result.passed:
+                            all_rules_pass = False
+                            rule_failures.append(f"{check.type}: {result.detail}")
+
+                # 3. LLM-as-judge (only if rules pass — save API cost)
+                if all_rules_pass:
+                    score, reason = await judge.evaluate(
+                        question=case.question,
+                        generated_ngql=generated_ngql,
+                        rubric=case.offline.judge.rubric,
+                    )
+                    run_scores.append(score)
+                    judge_reasons.append(reason)
+                    passed = score >= case.offline.judge.pass_criteria
+                else:
+                    run_scores.append(0)
+                    judge_reasons.append("Skipped — rule check failed")
+                    passed = False
+
+                run_passes.append(passed)
+                logger.debug(
+                    "eval_run_complete",
+                    case_id=case.id,
+                    run=run_idx + 1,
+                    passed=passed,
+                    rules_pass=all_rules_pass,
+                )
+            except Exception as e:
+                # Broad catch: any LLM failure (network, timeout, 500, rate
+                # limit) should not abort the entire suite. generate_ngql
+                # wraps errors as LLMGenerationError; judge.evaluate may raise
+                # LLMError/LLMTimeoutError/RateLimitExceeded. We record the
+                # failure and continue to the next run.
+                logger.warning(
+                    "eval_run_failed",
+                    case_id=case.id,
+                    run=run_idx + 1,
+                    error=str(e),
+                )
+                run_passes.append(False)
+                run_scores.append(0)
+                judge_reasons.append(str(e))
+                rule_failures.append(f"run_error: {type(e).__name__}: {e}")
+                continue
 
         pass_rate = compute_pass_rate(run_passes)
         results.append(EvalResult(
