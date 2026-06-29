@@ -26,6 +26,7 @@ _spec.loader.exec_module(_mod)
 get_schema_impl = _mod.get_schema_impl
 validate_and_execute_impl = _mod.validate_and_execute_impl
 get_user_permissions_impl = _mod.get_user_permissions_impl
+generate_ngql_impl = _mod.generate_ngql_impl
 _schema_cache = _mod._schema_cache
 
 
@@ -382,3 +383,129 @@ class TestValidateAndExecuteWithPermissions:
         )
         assert result["success"] is True
         assert result["warnings"] == []
+
+
+# ---------------------------------------------------------------------------
+# Tests for generate_ngql_impl — ontology_info injection
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateNgqlOntologyInjection:
+    """Tests that generate_ngql_impl injects ontology context into the LLM call.
+
+    Previously ontology_info was hardcoded to "" — the 12 shipped ontology
+    files were never seen by the nGQL generation prompt.  These tests guard
+    against that regression.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_ontology_singleton(self):
+        """Reset the module-level ontology loader cache before each test."""
+        _mod._ontology_loader = None
+        _mod._ontology_unavailable = False
+        yield
+        _mod._ontology_loader = None
+        _mod._ontology_unavailable = False
+
+    @pytest.mark.asyncio
+    async def test_ontology_info_is_nonempty_when_files_available(self, monkeypatch):
+        """When prompts/ontology/*.md exist, ontology_info passed to the LLM
+        must be non-empty and contain domain content."""
+        captured: dict = {}
+
+        async def fake_generate_ngql(adapter, question, schema_info, ontology_info, trace_id=None, **kw):
+            captured["ontology_info"] = ontology_info
+            captured["question"] = question
+            # Return a minimal LLMResponse-like object
+            from honeybadge.llm.adapter import LLMResponse
+            return LLMResponse(
+                content="MATCH (n) RETURN n LIMIT 1",
+                model="test",
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                finish_reason="stop",
+                latency_ms=1,
+            )
+
+        monkeypatch.setattr(_mod, "llm_generate_ngql", fake_generate_ngql)
+
+        # Use a question that should match the supplier domain
+        await generate_ngql_impl(
+            llm=None,
+            nebula=FakeNebulaClient({}),
+            question="列出所有高风险供应商",
+            schema_info="# fake schema",
+        )
+
+        assert captured["ontology_info"], "ontology_info must not be empty"
+        # The supplier domain should be selected for a supplier question
+        assert "ontology/supplier" in captured["ontology_info"] or "Supplier" in captured["ontology_info"]
+
+    @pytest.mark.asyncio
+    async def test_ontology_info_routes_by_keyword(self, monkeypatch):
+        """A procurement-related question should include the procurement domain."""
+        captured: dict = {}
+
+        async def fake_generate_ngql(adapter, question, schema_info, ontology_info, trace_id=None, **kw):
+            captured["ontology_info"] = ontology_info
+            from honeybadge.llm.adapter import LLMResponse
+            return LLMResponse(
+                content="MATCH (n) RETURN n LIMIT 1",
+                model="test",
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                finish_reason="stop",
+                latency_ms=1,
+            )
+
+        monkeypatch.setattr(_mod, "llm_generate_ngql", fake_generate_ngql)
+
+        await generate_ngql_impl(
+            llm=None,
+            nebula=FakeNebulaClient({}),
+            question="查询采购订单的收货情况",
+            schema_info="# fake schema",
+        )
+
+        assert captured["ontology_info"], "ontology_info must not be empty"
+        # Either procurement or overview domain should be present
+        assert "ontology/procurement" in captured["ontology_info"] or "ontology/overview" in captured["ontology_info"]
+
+    @pytest.mark.asyncio
+    async def test_ontology_info_empty_when_directory_missing(self, monkeypatch):
+        """When the ontology directory is unavailable, ontology_info falls
+        back to an empty string instead of crashing."""
+        # Simulate missing ontology directory
+        _mod._ontology_unavailable = True
+
+        captured: dict = {}
+
+        async def fake_generate_ngql(adapter, question, schema_info, ontology_info, trace_id=None, **kw):
+            captured["ontology_info"] = ontology_info
+            from honeybadge.llm.adapter import LLMResponse
+            return LLMResponse(
+                content="MATCH (n) RETURN n LIMIT 1",
+                model="test",
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                finish_reason="stop",
+                latency_ms=1,
+            )
+
+        monkeypatch.setattr(_mod, "llm_generate_ngql", fake_generate_ngql)
+
+        result = await generate_ngql_impl(
+            llm=None,
+            nebula=FakeNebulaClient({}),
+            question="列出所有供应商",
+            schema_info="# fake schema",
+        )
+
+        assert captured["ontology_info"] == ""
+        # Should still return a valid result dict
+        assert "ngql" in result
+        assert "trace_id" in result
+

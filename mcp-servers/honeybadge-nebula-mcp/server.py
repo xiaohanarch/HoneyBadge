@@ -28,6 +28,7 @@ from honeybadge.llm.adapter import (
     generate_ngql as llm_generate_ngql,
     summarize_results as llm_summarize_results,
 )
+from honeybadge.ontology import OntologyLoader
 from honeybadge.protocols.validator import NgqlValidator
 
 # Add mcp-servers/honeybadge-nebula-mcp to path for permission_enforcer
@@ -132,6 +133,8 @@ _nebula_client: NebulaGraphClient | None = None
 _llm_adapter: OpenAICompatibleAdapter | None = None
 _validator: NgqlValidator | None = None
 _enforcer: PermissionEnforcer | None = None
+_ontology_loader: OntologyLoader | None = None
+_ontology_unavailable: bool = False
 
 
 def _get_nebula() -> NebulaGraphClient:
@@ -171,6 +174,43 @@ def _get_enforcer() -> PermissionEnforcer:
     if _enforcer is None:
         _enforcer = PermissionEnforcer()
     return _enforcer
+
+
+def _get_ontology_loader() -> OntologyLoader | None:
+    """Return a process-global OntologyLoader, or None if unavailable.
+
+    The ontology directory may be absent in stripped-down deployments or some
+    test environments.  Once a FileNotFoundError is observed we cache the
+    negative result in ``_ontology_unavailable`` so we don't retry the
+    filesystem scan on every query.
+    """
+    global _ontology_loader, _ontology_unavailable
+    if _ontology_unavailable:
+        return None
+    if _ontology_loader is None:
+        try:
+            _ontology_loader = OntologyLoader()
+            _ontology_loader.load()
+        except FileNotFoundError as exc:
+            logger.warning("ontology_dir_not_found", error=str(exc))
+            _ontology_unavailable = True
+            return None
+    return _ontology_loader
+
+
+def _render_ontology_for_question(question: str) -> str:
+    """Render the ontology context for a question, or '' if unavailable."""
+    loader = _get_ontology_loader()
+    if loader is None:
+        return ""
+    try:
+        text, selected = loader.render_for_question(question)
+        if selected:
+            logger.info("ontology_routed", domains=selected, question=question[:80])
+        return text
+    except Exception as exc:
+        logger.warning("ontology_render_failed", error=str(exc))
+        return ""
 
 
 def _default_space() -> str:
@@ -329,11 +369,13 @@ async def generate_ngql_impl(
     if not schema_info:
         schema_info = await get_schema_impl(nebula)
 
+    ontology_info = _render_ontology_for_question(question)
+
     response = await llm_generate_ngql(
         adapter=llm,
         question=question,
         schema_info=schema_info,
-        ontology_info="",
+        ontology_info=ontology_info,
         trace_id=trace_id,
     )
 
