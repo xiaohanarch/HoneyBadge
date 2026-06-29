@@ -138,6 +138,38 @@ def _check_has_org_id(ngql: str, ctx: UserContext, params: CheckParams) -> Check
     return CheckResult(False, "Non-admin user query missing org_id filter")
 
 
+_WRITE_OPS_RE = re.compile(
+    r"\b(INSERT|UPDATE|UPSERT|DELETE|DROP|CREATE|ALTER)\b", re.IGNORECASE
+)
+_FORBIDDEN_QUERY_OPS_RE = re.compile(
+    r"\b(GO|FETCH|FIND\s+PATH|GET\s+SUBGRAPH)\b", re.IGNORECASE
+)
+
+
+def _check_rejected_by_L1(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:
+    """Expect the query to be rejected by L1 (syntax/validate_syntax)."""
+    stripped = ngql.strip()
+    if not stripped:
+        return CheckResult(True, "Rejected: empty query")
+    if _WRITE_OPS_RE.search(stripped):
+        return CheckResult(True, "Rejected: write operation")
+    # If it's a valid read query, L1 would NOT reject it
+    syntax = _check_syntax_valid(stripped, ctx, params)
+    if not syntax.passed:
+        return CheckResult(True, f"Rejected: {syntax.detail}")
+    return CheckResult(False, "Query was NOT rejected by L1 (valid syntax, no write op)")
+
+
+def _check_rejected_by_L3(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:
+    """Expect the query to be rejected by L3 (forbidden ops / permission)."""
+    stripped = ngql.strip()
+    if _FORBIDDEN_QUERY_OPS_RE.search(stripped):
+        return CheckResult(True, "Rejected: forbidden query operation (GO/FETCH/FIND PATH)")
+    if _WRITE_OPS_RE.search(stripped):
+        return CheckResult(True, "Rejected: write operation")
+    return CheckResult(False, "Query was NOT rejected by L3 (no forbidden ops detected)")
+
+
 _CHECKS: dict[str, CheckHandler] = {
     "syntax_valid": _check_syntax_valid,
     "has_limit": _check_has_limit,
@@ -147,4 +179,6 @@ _CHECKS: dict[str, CheckHandler] = {
     "order_by_uses_alias": _check_order_by_uses_alias,
     "no_optional_match_where": _check_no_optional_match_where,
     "has_org_id": _check_has_org_id,
+    "rejected_by_L1": _check_rejected_by_L1,
+    "rejected_by_L3": _check_rejected_by_L3,
 }

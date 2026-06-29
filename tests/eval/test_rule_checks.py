@@ -113,3 +113,34 @@ def test_has_org_id_skipped_for_admin() -> None:
     ngql = "MATCH (s:Supplier) RETURN s LIMIT 10"
     result = run_check({"type": "has_org_id"}, ngql, user_context={"user_id": "admin", "org_ids": None})
     assert result.passed  # admin doesn't need org_id filter
+
+
+# --- rejected_by_L1 ---
+
+def test_rejected_by_L1_passes_for_write_op() -> None:
+    """DELETE should be rejected by L1 (write operation)."""
+    ngql = "DELETE VERTEX *"
+    result = run_check({"type": "rejected_by_L1"}, ngql, user_context=None)
+    assert result.passed
+
+
+def test_rejected_by_L1_fails_for_valid_read() -> None:
+    """A valid MATCH query should NOT be rejected by L1."""
+    ngql = "MATCH (s:Supplier) RETURN s LIMIT 10"
+    result = run_check({"type": "rejected_by_L1"}, ngql, user_context=None)
+    assert not result.passed
+
+
+# --- rejected_by_L3 ---
+
+def test_rejected_by_L3_passes_for_forbidden_op() -> None:
+    """GO should be rejected by L3 (forbidden in permission enforcer)."""
+    ngql = "GO 1 STEPS FROM 'vid' OVER SUPPLIES_ITEM YIELD id($$)"
+    result = run_check({"type": "rejected_by_L3"}, ngql, user_context=None)
+    assert result.passed
+
+
+def test_rejected_by_L3_fails_for_allowed_match() -> None:
+    ngql = "MATCH (s:Supplier) RETURN s LIMIT 10"
+    result = run_check({"type": "rejected_by_L3"}, ngql, user_context=None)
+    assert not result.passed
