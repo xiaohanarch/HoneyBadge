@@ -475,10 +475,12 @@ class TestUserIsolation:
         # Remove markdown bold markers so "**8297** 个" becomes "8297 个"
         normalized = re.sub(r'\*\*', '', normalized)
         patterns = [
-            # "数量：0 个", "数量：89 笔" — analytics-worker direct answer
-            # Must precede "共有 N 个" so narrative context (e.g. "该组织共有
-            # 310 个采购订单") doesn't shadow the actual count ("数量：0 个").
-            r'数量[：:]\s*(\d+)\s*[个笔条单]',
+            # "数量：0 个", "数量为 0", "数量：89 笔" — analytics-worker direct
+            # answer. Must precede "共有 N 个" / "共计 N 笔" so narrative context
+            # (e.g. "共计 310 笔采购订单") doesn't shadow the actual count
+            # ("数量为 0").  Matches both colon and 为 variants; no counter word
+            # required since "数量" + number is always the direct answer.
+            r'数量[：:为]\s*(\d+)',
             r'共[有为]?\s*(\d+)\s*条',     # "共有 5000 条", "共 5000 条"
             r'共[^\d\n]*?(\d+)\s*条',      # "共发现 23 条" — analytics-worker
             r'共[有为]?\s*(\d+)\s*个',      # "共有 5000 个" — analytics-worker count-style
