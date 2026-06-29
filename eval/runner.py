@@ -19,13 +19,14 @@ from __future__ import annotations
 
 import os
 import re
-import structlog
 from pathlib import Path
 from typing import Any
 
+import structlog
+
 from eval.case_loader import EvalCase
 from eval.scorers.llm_judge import LLMJudge
-from eval.scorers.rule_checks import CheckResult, run_check
+from eval.scorers.rule_checks import run_check
 from eval.stats import EvalResult, compute_pass_rate
 
 logger = structlog.get_logger()
