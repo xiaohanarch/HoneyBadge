@@ -39,6 +39,27 @@ if [ -z "$WORKER_NAME" ] || [ -z "$MESSAGE" ]; then
     exit 1
 fi
 
+# Recover real user_id when the LLM defaults to "manager".
+# The LLM calls route-and-execute.sh (which writes /tmp/.last-route-user-id)
+# and dispatch.sh as separate bash tool invocations. It sometimes forgets to
+# re-extract USER_ID for dispatch.sh, defaulting to "manager" (its own identity).
+# This causes the Worker's spec.md to have user_id=manager → L3 uses org_ids=[1]
+# → 0 results. Recover the correct user_id from the temp file.
+if [[ "$USER_ID" == "manager" || -z "$USER_ID" ]]; then
+    if [[ -f /tmp/.last-route-user-id ]]; then
+        RECOVERED_ID=$(cat /tmp/.last-route-user-id 2>/dev/null || true)
+        if [[ -n "$RECOVERED_ID" && "$RECOVERED_ID" != "manager" ]]; then
+            echo "RECOVERED_USER_ID=$RECOVERED_ID (was '$USER_ID', recovered from route-and-execute.sh)" >&2
+            USER_ID="$RECOVERED_ID"
+            # Also fix --user-mxid so meta.json has the correct user_mxid
+            if [[ -z "$USER_MXID" || "$USER_MXID" == *"@hb-manager:"* ]]; then
+                MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
+                USER_MXID="@hb-${USER_ID}:${MATRIX_DOMAIN}"
+            fi
+        fi
+    fi
+fi
+
 REGISTRY="$HOME/workers-registry.json"
 # Tuwunel base URL. Honor HICLAW_MATRIX_URL when set (split topology — Tuwunel
 # lives in honeybadge-hiclaw-embedded, not the Manager container). Falls back

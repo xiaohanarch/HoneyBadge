@@ -93,10 +93,15 @@ class TestPermissions:
         response = page.locator(MSG_ASSISTANT)
         response_text = response.last.inner_text() if response.count() > 0 else ""
 
-        # Either error is shown OR response indicates no access
+        # Either error is shown OR response indicates no access.
+        # Keywords cover Manager's L3 denial wording: "查询被权限系统拦截，无法返回..." /
+        # "查询销售订单失败。当前用户...无法访问 OTC 流程" plus standard terms.
         has_permission_error = (
             error_elements.count() > 0 or
-            any(kw in response_text.lower() for kw in ["permission", "denied", "拒绝", "无权", "禁止", "不允许", "没有权限"])
+            any(kw in response_text.lower() for kw in [
+                "permission", "denied", "拒绝", "无权", "禁止", "不允许",
+                "没有权限", "拦截", "无法", "失败", "不在允许",
+            ])
         )
 
         # If no error shown, check that SalesOrder data is NOT present
@@ -147,9 +152,14 @@ class TestPermissions:
         response = page.locator(MSG_ASSISTANT)
         response_text = response.last.inner_text() if response.count() > 0 else ""
 
-        # Check for permission error indicators
+        # Check for permission error indicators.
+        # Keywords cover Manager's L3 denial wording: "查询被权限系统拦截，无法返回..." /
+        # "查询销售订单失败。当前用户...无法访问 OTC 流程" plus standard terms.
         has_error = (
-            any(kw in response_text.lower() for kw in ["permission", "denied", "拒绝", "无权", "禁止", "不允许", "没有权限", "error", "错误"]) or
+            any(kw in response_text.lower() for kw in [
+                "permission", "denied", "拒绝", "无权", "禁止", "不允许",
+                "没有权限", "error", "错误", "拦截", "无法", "失败", "不在允许",
+            ]) or
             page.locator('[class*="error"], [class*="permission"], [class*="alert-danger"]').count() > 0
         )
 
