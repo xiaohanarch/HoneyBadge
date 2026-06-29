@@ -1,0 +1,37 @@
+id: NGQL-SUP-001
+category: ngql_accuracy
+subcategory: supplier_risk
+question: "查询高风险供应商有哪些"
+user_context: analyst
+
+ci:
+  golden_ngql: |
+    MATCH (s:Supplier)
+    WHERE s.Supplier.org_id IN [1000]
+      AND (s.Supplier.credit_rating IN ["C","D"] OR s.Supplier.status == "BLOCKED")
+    RETURN s.Supplier.supplier_name AS supplier_name,
+           s.Supplier.credit_rating AS credit_rating,
+           s.Supplier.status AS status
+    LIMIT 100
+  checks:
+    - type: syntax_valid
+    - type: forbidden_ops_absent
+      ops: [GO, FETCH, "FIND PATH", "GET SUBGRAPH"]
+    - type: has_limit
+    - type: has_org_id
+    - type: expected_tags
+      tags: [Supplier]
+
+offline:
+  judge:
+    rubric: |
+      判断 nGQL 是否语义正确地回答了"查询高风险供应商"：
+      1. 必须查询 Supplier 顶点
+      2. 必须包含高风险过滤（credit_rating IN C/D 或 status==BLOCKED）
+      3. 不应查出所有供应商（缺少风险过滤为错误）
+      4. 非 admin 用户必须有 org_id 限制
+    pass_criteria: 4
+    runs: 3
+  post_exec:
+    expected_row_count_min: 1
+    summary_value_check: true

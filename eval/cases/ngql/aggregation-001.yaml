@@ -1,0 +1,31 @@
+id: NGQL-AGG-001
+category: ngql_accuracy
+subcategory: aggregation
+question: "各信用评级的供应商数量"
+user_context: admin
+
+ci:
+  golden_ngql: |
+    MATCH (s:Supplier)
+    RETURN s.Supplier.credit_rating AS credit_rating,
+           count(s) AS supplier_count
+    ORDER BY credit_rating
+    LIMIT 100
+  checks:
+    - type: syntax_valid
+    - type: forbidden_ops_absent
+      ops: [GO, FETCH, "FIND PATH", "GET SUBGRAPH"]
+    - type: has_limit
+    - type: expected_tags
+      tags: [Supplier]
+    - type: order_by_uses_alias
+
+offline:
+  judge:
+    rubric: |
+      判断 nGQL 是否正确统计各信用评级的供应商数量：
+      1. 必须用 count() 聚合
+      2. 必须按 credit_rating 分组（RETURN 中包含 credit_rating）
+      3. 不应缺少 LIMIT
+    pass_criteria: 4
+    runs: 3
