@@ -33,7 +33,7 @@ def build(generate_file: Path, execute_file: Path, result_md: Path) -> TaskResul
     rows = exe.get("rows", [])
     return TaskResult(
         trace_id=exe.get("trace_id", ""),
-        cypher=gen.get("ngql", ""),
+        cypher=exe.get("ngql", gen.get("ngql", "")),
         columns=exe.get("columns", []),
         raw_data=rows,
         row_count=exe.get("row_count", len(rows)),

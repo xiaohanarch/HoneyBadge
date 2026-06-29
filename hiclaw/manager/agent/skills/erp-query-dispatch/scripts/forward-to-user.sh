@@ -262,13 +262,20 @@ if result_json_path and os.path.isfile(result_json_path):
         if not trace_id or trace_id in ('N/A', 'null', 'None'):
             import datetime as _dt
             trace_id = _dt.datetime.now().strftime('TRC-%Y%m%d-%H%M%S-graphworker')
+        # Truncate raw_data to prevent Matrix PDU size limit (65535 bytes).
+        # Analytics-worker queries can return thousands of rows; sending the
+        # full dataset causes M_TOO_LARGE errors and the result is never delivered.
+        raw_data = result.get('raw_data', [])
+        MAX_PAYLOAD_ROWS = 50
+        if len(raw_data) > MAX_PAYLOAD_ROWS:
+            raw_data = raw_data[:MAX_PAYLOAD_ROWS]
         body['x-honeybadge'] = {
             'v': '1',
             'contract': '002',
             'trace_id': trace_id,
             'payload': {
                 'summary': result.get('summary', content),
-                'raw_data': result.get('raw_data', []),
+                'raw_data': raw_data,
                 'columns': result.get('columns', []),
                 'cypher': result.get('cypher', ''),
                 'execution_time_ms': result.get('execution_time_ms', 0),

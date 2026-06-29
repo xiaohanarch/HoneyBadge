@@ -38,6 +38,14 @@ done
 [[ -z "$QUESTION" ]] && { echo '{"error":"--question is required"}'; exit 1; }
 [[ -z "$USER_ID" ]]  && { echo '{"error":"--user-id is required"}';  exit 1; }
 
+# Persist user_id so dispatch-to-worker.sh can recover it.
+# The Manager LLM calls route-and-execute.sh and dispatch.sh as separate
+# bash tool invocations — USER_ID doesn't carry over. When the LLM
+# forgets to re-extract USER_ID for dispatch.sh, it defaults to "manager"
+# (its own identity), causing L3 to use org_ids=[1] → 0 results.
+# dispatch.sh reads this file when --user-id is "manager" or empty.
+echo "$USER_ID" > /tmp/.last-route-user-id
+
 # Step 1: Route
 ROUTE=$(bash /opt/honeybadge/config/manager/agent/skills/fast-query/router.sh "$QUESTION")
 
