@@ -226,8 +226,12 @@ async def run_offline_eval(cases, runs=3, threshold=0.8):
             )
             generated_ngql = strip_fences(llm_resp.content)
 
-            # 2. 规则评分（复用 CI 的 scorer）
-            rule_scores = run_all_checks(case.ci.checks, generated_ngql, ctx)
+            # 2. 规则评分（复用 CI 的 scorer，e2e_quality 用例可能无 ci 段）
+            rule_scores = (
+                run_all_checks(case.ci.checks, generated_ngql, ctx)
+                if case.ci
+                else []
+            )
 
             # 3. LLM-as-judge 语义评分
             judge_score = await judge.evaluate(
@@ -276,8 +280,8 @@ class LLMJudge:
 **Judge 风险缓解**：
 - judge 用比生成更强的模型（生成 Qwen/GLM，judge Claude/GPT-4）
 - 结构化 rubric，不是自由评判
-- 规则已抓到的错误不再浪费 judge 调用
-- 离线 eval 中 judge 跑 N 次取多数投票
+- 规则已抓到的错误不再浪费 judge 调用（规则全通过才调 judge）
+- 离线 eval 中生成跑 N 次，每次生成的 nGQL 被 judge 评一次，N 次中通过率 ≥ 80% 算 PASS
 
 ### 报告输出
 
