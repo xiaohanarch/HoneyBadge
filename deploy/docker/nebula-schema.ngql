@@ -226,14 +226,28 @@ CREATE TAG INDEX IF NOT EXISTS idx_supplier_status ON Supplier(status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_item_status ON Item(status(20));
 
 # --- Permission field indexes (access control) ---
+# L3 PermissionEnforcer injects org_id IN [...] on every PTP/OTC tag.
+# Without an org_id index, LOOKUP ON Tag WHERE Tag.org_id IN [...] does a
+# full scan — add org_id indexes for all PTP/OTC tags the enforcer touches.
 CREATE TAG INDEX IF NOT EXISTS idx_po_org ON PurchaseOrder(org_id);
+CREATE TAG INDEX IF NOT EXISTS idx_pr_org ON PurchaseRequisition(org_id);
+CREATE TAG INDEX IF NOT EXISTS idx_receipt_org ON Receipt(org_id);
 CREATE TAG INDEX IF NOT EXISTS idx_invoice_org ON Invoice(org_id);
+CREATE TAG INDEX IF NOT EXISTS idx_payment_org ON Payment(org_id);
+CREATE TAG INDEX IF NOT EXISTS idx_payment_batch_org ON PaymentBatch(org_id);
+CREATE TAG INDEX IF NOT EXISTS idx_contract_org ON Contract(org_id);
 CREATE TAG INDEX IF NOT EXISTS idx_so_org ON SalesOrder(org_id);
+CREATE TAG INDEX IF NOT EXISTS idx_shipment_org ON Shipment(org_id);
+CREATE TAG INDEX IF NOT EXISTS idx_ar_invoice_org ON ARInvoice(org_id);
+CREATE TAG INDEX IF NOT EXISTS idx_ar_receipt_org ON ARReceipt(org_id);
 CREATE TAG INDEX IF NOT EXISTS idx_supplier_org ON Supplier(org_id);
 
-# --- Composite indexes ---
+# --- Composite indexes (org_id + status for common filter patterns) ---
 CREATE TAG INDEX IF NOT EXISTS idx_po_date_status ON PurchaseOrder(order_date, status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_invoice_date_status ON Invoice(invoice_date, status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_so_date_status ON SalesOrder(order_date, status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_po_org_status ON PurchaseOrder(org_id, status(20));
 CREATE TAG INDEX IF NOT EXISTS idx_invoice_org_status ON Invoice(org_id, status(20));
+CREATE TAG INDEX IF NOT EXISTS idx_payment_org_status ON Payment(org_id, status(20));
+CREATE TAG INDEX IF NOT EXISTS idx_receipt_org_status ON Receipt(org_id, status(20));
+CREATE TAG INDEX IF NOT EXISTS idx_shipment_org_status ON Shipment(org_id, status(20));

@@ -299,3 +299,361 @@ class TestForbiddenOperationsRejected:
         result_ngql, warnings = enforcer.enforce(ngql, ctx)
         assert "MATCH" in result_ngql
         assert "GO" not in result_ngql.upper().split("MATCH")[0]
+
+
+class TestAnonymousNodeHandling:
+    """Anonymous ``(:Tag)`` nodes previously bypassed L3 org_id injection.
+
+    The ``_TAG_VAR_RE`` regex used ``\\w+`` (requiring at least one char),
+    so ``(:PurchaseOrder)`` was never matched.  The fix auto-names anonymous
+    PTP/OTC nodes to ``_gen0``, ``_gen1``, ... so org_id can be injected.
+    """
+
+    def test_anonymous_ptp_node_gets_named_and_filtered(self, enforcer):
+        """``(:PurchaseOrder)`` should be renamed and get org_id injected."""
+        ngql = "MATCH (:PurchaseOrder) RETURN count(*)"
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "_gen0:PurchaseOrder" in result_ngql
+        assert "_gen0.PurchaseOrder.org_id IN [1021]" in result_ngql
+        assert len(warnings) == 1
+
+    def test_anonymous_master_node_not_renamed(self, enforcer):
+        """``(:Supplier)`` (MASTER) should NOT be renamed — no org_id needed."""
+        ngql = "MATCH (:Supplier) RETURN count(*)"
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "_gen" not in result_ngql
+        assert "org_id" not in result_ngql
+        assert warnings == []
+
+    def test_named_node_not_renamed(self, enforcer):
+        """Already-named ``(po:PurchaseOrder)`` should not be renamed."""
+        ngql = "MATCH (po:PurchaseOrder) RETURN po.po_number"
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "_gen" not in result_ngql
+        assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
+
+    def test_multiple_anonymous_nodes_get_unique_names(self, enforcer):
+        """Two anonymous PTP nodes should get _gen0 and _gen1."""
+        ngql = (
+            "MATCH (:PurchaseOrder)-[:INVOICED_BY]->(:Invoice) "
+            "RETURN count(*)"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "_gen0:PurchaseOrder" in result_ngql
+        assert "_gen1:Invoice" in result_ngql
+        assert "_gen0.PurchaseOrder.org_id IN [1021]" in result_ngql
+        assert "_gen1.Invoice.org_id IN [1021]" in result_ngql
+        assert len(warnings) == 2
+
+    def test_anonymous_node_with_existing_where(self, enforcer):
+        """Anonymous node + existing WHERE should append AND org_id."""
+        ngql = (
+            "MATCH (:PurchaseOrder) "
+            "WHERE PurchaseOrder.status == 'APPROVED' "
+            "RETURN count(*)"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "_gen0:PurchaseOrder" in result_ngql
+        assert "_gen0.PurchaseOrder.org_id IN [1021]" in result_ngql
+        assert "APPROVED" in result_ngql
+        assert len(warnings) == 1
+
+
+class TestMultiHopTraversal:
+    """Multi-hop queries (MASTER → PTP, PTP → PTP) must inject org_id on
+    every PTP/OTC node in the traversal path.
+
+    Previously, only the first PTP node got org_id; anonymous nodes in the
+    path were silently skipped, leaking cross-org data.
+    """
+
+    def test_master_to_ptp_hop_injects_on_ptp_only(self, enforcer):
+        """Supplier (MASTER) → PurchaseOrder (PTP): only PO gets org_id."""
+        ngql = (
+            "MATCH (s:Supplier)-[:SUPPLIED_TO]->(po:PurchaseOrder) "
+            "RETURN s.supplier_name, po.po_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
+        assert "s.org_id" not in result_ngql  # MASTER: no filter
+        assert len(warnings) == 1
+
+    def test_ptp_to_ptp_hop_injects_on_both(self, enforcer):
+        """PurchaseOrder (PTP) → Invoice (PTP): both get org_id."""
+        ngql = (
+            "MATCH (po:PurchaseOrder)-[:INVOICED_BY]->(i:Invoice) "
+            "RETURN po.po_number, i.invoice_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
+        assert "i.Invoice.org_id IN [1021]" in result_ngql
+        assert len(warnings) == 2
+
+    def test_three_hop_master_ptp_ptp(self, enforcer):
+        """Supplier → PO → Invoice: both PTP nodes get org_id."""
+        ngql = (
+            "MATCH (s:Supplier)-[:SUPPLIED_TO]->(po:PurchaseOrder)"
+            "-[:INVOICED_BY]->(i:Invoice) "
+            "RETURN s.supplier_name, po.po_number, i.invoice_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
+        assert "i.Invoice.org_id IN [1021]" in result_ngql
+        assert "s.org_id" not in result_ngql
+        assert len(warnings) == 2
+
+    def test_anonymous_node_in_multi_hop(self, enforcer):
+        """Anonymous PTP node in a multi-hop path gets named + filtered."""
+        ngql = (
+            "MATCH (s:Supplier)-[:SUPPLIED_TO]->(:PurchaseOrder)"
+            "-[:INVOICED_BY]->(i:Invoice) "
+            "RETURN count(*)"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        # Anonymous PO renamed
+        assert "_gen0:PurchaseOrder" in result_ngql
+        assert "_gen0.PurchaseOrder.org_id IN [1021]" in result_ngql
+        # Named Invoice also filtered
+        assert "i.Invoice.org_id IN [1021]" in result_ngql
+        # MASTER Supplier not filtered
+        assert "s.org_id" not in result_ngql
+        assert len(warnings) == 2
+
+    def test_multi_hop_with_existing_org_filter_on_one_node(self, enforcer):
+        """If one PTP node already has org_id, only the other gets injected."""
+        ngql = (
+            "MATCH (po:PurchaseOrder)-[:INVOICED_BY]->(i:Invoice) "
+            "WHERE po.PurchaseOrder.org_id IN [1021] "
+            "RETURN po.po_number, i.invoice_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        # po already has org_id — should not be double-injected
+        assert result_ngql.count("po.PurchaseOrder.org_id IN") == 1
+        # i does not have org_id — should be injected
+        assert "i.Invoice.org_id IN [1021]" in result_ngql
+        assert len(warnings) == 1
+
+    def test_multi_hop_with_clause_both_nodes_filtered(self, enforcer):
+        """Multi-hop + WITH clause: both PTP nodes filtered before WITH."""
+        ngql = (
+            "MATCH (po:PurchaseOrder)-[:INVOICED_BY]->(i:Invoice) "
+            "WHERE po.PurchaseOrder.status == 'APPROVED' "
+            "WITH count(i) AS invoice_count "
+            "RETURN invoice_count"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        # Both org_id filters must appear before WITH
+        with_pos = result_ngql.find("WITH")
+        po_org_pos = result_ngql.find("po.PurchaseOrder.org_id IN [1021]")
+        i_org_pos = result_ngql.find("i.Invoice.org_id IN [1021]")
+        assert po_org_pos != -1, "po org_id should be present"
+        assert i_org_pos != -1, "i org_id should be present"
+        assert po_org_pos < with_pos, "po org_id must be before WITH"
+        assert i_org_pos < with_pos, "i org_id must be before WITH"
+        assert len(warnings) == 2
+
+    def test_multi_hop_forbidden_tag_rejected(self, enforcer):
+        """Multi-hop with a forbidden process tag should be rejected."""
+        ngql = (
+            "MATCH (po:PurchaseOrder)-[:LINKED_TO]->(so:SalesOrder) "
+            "RETURN po.po_number, so.status"
+        )
+        ctx = _ctx(allowed_processes=["PTP"])
+        with pytest.raises(PermissionViolationError) as exc:
+            enforcer.enforce(ngql, ctx)
+        assert "SalesOrder" in str(exc.value)
+
+    def test_two_anonymous_ptp_nodes_with_existing_var_collision(self, enforcer):
+        """Generated var names must not collide with existing variables."""
+        ngql = (
+            "MATCH (_gen0:Supplier)-[:SUPPLIED_TO]->(:PurchaseOrder) "
+            "RETURN count(*)"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        # _gen0 is taken by Supplier, so the anonymous PO should get _gen1
+        assert "_gen1:PurchaseOrder" in result_ngql
+        assert "_gen1.PurchaseOrder.org_id IN [1021]" in result_ngql
+        assert len(warnings) == 1
+
+
+class TestForbiddenOpsBroadened:
+    """Additional nGQL operations that bypass L3 org_id injection.
+
+    The original _FORBIDDEN_OPS_RE only covered GO [n STEPS] FROM,
+    FETCH PROP ON, and FIND PATH.  These tests verify the broadened
+    regex catches GO UPTO, GET SUBGRAPH, FETCH without PROP, and DDL.
+    """
+
+    def test_go_upto_steps_rejected(self, enforcer):
+        ngql = 'GO UPTO 3 STEPS FROM "po:1021-00001" OVER PLACED_WITH YIELD id(vertex)'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_go_without_steps_keyword_rejected(self, enforcer):
+        ngql = 'GO 1 FROM "po:1021-00001" OVER PLACED_WITH YIELD id(vertex)'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_get_subgraph_rejected(self, enforcer):
+        ngql = 'GET SUBGRAPH 1 STEPS FROM "po:1021-00001" BOTH PLACED_WITH'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_fetch_without_prop_rejected(self, enforcer):
+        ngql = 'FETCH ON PurchaseOrder "po:1021-00001" YIELD PurchaseOrder.po_number'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_delete_vertex_rejected(self, enforcer):
+        ngql = 'DELETE VERTEX "po:1021-00001"'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_update_vertex_rejected(self, enforcer):
+        ngql = 'UPDATE VERTEX ON PurchaseOrder "po:1021-00001" SET status = "CLOSED"'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_insert_vertex_rejected(self, enforcer):
+        ngql = 'INSERT VERTEX PurchaseOrder VALUES "po:new":("new", "PENDING", 1021)'
+        ctx = _ctx(org_ids=[1021])
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+    def test_change_password_rejected(self, enforcer):
+        ngql = 'CHANGE PASSWORD FROM "root" TO "newpass"'
+        ctx = _ctx(org_ids=None)
+        with pytest.raises(PermissionViolationError):
+            enforcer.enforce(ngql, ctx)
+
+
+class TestStringLiteralSafety:
+    """String literals in data values must not trigger false-positive rejections.
+
+    The enforcer strips string literals before applying _FORBIDDEN_OPS_RE
+    and the fallback tag-name scan, so queries containing phrases like
+    'find path' or tag names like 'SalesOrder' in data values are safe.
+    """
+
+    def test_find_path_in_string_literal_not_rejected(self, enforcer):
+        """WHERE clause containing 'find path' in a string value should pass."""
+        ngql = (
+            "MATCH (po:PurchaseOrder) "
+            "WHERE po.PurchaseOrder.description == 'find path manually' "
+            "RETURN po.po_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "MATCH" in result_ngql
+
+    def test_go_in_string_literal_not_rejected(self, enforcer):
+        """WHERE clause containing 'GO' in a string value should pass."""
+        ngql = (
+            "MATCH (po:PurchaseOrder) "
+            "WHERE po.PurchaseOrder.note == 'GO label here' "
+            "RETURN po.po_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "MATCH" in result_ngql
+
+    def test_forbidden_tag_name_in_string_literal_not_rejected(self, enforcer):
+        """A forbidden tag name appearing as a string value should not reject."""
+        ngql = (
+            "MATCH (po:PurchaseOrder) "
+            "WHERE po.PurchaseOrder.note == 'SalesOrder reference' "
+            "RETURN po.po_number"
+        )
+        ctx = _ctx(allowed_processes=["PTP"])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "MATCH" in result_ngql
+
+    def test_return_keyword_in_string_literal_not_corrupted(self, enforcer):
+        """'RETURN' appearing in a string value must not be treated as boundary."""
+        ngql = (
+            "MATCH (po:PurchaseOrder) "
+            "WHERE po.PurchaseOrder.status == 'RETURN' "
+            "RETURN po.po_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        # org_id should be injected before the real RETURN, not inside the string
+        assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
+        # The string 'RETURN' should still be intact
+        assert "'RETURN'" in result_ngql
+
+
+class TestMultiWithScope:
+    """Multi-WITH queries must inject org_id in the correct scope.
+
+    For ``MATCH (a) WITH a MATCH (b) RETURN ...``, each variable's org_id
+    must be injected in its own WHERE scope (between its MATCH and the next
+    boundary keyword), not before the first WITH where the variable is
+    out of scope.
+    """
+
+    def test_second_match_after_with_gets_own_scope(self, enforcer):
+        """Variable defined after WITH gets org_id in its own scope."""
+        ngql = (
+            "MATCH (po:PurchaseOrder) "
+            "WHERE po.PurchaseOrder.status == 'APPROVED' "
+            "WITH po "
+            "MATCH (i:Invoice) "
+            "RETURN po.po_number, i.invoice_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        # po org_id should be before the first WITH
+        po_org_pos = result_ngql.find("po.PurchaseOrder.org_id IN [1021]")
+        with_pos = result_ngql.find("WITH")
+        assert po_org_pos != -1
+        assert po_org_pos < with_pos, "po org_id must be before WITH"
+
+        # i org_id should be AFTER the WITH (in i's own scope)
+        i_org_pos = result_ngql.find("i.Invoice.org_id IN [1021]")
+        assert i_org_pos != -1
+        assert i_org_pos > with_pos, "i org_id must be after WITH (in i's scope)"
+
+        assert len(warnings) == 2
+
+    def test_both_variables_in_separate_scopes(self, enforcer):
+        """Two variables in separate MATCH...WITH scopes both get filtered."""
+        ngql = (
+            "MATCH (po:PurchaseOrder) "
+            "WITH po "
+            "MATCH (i:Invoice) "
+            "WITH po, i "
+            "RETURN po.po_number, i.invoice_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        # po org_id before first WITH
+        first_with = result_ngql.find("WITH")
+        po_org = result_ngql.find("po.PurchaseOrder.org_id IN [1021]")
+        assert po_org < first_with
+
+        # i org_id after first WITH but before second WITH
+        second_with = result_ngql.find("WITH", first_with + 4)
+        i_org = result_ngql.find("i.Invoice.org_id IN [1021]")
+        assert i_org > first_with
+        assert i_org < second_with
+
+        assert len(warnings) == 2

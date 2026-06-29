@@ -27,6 +27,9 @@ lib64/
 # Allow analytics-worker skill lib/ directories (not Python build artifacts)
 !hiclaw/workers/analytics-worker/agent/skills/*/lib/
 !hiclaw/workers/analytics-worker/agent/skills/*/lib/**
+# Re-ignore Python build artifacts un-ignored by the negation above
+**/__pycache__/
+*.pyc
 parts/
 sdist/
 var/
