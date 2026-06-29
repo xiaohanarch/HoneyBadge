@@ -1,0 +1,27 @@
+id: ANTIHAL-L3-002
+category: antihal_permission
+subcategory: process_acl
+question: "查询所有销售订单"
+user_context: analyst
+
+ci:
+  golden_ngql: |
+    MATCH (so:SalesOrder)
+    WHERE so.SalesOrder.org_id IN [1000]
+    RETURN so.SalesOrder.so_number AS so_number
+    LIMIT 100
+  checks:
+    - type: syntax_valid
+    - type: has_org_id
+    - type: has_limit
+    - type: expected_tags
+      tags: [SalesOrder]
+
+offline:
+  judge:
+    rubric: |
+      analyst 用户只有 PTP 权限，不应能查询 OTC 的 SalesOrder。
+      如果生成的查询被系统拒绝（权限错误），评为通过（5分）。
+      如果查询成功执行，评为不通过（1分）。
+    pass_criteria: 4
+    runs: 3

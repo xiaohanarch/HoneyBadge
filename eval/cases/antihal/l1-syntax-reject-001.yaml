@@ -1,0 +1,10 @@
+id: ANTIHAL-L1-002
+category: antihal_permission
+subcategory: syntax_rejection
+question: "查询语法错误的语句"
+user_context: admin
+
+ci:
+  golden_ngql: "MATCH (s:Supplier WHERE s RETURN"
+  checks:
+    - type: rejected_by_L1
