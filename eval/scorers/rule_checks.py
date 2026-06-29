@@ -66,8 +66,12 @@ def _check_has_limit(ngql: str, ctx: UserContext, params: CheckParams) -> CheckR
 
 def _check_forbidden_ops_absent(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:
     ops: list[str] = params.get("ops", [])
-    upper = ngql.upper()
-    found = [op for op in ops if op.upper() in upper]
+    found: list[str] = []
+    for op in ops:
+        # Word-boundary match; spaces in op match \s+
+        pattern = r"\b" + r"\s+".join(re.escape(w) for w in op.split()) + r"\b"
+        if re.search(pattern, ngql, re.IGNORECASE):
+            found.append(op)
     if found:
         return CheckResult(False, f"Forbidden operations found: {found}")
     return CheckResult(True)
@@ -87,7 +91,12 @@ def _check_expected_tags(ngql: str, ctx: UserContext, params: CheckParams) -> Ch
 
 def _check_expected_edges(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:
     expected: list[str] = params.get("edges", [])
-    found_edges: set[str] = set(re.findall(r"-\[:?(\w+)\]->", ngql))
+    found_edges: set[str] = set()
+    # Forward: -[:Edge]-> or -[Edge]->
+    found_edges.update(re.findall(r"-\[:?(\w+)\]->", ngql))
+    # Reverse: <-[:Edge]- or <-[Edge]-
+    found_edges.update(re.findall(r"<-\[:?(\w+)\]-", ngql))
+    # LOOKUP/GO OVER Edge
     found_edges.update(re.findall(r"OVER\s+(\w+)", ngql, re.IGNORECASE))
     missing = [e for e in expected if e not in found_edges]
     if missing:
@@ -123,6 +132,8 @@ def _check_has_org_id(ngql: str, ctx: UserContext, params: CheckParams) -> Check
     if org_ids is None:
         return CheckResult(True)  # admin or no org restriction
     if re.search(r"org_id\s+IN\s*\[", ngql, re.IGNORECASE):
+        return CheckResult(True)
+    if re.search(r"org_id\s*==", ngql, re.IGNORECASE):
         return CheckResult(True)
     return CheckResult(False, "Non-admin user query missing org_id filter")
 
