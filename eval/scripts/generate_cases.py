@@ -105,7 +105,16 @@ async def generate_cases(count: int = 40) -> list[dict]:
     text = resp.content.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        # Log the raw response for debugging
+        print(f"ERROR: LLM returned invalid JSON: {e}")
+        print(f"Raw response (first 500 chars): {text[:500]}")
+        raise ValueError(
+            f"LLM returned invalid JSON: {e}. "
+            f"Raw response starts with: {text[:200]}"
+        ) from e
 
 
 def _to_yaml(case: dict, idx: int) -> str:
@@ -116,10 +125,11 @@ def _to_yaml(case: dict, idx: int) -> str:
     tags_block = (
         f"    - type: expected_tags\n      tags: [{tags_yaml}]\n" if tags_yaml else ""
     )
+    question_line = f"question: {json.dumps(case['question'], ensure_ascii=False)}"
     return f"""id: {case_id}
 category: ngql_accuracy
 subcategory: {case.get('difficulty', 'unknown')}
-question: "{case['question']}"
+{question_line}
 user_context: {case.get('user_context', 'admin')}
 
 # TODO: review and fill in golden_ngql

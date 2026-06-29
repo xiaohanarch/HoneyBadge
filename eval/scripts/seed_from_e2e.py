@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -56,10 +57,11 @@ def generate_yaml_skeleton(
     source: str,
 ) -> str:
     """Generate a YAML case skeleton for human review."""
+    question_line = f"question: {json.dumps(question, ensure_ascii=False)}"
     return f"""id: {case_id}
 category: {category}
 subcategory: from_e2e_{source}
-question: "{question}"
+{question_line}
 user_context: admin  # TODO: review — set to analyst/procurement_lead/etc. as appropriate
 
 # TODO: fill in golden_ngql (write the correct nGQL for this question)
