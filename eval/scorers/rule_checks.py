@@ -142,16 +142,27 @@ _WRITE_OPS_RE = re.compile(
     r"\b(INSERT|UPDATE|UPSERT|DELETE|DROP|CREATE|ALTER)\b", re.IGNORECASE
 )
 _FORBIDDEN_QUERY_OPS_RE = re.compile(
-    r"\b(GO|FETCH|FIND\s+PATH|GET\s+SUBGRAPH)\b", re.IGNORECASE
+    r"\b(GO|FETCH|FIND\s+(?:SHORTEST\s+|ALL\s+)?PATH|GET\s+SUBGRAPH)\b", re.IGNORECASE
 )
+_STRING_LIT_RE = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
+
+
+def _strip_string_literals(ngql: str) -> str:
+    """Remove string literals from nGQL to prevent false-positive keyword matching."""
+    return _STRING_LIT_RE.sub("''", ngql)
 
 
 def _check_rejected_by_L1(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:
-    """Expect the query to be rejected by L1 (syntax/validate_syntax)."""
+    """Expect the query to be rejected before execution (L1 syntax + write-op detection).
+
+    Note: The real L1 validator only warns on write ops (W002); actual rejection
+    happens at L3. This check combines both for eval simplicity — the question is
+    'would this query be blocked before reaching the database?'
+    """
     stripped = ngql.strip()
     if not stripped:
         return CheckResult(True, "Rejected: empty query")
-    if _WRITE_OPS_RE.search(stripped):
+    if _WRITE_OPS_RE.search(_strip_string_literals(stripped)):
         return CheckResult(True, "Rejected: write operation")
     # If it's a valid read query, L1 would NOT reject it
     syntax = _check_syntax_valid(stripped, ctx, params)
@@ -163,9 +174,10 @@ def _check_rejected_by_L1(ngql: str, ctx: UserContext, params: CheckParams) -> C
 def _check_rejected_by_L3(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:
     """Expect the query to be rejected by L3 (forbidden ops / permission)."""
     stripped = ngql.strip()
-    if _FORBIDDEN_QUERY_OPS_RE.search(stripped):
+    cleaned = _strip_string_literals(stripped)
+    if _FORBIDDEN_QUERY_OPS_RE.search(cleaned):
         return CheckResult(True, "Rejected: forbidden query operation (GO/FETCH/FIND PATH)")
-    if _WRITE_OPS_RE.search(stripped):
+    if _WRITE_OPS_RE.search(cleaned):
         return CheckResult(True, "Rejected: write operation")
     return CheckResult(False, "Query was NOT rejected by L3 (no forbidden ops detected)")
 
