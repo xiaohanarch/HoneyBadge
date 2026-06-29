@@ -6,9 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from eval.case_loader import EvalCase, CISection, Check, OfflineSection, JudgeSection
+from eval.case_loader import Check, CISection, EvalCase, JudgeSection, OfflineSection
 from eval.runner import run_offline_eval
-from eval.stats import EvalResult
 
 
 def _make_case(case_id: str, category: str = "ngql_accuracy") -> EvalCase:

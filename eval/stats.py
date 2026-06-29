@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -23,7 +24,7 @@ class EvalSummary:
     total: int
     passed: int
     pass_rate: float
-    by_category: dict[str, dict] = field(default_factory=dict)
+    by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def compute_pass_rate(run_results: list[bool]) -> float:
@@ -39,7 +40,7 @@ def summarize_results(results: list[EvalResult], threshold: float = 0.8) -> Eval
     passed = sum(1 for r in results if r.passed)
     overall_rate = passed / total if total else 0.0
 
-    by_category: dict[str, dict] = {}
+    by_category: dict[str, dict[str, Any]] = {}
     for r in results:
         cat = r.category
         if cat not in by_category:

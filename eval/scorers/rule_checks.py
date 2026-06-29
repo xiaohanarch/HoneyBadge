@@ -152,7 +152,7 @@ def _strip_string_literals(ngql: str) -> str:
     return _STRING_LIT_RE.sub("''", ngql)
 
 
-def _check_rejected_by_L1(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:
+def _check_rejected_by_L1(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:  # noqa: N802
     """Expect the query to be rejected before execution (L1 syntax + write-op detection).
 
     Note: The real L1 validator only warns on write ops (W002); actual rejection
@@ -171,7 +171,7 @@ def _check_rejected_by_L1(ngql: str, ctx: UserContext, params: CheckParams) -> C
     return CheckResult(False, "Query was NOT rejected by L1 (valid syntax, no write op)")
 
 
-def _check_rejected_by_L3(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:
+def _check_rejected_by_L3(ngql: str, ctx: UserContext, params: CheckParams) -> CheckResult:  # noqa: N802
     """Expect the query to be rejected by L3 (forbidden ops / permission)."""
     stripped = ngql.strip()
     cleaned = _strip_string_literals(stripped)

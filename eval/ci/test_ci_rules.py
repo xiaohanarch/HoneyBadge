@@ -8,9 +8,9 @@ from eval.case_loader import EvalCase
 from eval.scorers.rule_checks import run_check
 
 
-def _build_user_context(user_context: str) -> dict | None:
+def _build_user_context(user_context: str) -> dict[str, object] | None:
     """Map the demo user name to a permission context dict."""
-    profiles = {
+    profiles: dict[str, dict[str, object]] = {
         "admin": {"user_id": "admin", "org_ids": None},
         "analyst": {"user_id": "analyst", "org_ids": [1000]},
         "procurement_lead": {"user_id": "procurement_lead", "org_ids": [1000]},

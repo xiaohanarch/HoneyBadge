@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 from honeybadge.llm.adapter import LLMAdapter, LLMRequest
-
 
 _JUDGE_SYSTEM_PROMPT = """你是 nGQL 查询评审专家。你需要根据评分标准对生成的 nGQL 查询打分（1-5 分）。
 

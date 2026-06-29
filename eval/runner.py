@@ -91,18 +91,18 @@ def render_ontology(question: str) -> str:
     try:
         loader = get_loader()
         text, _ = loader.render_for_question(question)
-        return text
+        return str(text)
     except FileNotFoundError:
         return ""
 
 
-def _build_user_context(user_context: str) -> dict | None:
+def _build_user_context(user_context: str) -> dict[str, Any] | None:
     """Map a case's user_context label to a permission context dict.
 
     org_ids=None means admin (no org filter). procurement_lead and auditor
     are both in org 1000 (corrected from Task 4's bug fix).
     """
-    profiles = {
+    profiles: dict[str, dict[str, Any]] = {
         "admin": {"user_id": "admin", "org_ids": None},
         "analyst": {"user_id": "analyst", "org_ids": [1000]},
         "procurement_lead": {"user_id": "procurement_lead", "org_ids": [1000]},
