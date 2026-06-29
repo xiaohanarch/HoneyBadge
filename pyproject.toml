@@ -94,6 +94,3 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
-markers = [
-    "eval_ci: eval suite CI-layer tests (deterministic, no LLM calls)",
-]

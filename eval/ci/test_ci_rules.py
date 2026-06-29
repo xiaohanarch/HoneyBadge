@@ -13,9 +13,9 @@ def _build_user_context(user_context: str) -> dict | None:
     profiles = {
         "admin": {"user_id": "admin", "org_ids": None},
         "analyst": {"user_id": "analyst", "org_ids": [1000]},
-        "procurement_lead": {"user_id": "procurement_lead", "org_ids": None},
+        "procurement_lead": {"user_id": "procurement_lead", "org_ids": [1000]},
         "subsidiary_lead": {"user_id": "subsidiary_lead", "org_ids": [1021]},
-        "auditor": {"user_id": "auditor", "org_ids": None},
+        "auditor": {"user_id": "auditor", "org_ids": [1000]},
     }
     return profiles.get(user_context)
 
