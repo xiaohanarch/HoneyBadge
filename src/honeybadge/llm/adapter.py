@@ -22,6 +22,7 @@ from honeybadge.core.exceptions import (
     LLMTimeoutError,
     RateLimitExceeded,
 )
+from honeybadge.llm.prompt_loader import load_prompt
 
 logger = structlog.get_logger()
 
@@ -716,8 +717,10 @@ async def generate_ngql(
     Raises:
         LLMGenerationError: If generation fails.
     """
-    # Build system prompt with constraints
-    system_prompt = f"""你是一个 NebulaGraph 数据库查询专家。你的唯一任务是将用户的自然语言问题转换为正确的 nGQL (NebulaGraph Query Language) 查询语句。
+    # Build system prompt with constraints.
+    # Prefer the on-disk prompt file (prompts/cypher_system.md); fall back to
+    # the inline body below if the file is missing.
+    _inline_body = """你是一个 NebulaGraph 数据库查询专家。你的唯一任务是将用户的自然语言问题转换为正确的 nGQL (NebulaGraph Query Language) 查询语句。
 
 # 严格规则
 
@@ -871,14 +874,14 @@ LIMIT 5
 **收货日期早于 PO 日期**
 → `Receipt.receipt_date < PO.order_date`
 
-# Schema 信息
-
-{schema_info}
-
-# 本体信息
-
-{ontology_info}
 """
+    _body = load_prompt("cypher_system")
+    if _body is None:
+        _body = _inline_body
+    system_prompt = (
+        _body.rstrip()
+        + f"\n\n# Schema 信息\n\n{schema_info}\n\n# 本体信息\n\n{ontology_info}\n"
+    )
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -945,7 +948,7 @@ async def summarize_results(
     Raises:
         LLMSummarizationError: If summarization fails.
     """
-    system_prompt = """你是一个 ERP 数据分析助手。你的任务是将数据库查询结果用通俗的中文总结。
+    _inline_prompt = """你是一个 ERP 数据分析助手。你的任务是将数据库查询结果用通俗的中文总结。
 
 # 严格规则
 
@@ -986,6 +989,11 @@ async def summarize_results(
 先说结论（查到多少条、风险等级分布），再说具体分析。
 不要逐行朗读原始数据，要提炼关键信息。
 """
+    # Prefer the on-disk prompt file (prompts/summarize_system.md); fall back
+    # to the inline prompt above if the file is missing.
+    system_prompt = load_prompt("summarize_system")
+    if system_prompt is None:
+        system_prompt = _inline_prompt
 
     # Format results for the prompt
     if not raw_results:

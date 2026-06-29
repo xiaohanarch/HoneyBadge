@@ -1,3 +1,6 @@
+<!-- Reference document only — NOT auto-loaded at runtime. -->
+<!-- The live nGQL generation prompt is prompts/cypher_system.md (loaded by adapter.generate_ngql). -->
+<!-- This file is kept for human reference. Tag/Edge name tables here are redundant with get_schema_impl(), which loads schema dynamically from NebulaGraph. -->
 # NebulaGraph nGQL Syntax Reminders — nGQL语法提醒
 
 > Version: v1.0
