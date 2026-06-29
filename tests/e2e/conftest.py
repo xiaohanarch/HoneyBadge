@@ -73,6 +73,120 @@ def _reset_openclaw_sessions(container, session_dir):
         print(f"[reset_sessions] WARNING: openclaw process not detected in {container} after 40s")
 
 
+def _wait_for_manager_ready(max_init_wait=90, retry_restarts=2):
+    """Wait for the Manager to be fully ready after a container restart.
+
+    Verifies three readiness signals:
+    1. Background init (manager-init-internal.sh) completed — the init log
+       at /var/log/hiclaw/honeybadge-init.log prints "HoneyBadge auto-init
+       complete!" when done. This guarantees the allowlist is patched,
+       SOUL.md is injected, and worker configs are synced to MinIO.
+    2. First heartbeat run — docker logs show "embedded run start" with
+       "messageChannel=heartbeat", confirming the openclaw-gateway is alive
+       and the LLM endpoint is reachable.
+    3. Additional 15s settle time — after init completes, the Matrix client
+       needs time to sync rooms and pick up the patched openclaw.json.
+
+    If the init doesn't complete within max_init_wait seconds, restarts the
+    Manager container and tries again (up to retry_restarts times). This
+    handles transient failures where the Matrix client or background init
+    gets stuck — a fresh restart often resolves the issue.
+    """
+    INIT_LOG_PATH = "/var/log/hiclaw/honeybadge-init.log"
+    INIT_COMPLETE_MARKER = "HoneyBadge auto-init complete!"
+
+    for attempt in range(retry_restarts + 1):
+        if attempt > 0:
+            print(f"[manager_ready] Attempt {attempt + 1}/{retry_restarts + 1}: "
+                  f"restarting Manager (previous attempt did not complete init)...")
+            subprocess.run(
+                ["docker", "restart", MANAGER_CONTAINER],
+                capture_output=True, timeout=60,
+            )
+            # Wait for openclaw process to come back
+            for _ in range(20):
+                try:
+                    result = subprocess.run(
+                        ["docker", "exec", MANAGER_CONTAINER, "pgrep", "-f", "openclaw"],
+                        capture_output=True, timeout=15,
+                    )
+                    if result.returncode == 0:
+                        break
+                except subprocess.TimeoutExpired:
+                    pass
+                time.sleep(2)
+
+        # Poll the init log for completion
+        init_complete = False
+        deadline = time.time() + max_init_wait
+        while time.time() < deadline:
+            try:
+                result = subprocess.run(
+                    ["docker", "exec", MANAGER_CONTAINER, "cat", INIT_LOG_PATH],
+                    capture_output=True, timeout=15,
+                )
+                log_content = result.stdout.decode(errors="replace")
+                if INIT_COMPLETE_MARKER in log_content:
+                    print(f"[manager_ready] Background init complete "
+                          f"(attempt {attempt + 1})")
+                    init_complete = True
+                    break
+            except subprocess.TimeoutExpired:
+                pass
+            time.sleep(5)
+
+        if not init_complete:
+            # Print the init log for debugging before retrying
+            try:
+                result = subprocess.run(
+                    ["docker", "exec", MANAGER_CONTAINER, "cat", INIT_LOG_PATH],
+                    capture_output=True, timeout=15,
+                )
+                log_tail = result.stdout.decode(errors="replace")[-500:]
+                print(f"[manager_ready] WARNING: Init not complete after "
+                      f"{max_init_wait}s (attempt {attempt + 1}). "
+                      f"Init log tail:\n{log_tail}")
+            except Exception:
+                print(f"[manager_ready] WARNING: Init not complete after "
+                      f"{max_init_wait}s (attempt {attempt + 1}), "
+                      f"could not read init log")
+            if attempt < retry_restarts:
+                continue
+            print("[manager_ready] Giving up after all retries — "
+                  "tests will likely fail")
+            time.sleep(10)
+            return
+
+        # Init complete — wait for first heartbeat to confirm the agent is alive
+        heartbeat_found = False
+        heartbeat_deadline = time.time() + 30
+        while time.time() < heartbeat_deadline:
+            try:
+                result = subprocess.run(
+                    ["docker", "logs", "--since", "2m", MANAGER_CONTAINER],
+                    capture_output=True, timeout=15,
+                )
+                logs = result.stdout.decode(errors="replace")
+                if "embedded run start" in logs and "heartbeat" in logs:
+                    print("[manager_ready] Manager heartbeat detected")
+                    heartbeat_found = True
+                    break
+            except subprocess.TimeoutExpired:
+                pass
+            time.sleep(5)
+
+        if not heartbeat_found:
+            print("[manager_ready] WARNING: No heartbeat detected within 30s "
+                  "after init completion — Manager may not be fully ready")
+
+        # Settle time: allow Matrix client to finish syncing rooms and
+        # pick up the patched allowlist from openclaw.json. Workers also
+        # restart concurrently and need ~10-15s for MinIO sync + Matrix
+        # reconnection, so this window covers both.
+        time.sleep(15)
+        return
+
+
 def reset_manager_sessions():
     """Clear all HiClaw LLM sessions (Manager + Workers) and restart containers.
 
@@ -115,17 +229,19 @@ def reset_manager_sessions():
     _reset_openclaw_sessions(GRAPH_WORKER_CONTAINER, WORKER_SESSION_DIR)
     _reset_openclaw_sessions(ANALYTICS_WORKER_CONTAINER, WORKER_SESSION_DIR)
 
-    # 4. Wait for the Manager's Matrix client to connect to the homeserver.
-    #    The Manager takes ~22s after restart to join rooms and connect to
-    #    the gateway.  Without this wait, the first query after restart may
-    #    time out because the Matrix message isn't delivered.
-    #    We use a fixed wait because docker logs --tail=N only shows the last
-    #    N lines, which may not include the startup "connected to gateway" msg.
-    #    Workers restart concurrently during this 25s window: their
-    #    worker-init-wrapper.sh performs MinIO sync + Matrix reconnection
-    #    (~10-15s typical), so by the time the Manager is ready to dispatch,
-    #    workers have reconnected and are ready to receive queries.
-    time.sleep(25)
+    # 4. Wait for the Manager to be fully ready after restart.
+    #    The background init (entrypoint-wrapper.sh → manager-init-internal.sh)
+    #    runs AFTER the Manager agent starts and must complete before tests
+    #    send queries. It waits for MinIO, registers @manager on Matrix,
+    #    sleeps 20s, then patches the allowlist + injects SOUL.md. If the
+    #    init doesn't complete, the Manager's allowlist is unpatched (only
+    #    @admin allowed) and the Matrix client may not have connected —
+    #    causing all query-sending tests to timeout at 240s.
+    #    The previous fixed 25s sleep was insufficient: the init alone takes
+    #    20s (sleep) + variable time for MinIO/Tuwunel readiness + SOUL.md
+    #    injection. When it fails, the Manager never receives user messages
+    #    (admin_dm_room_id stays null in state.json for the entire CI run).
+    _wait_for_manager_ready()
 
 
 def _wait_for_textarea_enabled(page_obj, timeout=60000):

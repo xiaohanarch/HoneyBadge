@@ -263,6 +263,8 @@ jobs:
           docker ps -a
           echo "=== Compose logs (tail=2000) ==="
           docker compose -f deploy/docker/docker-compose.yaml logs --tail=2000 || true
+          echo "=== Manager init log (background init — invisible in compose logs) ==="
+          docker exec honeybadge-hiclaw-manager cat /var/log/hiclaw/honeybadge-init.log 2>/dev/null || echo "(init log not available)"
 
   # ===========================================================================
   # Test Summary — runs after e2e, posts a step-summary table.
