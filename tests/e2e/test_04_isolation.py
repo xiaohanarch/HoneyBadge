@@ -25,9 +25,6 @@ from tests.e2e.conftest import send_query_on_page
 from tests.e2e.selectors import MSG_ASSISTANT
 
 
-BASE_URL = "http://localhost:3000"
-
-
 class TestUserIsolation:
     """Test user isolation and multi-tenancy."""
 
@@ -133,38 +130,26 @@ class TestUserIsolation:
             f"Subsidiary should NOT see all orgs data. Got: {subsidiary_count}. " \
             f"org_id filter not working properly."
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category E (page navigation + teardown ERROR). "
-        "Test fails AND errors on teardown due to context cleanup race. Needs "
-        "fixture rework. See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
-    def test_tc305_session_isolation_by_user(self, page, login_as, wait_for_chat_ready, send_chat_query):
+    def test_tc305_session_isolation_by_user(self, create_user_page):
         """TC-305: Each user has isolated session storage.
 
-        localStorage should be different for different users.
+        The per-user auth token (``token`` = roles_jwt, written by
+        ``useAuth.ts`` on login) must differ between users. Uses separate
+        browser contexts to ensure genuine isolation — the single-page
+        in-place user switch caused navigation races and teardown errors
+        because the Matrix SDK JS state is not reset by
+        ``localStorage.clear()``.
         """
-        # Login as admin
-        login_as("admin", "admin123")
-        wait_for_chat_ready()
-        send_chat_query("管理员查询", timeout=120000)
-        page.wait_for_timeout(1000)
+        admin_page = create_user_page("admin", "admin123")
+        analyst_page = create_user_page("analyst", "analyst123")
 
-        # Store admin's local storage
-        admin_storage = page.evaluate("() => localStorage.getItem('auth_store')")
+        admin_token = admin_page.evaluate("() => localStorage.getItem('token')")
+        analyst_token = analyst_page.evaluate("() => localStorage.getItem('token')")
 
-        # Clear and login as analyst
-        page.evaluate("() => localStorage.clear()")
-        page.goto(f"{BASE_URL}/login")
-        login_as("analyst", "analyst123")
-        wait_for_chat_ready()
-
-        # Check that admin's auth data is not present
-        analyst_storage = page.evaluate("() => localStorage.getItem('auth_store')")
-
-        # Verify isolation
-        assert admin_storage, "Admin should have localStorage data"
-        assert analyst_storage, "Analyst should have localStorage data"
-        assert admin_storage != analyst_storage, "Users should have different localStorage tokens"
+        assert admin_token, "Admin should have a token in localStorage"
+        assert analyst_token, "Analyst should have a token in localStorage"
+        assert admin_token != analyst_token, \
+            "Users should have different session tokens (isolation broken)"
 
     def test_tc306_cache_isolation_between_users(self, admin_logged_in, analyst_logged_in, send_chat_query):
         """TC-306: Cache entries are isolated between users.

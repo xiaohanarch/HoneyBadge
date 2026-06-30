@@ -15,6 +15,78 @@ import type { ChatMessage, ChatSession } from '@/types'
 const MANAGER_USER_ID =
   import.meta.env.VITE_MANAGER_USER_ID || '@manager:matrix-local.hiclaw.io'
 
+// Converts a Matrix room message event to a ChatMessage for history restore.
+// Returns null for non-message events, worker progress updates, and empty bodies.
+// Unlike handleRoomEvent, this does NOT filter by sender or queryStartTime —
+// history loading wants all messages including the user's own.
+function matrixEventToChatMessage(event: any): ChatMessage | null {
+  if (event.getType() !== 'm.room.message') return null
+
+  const content = event.getContent()
+  const xhb = content['x-honeybadge']
+  const sender = event.getSender()
+  const ts: number = (event.getServerTs?.() as number) || Date.now()
+  const created_at = new Date(ts).toISOString()
+  const id = event.getId() || uuidv4()
+
+  // User query (contract 001) — sent by the current user
+  if (xhb?.contract === '001') {
+    return {
+      id,
+      role: 'user',
+      content: xhb.payload?.question || content.body || '',
+      message_type: 'text',
+      created_at,
+    }
+  }
+
+  // Structured result (contract 002) — sent by Worker via Manager
+  if (xhb?.contract === '002') {
+    const payload = xhb.payload || {}
+    return {
+      id,
+      role: 'assistant',
+      content: payload.summary || content.body || '',
+      message_type: 'query_result',
+      created_at,
+      metadata: {
+        trace_id: xhb.trace_id || '',
+        cypher: payload.cypher || '',
+        raw_data: payload.raw_data || [],
+        columns: payload.columns || [],
+        execution_time_ms: payload.execution_time_ms || 0,
+      },
+    }
+  }
+
+  // Error (contract 003)
+  if (xhb?.contract === '003') {
+    return {
+      id,
+      role: 'assistant',
+      content: xhb.payload?.message || '查询失败',
+      message_type: 'error',
+      created_at,
+    }
+  }
+
+  // Plain text from Manager (no xhb) — text reply
+  if (sender === MANAGER_USER_ID) {
+    const body = content.body || ''
+    if (!body) return null
+    return {
+      id,
+      role: 'assistant',
+      content: body,
+      message_type: 'text',
+      created_at,
+    }
+  }
+
+  // Plain text from Worker (no xhb, not Manager) — transient progress update
+  return null
+}
+
 export function useMatrixChat() {
   const chatStore = useChatStore()
   const authStore = useAuthStore()
@@ -90,6 +162,35 @@ export function useMatrixChat() {
     if (initPromise) return initPromise
     initPromise = initMatrix().finally(() => { initPromise = null })
     return initPromise
+  }
+
+  // Wait for the Matrix client to finish initial sync. The preProvisionedRoomId
+  // path in initMatrix calls startClient but does NOT await sync PREPARED (unlike
+  // findOrCreateManagerDmRoom which does). Reading room.timeline before sync
+  // returns an incomplete/empty list, so loadMessages must wait here first.
+  async function waitForMatrixSync(timeoutMs = 10000): Promise<void> {
+    if (!matrixClient) return
+    // Capture into a const so TS narrows for the closures below (the outer
+    // matrixClient is a `let` that could be reassigned by disconnect()).
+    const client = matrixClient
+    const state = client.getSyncState()
+    if (state === 'PREPARED') return
+
+    return new Promise<void>((resolve) => {
+      const timeoutId = setTimeout(() => {
+        client.removeListener('sync' as any, onSync)
+        resolve() // resolve anyway after timeout — room may still have partial timeline
+      }, timeoutMs)
+
+      const onSync = (state: string) => {
+        if (state === 'PREPARED' || state === 'ERROR' || state === 'STOPPED') {
+          clearTimeout(timeoutId)
+          client.removeListener('sync' as any, onSync)
+          resolve()
+        }
+      }
+      client.on('sync' as any, onSync)
+    })
   }
 
   // @ts-ignore — event/room are typed as any here for flexibility
@@ -256,12 +357,32 @@ export function useMatrixChat() {
   async function loadMessages(sessionId: string) {
     loading.value = true
     try {
-      const response = await sessionApi.getMessages(sessionId)
-      const messages = response.data as unknown as ChatMessage[]
+      const ok = await ensureInitialized()
+      if (!ok || !matrixClient || !dmRoomId) return
+
+      await waitForMatrixSync()
+
+      const room = matrixClient.getRoom(dmRoomId)
+      if (!room) {
+        console.warn('DM room not found in client store:', dmRoomId)
+        return
+      }
+
+      // Fetch up to 50 historical events. Idempotent — won't duplicate events
+      // already in the timeline from initialSyncLimit: 10.
+      await matrixClient.scrollback(room, 50)
+
+      // room.timeline is oldest (index 0) to newest (last index)
+      const messages: ChatMessage[] = []
+      for (const event of room.timeline) {
+        const msg = matrixEventToChatMessage(event)
+        if (msg) messages.push(msg)
+      }
+
       chatStore.setMessages(sessionId, messages)
     } catch (error) {
-      console.error('Failed to load messages:', error)
-      ElMessage.error('加载消息历史失败')
+      console.error('Failed to load messages from Matrix:', error)
+      // Leave messages empty — same as the old backend path which returned []
     } finally {
       loading.value = false
     }

@@ -206,38 +206,33 @@ class TestPermissions:
             assert has_error_msg or len(response_text.strip()) == 0, \
                 f"Should show permission denied for OTC access. Got: {response_text[:200]}"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category E (transient backend disconnect). "
-        "Failed with httpx.RemoteProtocolError: Server disconnected without "
-        "sending a response — backend instability under load. "
-        "See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc407_api_returns_403_for_unauthorized(self, api_client):
         """TC-407: API returns 403 status for unauthorized access.
 
-        This test verifies API-level permission enforcement.
-        Logs in as analyst, then tries an admin-only endpoint.
+        Verifies REST API-level role enforcement. Logs in as analyst
+        (non-admin role), then hits the admin-only GET /api/admin/users
+        endpoint. The require_admin dependency must reject non-admin
+        roles with 403 (authenticated but not authorized).
         """
-        import httpx
-
-        # Login as analyst
+        # Login as analyst (non-admin role)
         response = api_client.post(
             "/api/auth/login",
             json={"username": "analyst", "password": "analyst123"}
         )
+        assert response.status_code == 200, \
+            f"Analyst login failed: {response.status_code} {response.text}"
+        data = response.json()
+        token = data.get("token") or data.get("access_token") or data.get("roles_jwt")
+        assert token, f"No token in login response: {data}"
 
-        if response.status_code == 200:
-            data = response.json()
-            token = data.get("access_token") or data.get("roles_jwt")
-
-            if token:
-                # Try admin-only endpoint - should return 403 for non-admin
-                admin_response = api_client.get(
-                    "/api/admin/users",
-                    headers={"Authorization": f"Bearer {token}"}
-                )
-                assert admin_response.status_code in (401, 403), \
-                    f"Analyst accessing /api/admin/users should get 401/403, got {admin_response.status_code}"
+        # Try admin-only endpoint — analyst is authenticated but not admin,
+        # so require_admin must return 403 (not 401, not 200).
+        admin_response = api_client.get(
+            "/api/admin/users",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert admin_response.status_code == 403, \
+            f"Analyst accessing /api/admin/users should get 403, got {admin_response.status_code}"
 
     @pytest.mark.timeout(600)
     def test_tc408_org_id_filter_verification(self, reset_manager, create_user_page):

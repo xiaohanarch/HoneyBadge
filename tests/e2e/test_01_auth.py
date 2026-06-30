@@ -67,20 +67,16 @@ class TestAuthentication:
         # User should still be on login page (not redirected to chat)
         assert "/login" in page.url, f"Expected to stay on /login, but URL is {page.url}"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category E (UI interaction): el-dropdown hover on nested "
-        ".user-avatar span does not reveal teleported menu. Element Plus v2.9 default trigger "
-        "is hover, but propagation through the avatar wrapper is inconsistent. See "
-        "docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc005_logout_redirects_to_login(self, admin_logged_in):
-        """TC-005: Logout redirects to login and blocks /chat access."""
+        """TC-005: Logout redirects to login and blocks /chat access.
+
+        ChatView.vue's user-avatar el-dropdown uses trigger="click" (aligned
+        with the session dropdown on the same view). Click the avatar to
+        reveal the teleported dropdown menu, then click logout.
+        """
         page = admin_logged_in
 
-        # ChatView.vue uses <el-dropdown> without an explicit trigger prop, so it
-        # defaults to "hover" — clicking the avatar does NOT open the menu.
-        # Hover first to reveal the teleported dropdown menu, then click logout.
-        page.locator(USER_AVATAR).hover()
+        page.locator(USER_AVATAR).click()
 
         # Element Plus v2 teleports the dropdown menu to <body> with position:fixed,
         # so offsetParent is always null — must wait with Playwright state check.

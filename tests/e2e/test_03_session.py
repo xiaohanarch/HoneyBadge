@@ -128,14 +128,15 @@ class TestSessionManagement:
         session_items = page.locator(SESSION_ITEM)
         assert session_items.count() >= 3, f"Expected >=3 sessions, got {session_items.count()}"
 
-    @pytest.mark.skip(
-        reason="Deferred to 1.1.1 — Category E (page reload + chat readiness timing). "
-        "After page.reload(), wait_for_chat_ready() times out at 20s because the Pinia "
-        "chat store doesn't reach connected=true. Backend cascade, not pure test issue. "
-        "See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
-    def test_tc205_session_persistence(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-205: Session data persists after page reload."""
+    def test_tc205_session_persistence(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_chat_query):
+        """TC-205: Session data persists after page reload.
+
+        Messages are restored from the Matrix DM room timeline (Tuwunel
+        homeserver stores them server-side). After reload, onMounted runs:
+        fetchCurrentUser -> loadSessions -> connect -> loadMessages, where
+        loadMessages reads room.timeline via scrollback and converts each
+        MatrixEvent via matrixEventToChatMessage.
+        """
         page = admin_logged_in
         wait_for_chat_ready()
 
@@ -144,16 +145,16 @@ class TestSessionManagement:
         page.wait_for_timeout(1000)
 
         # Reload page. Do NOT wait for "networkidle" — Matrix SDK keeps a long-poll
-        # /sync connection open indefinitely, so networkidle never resolves and
-        # times out at the default 30s. wait_for_chat_ready() polls the Pinia
-        # chat store which is the actual readiness signal we care about.
+        # /sync connection open indefinitely, so networkidle never resolves.
         page.reload()
         page.wait_for_load_state("domcontentloaded")
-        wait_for_chat_ready()
 
-        # Verify session and messages still exist
+        # After reload, onMounted runs: fetchCurrentUser -> loadSessions ->
+        # connect -> loadMessages(lastSession). loadMessages reads the DM room
+        # timeline from Matrix (scrollback) and populates the Pinia store, so
+        # the assistant reply reappears without any backend write path.
         messages = page.locator(MSG_ASSISTANT)
-        expect(messages.last).to_be_visible()
+        expect(messages.last).to_be_visible(timeout=60000)
 
     def test_tc206_session_search(self, admin_logged_in, wait_for_chat_ready):
         """TC-206: User can search through sessions."""

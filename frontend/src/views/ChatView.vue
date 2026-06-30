@@ -46,7 +46,7 @@
           <el-tag :type="connected ? 'success' : 'danger'" size="small">
             {{ connected ? '已连接' : '未连接' }}
           </el-tag>
-          <el-dropdown @command="handleUserCommand">
+          <el-dropdown trigger="click" @command="handleUserCommand">
             <span class="user-avatar">
               <el-avatar :size="32" :icon="UserFilled" />
             </span>
@@ -242,6 +242,10 @@ onMounted(async () => {
   // 加载会话列表
   await loadSessions();
 
+  // Connect Matrix client BEFORE loading messages — loadMessages now reads
+  // from room.timeline, which requires the client to be initialized + synced.
+  await connect();
+
   // 如果有会话，选中第一个（避免重复加载已存在于 store 的消息）
   if (sessions.value.length > 0) {
     const lastSession = sessions.value[0];
@@ -250,9 +254,6 @@ onMounted(async () => {
       await loadMessages(lastSession.id);
     }
   }
-
-  // 建立 WebSocket 连接
-  await connect();
 });
 </script>
 

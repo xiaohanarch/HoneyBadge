@@ -31,6 +31,18 @@ async def get_current_user(
     return payload
 
 
+async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    """Verify the authenticated user has the 'admin' role.
+
+    Use as a route dependency to enforce admin-only access at the REST API
+    boundary. Returns 401 if unauthenticated, 403 if authenticated but non-admin.
+    """
+    roles = user.get("roles") or []
+    if "admin" not in roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return user
+
+
 def get_pg(request: Request):
     return request.app.state.pg
 
