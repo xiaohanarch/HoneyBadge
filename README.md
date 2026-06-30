@@ -8,7 +8,7 @@
 
 [![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/xiaohanarch/HoneyBadge)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ---
 
@@ -130,7 +130,7 @@
 | NebulaGraph Schema | ✅ | 34 Tags, 38 Edges + 测试数据 57 实体类型 |
 | HiClaw Manager-Worker | ✅ | Matrix 协议通信，Manager + graph-worker + analytics-worker |
 | HiClaw v1.1.2 升级 | ✅ | v1.1.0 → v1.1.2，6 个死代码 workaround 已删，observe-recovery 禁用 |
-| 五层防幻觉框架 | ✅ | L1-L3 已实现，L3 权限通过 route-and-execute.sh 强制执行 |
+| 五层防幻觉框架 | ✅ | L1-L5 全部实现；L3 权限通过 route-and-execute.sh 强制执行；L4 原始数据前端直传；L5 审计日志写入 PostgreSQL |
 | honeybadge-auth 服务 | ✅ | 每用户 Matrix 账号 + JWT |
 | matrix-js-sdk 前端 | ✅ | 浏览器直连 Tuwunel |
 | MCP 工具服务 | ✅ | nebula/audit/cache MCP |

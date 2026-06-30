@@ -1,0 +1,17 @@
+id: SUMMARIZE-AGG-001
+category: summarize_fidelity
+subcategory: aggregation
+question: "查询各供应商的订单总额"
+user_context: admin
+
+summarize:
+  columns: [supplier, total_amount]
+  raw_results:
+    - supplier: "ACME"
+      total_amount: "1500000"
+    - supplier: "Globex"
+      total_amount: "820000"
+    - supplier: "Initech"
+      total_amount: "450000"
+  expected_summary: "各供应商订单总额：ACME 1500000 元，Globex 820000 元，Initech 450000 元，合计 2770000 元。"
+  tampered_summary: "各供应商订单总额：ACME 1500000 元，Globex 820000 元，Initech 45000 元，合计 2370000 元。"
