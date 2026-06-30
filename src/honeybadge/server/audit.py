@@ -29,8 +29,8 @@ class AuditTrailResponse(BaseModel):
 @router.get("/{trace_id}", response_model=AuditTrailResponse)
 async def get_audit_trail(
     trace_id: str,
-    user: dict = Depends(get_current_user),
-    pg=Depends(get_pg),
+    user: dict[str, Any] = Depends(get_current_user),
+    pg: Any = Depends(get_pg),
 ) -> AuditTrailResponse:
     """Get audit trail by trace_id.
 

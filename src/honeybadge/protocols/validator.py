@@ -68,7 +68,7 @@ class NgqlValidator:
     L3: Permission filter validation
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize validator."""
         self._schema_tags: dict[str, SchemaTag] = {}
         self._schema_edges: dict[str, SchemaEdge] = {}

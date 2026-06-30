@@ -137,7 +137,7 @@ async def _exchange_code_for_tokens(code: str) -> dict[str, Any]:
         resp = await client.post(GOOGLE_TOKEN_URL, data=payload)
         if resp.status_code != 200:
             raise GoogleOAuthError(f"Token exchange failed: {resp.status_code} {resp.text}")
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
 
 async def _fetch_google_userinfo(access_token: str) -> dict[str, Any]:
@@ -157,7 +157,7 @@ async def _fetch_google_userinfo(access_token: str) -> dict[str, Any]:
         )
         if resp.status_code != 200:
             raise GoogleOAuthError(f"Userinfo fetch failed: {resp.status_code}")
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
 
 def _sign_google_jwt(google_sub: str, email: str, display_name: str) -> str:
@@ -184,7 +184,7 @@ def _sign_google_jwt(google_sub: str, email: str, display_name: str) -> str:
         "iss": "honeybadge-auth",
         "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)  # type: ignore[no-any-return]
 
 
 def _get_matrix_domain() -> str:

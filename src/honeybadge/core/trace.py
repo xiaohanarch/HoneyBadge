@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 
 def generate_trace_id(prefix: str | None = "TRC") -> str:
@@ -26,7 +27,7 @@ def generate_trace_id(prefix: str | None = "TRC") -> str:
     return f"{prefix}-{date_part}-{time_part}-{uuid_part}"
 
 
-def parse_trace_id(trace_id: str) -> dict:
+def parse_trace_id(trace_id: str) -> dict[str, Any]:
     """
     Parse a trace ID into its components.
 

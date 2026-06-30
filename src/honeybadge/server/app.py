@@ -2,11 +2,13 @@
 
 import json
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -30,7 +32,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         config = ServerConfig.from_env()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("server_starting", port=config.port)
         # Initialize all to None so error handling can distinguish
         # "initialized but failed later" from "never reached"
@@ -116,7 +118,6 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     )
 
     # --- Auth routes (inline) ---
-    from fastapi import Depends, HTTPException, status
 
     class LoginRequest(BaseModel):
         username: str
@@ -126,7 +127,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         refresh_token: str
 
     @app.post("/api/auth/login")
-    async def login(body: LoginRequest):
+    async def login(body: LoginRequest) -> dict[str, Any]:
         user = authenticate_user(body.username, body.password)
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -136,15 +137,15 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         return {"token": access_token, "refresh_token": refresh_token, "user": user_to_response(user)}
 
     @app.get("/api/auth/me")
-    async def me(user=Depends(get_current_user)):
+    async def me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
         return {"id": user["sub"], "username": user["username"], "display_name": user.get("display_name", user["username"]), "roles": user["roles"], "org_id": user.get("org_id")}
 
     @app.post("/api/auth/logout")
-    async def logout(user=Depends(get_current_user)):
+    async def logout(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, str]:
         return {"message": "Logged out"}
 
     @app.post("/api/auth/refresh")
-    async def refresh(body: RefreshRequest):
+    async def refresh(body: RefreshRequest) -> dict[str, Any]:
         payload = decode_token(body.refresh_token, config.jwt_secret)
         if payload is None or payload.get("type") != "refresh":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
@@ -177,7 +178,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     from honeybadge.server.websocket import build_query_response, process_query
 
     @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
+    async def websocket_endpoint(websocket: WebSocket) -> None:
         """WebSocket endpoint for query processing with full metadata."""
         from honeybadge.server.auth import decode_token
 
@@ -256,7 +257,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     return app
 
 
-def main():
+def main() -> None:
     config = ServerConfig.from_env()
     app = create_app(config)
     uvicorn.run(app, host=config.host, port=config.port, log_level="info")

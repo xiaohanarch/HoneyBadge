@@ -78,7 +78,9 @@ class RedisClient:
         data = await self._client.hgetall(key)
         if not data:
             return None
-        return self._deserialize_session(data)
+        # decode_responses=True ensures str keys/values, but the redis-py
+        # type stubs still report bytes|str. Cast to the runtime type.
+        return self._deserialize_session(dict(data))  # type: ignore[arg-type]
 
     async def set_session(
         self,
@@ -93,7 +95,7 @@ class RedisClient:
 
         key = f"{self.session_prefix}:{user_id}:{session_id}"
         serialized = self._serialize_session(data)
-        await self._client.hset(key, mapping=serialized)
+        await self._client.hset(key, mapping=serialized)  # type: ignore[arg-type]
         await self._client.expire(key, ttl)
         return True
 
@@ -166,7 +168,7 @@ class RedisClient:
 
     def _deserialize_session(self, data: dict[str, str]) -> dict[str, Any]:
         """Deserialize session data from Redis hash."""
-        result = {}
+        result: dict[str, Any] = {}
         for key, value in data.items():
             if key in ("created_at", "last_active"):
                 try:

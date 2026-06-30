@@ -117,10 +117,18 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+# ETL pipeline runner is a standalone prototype script (not in the runtime
+# request path). Excluding from strict mypy until it's production-ready.
+exclude = "src/honeybadge/etl/run_pipeline.py"
 
 [[tool.mypy.overrides]]
 # matrix_client (matrix-js-sdk bridge) ships no py.typed marker.
 module = ["honeybadge.gateway.matrix_client", "honeybadge.gateway.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Third-party libraries that ship without type stubs or py.typed marker.
+module = ["jose", "passlib", "passlib.*", "asyncpg", "nebula3.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

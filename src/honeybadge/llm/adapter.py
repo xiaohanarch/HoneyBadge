@@ -116,7 +116,7 @@ class LLMAdapter(ABC):
         ...
 
     @abstractmethod
-    async def chat_stream(self, request: LLMRequest) -> AsyncIterator[str]:
+    def chat_stream(self, request: LLMRequest) -> AsyncIterator[str]:
         """
         Streaming chat completion.
 
@@ -488,7 +488,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
     @property
     def default_model(self) -> str:
         """Get the default model identifier."""
-        return self.default_model_name
+        return self.default_model_name  # type: ignore[no-any-return]
 
 
 # =============================================================================

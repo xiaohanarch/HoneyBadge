@@ -33,7 +33,7 @@ class SyntaxValidationError(ValidationError):
 class SchemaValidationError(ValidationError):
     """L2: Schema compliance validation failed."""
 
-    def __init__(self, message: str, invalid_properties: list = None):
+    def __init__(self, message: str, invalid_properties: list[str] | None = None):
         self.invalid_properties = invalid_properties or []
         super().__init__(message, "SCHEMA_ERROR")
 
@@ -41,7 +41,7 @@ class SchemaValidationError(ValidationError):
 class PermissionValidationError(ValidationError):
     """L3: Permission validation failed."""
 
-    def __init__(self, message: str, missing_filters: list = None):
+    def __init__(self, message: str, missing_filters: list[str] | None = None):
         self.missing_filters = missing_filters or []
         super().__init__(message, "PERMISSION_DENIED")
 

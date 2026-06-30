@@ -118,7 +118,7 @@ def create_access_token(data: dict[str, Any], secret: str, expire_minutes: int) 
     payload = dict(data)
     payload["type"] = "access"
     payload["exp"] = datetime.now(tz=timezone.utc) + timedelta(minutes=expire_minutes)
-    return jwt.encode(payload, secret, algorithm=_ALGORITHM)
+    return jwt.encode(payload, secret, algorithm=_ALGORITHM)  # type: ignore[no-any-return]
 
 
 def create_refresh_token(data: dict[str, Any], secret: str, expire_days: int) -> str:
@@ -135,7 +135,7 @@ def create_refresh_token(data: dict[str, Any], secret: str, expire_days: int) ->
     payload = dict(data)
     payload["type"] = "refresh"
     payload["exp"] = datetime.now(tz=timezone.utc) + timedelta(days=expire_days)
-    return jwt.encode(payload, secret, algorithm=_ALGORITHM)
+    return jwt.encode(payload, secret, algorithm=_ALGORITHM)  # type: ignore[no-any-return]
 
 
 def decode_token(token: str, secret: str) -> dict[str, Any] | None:

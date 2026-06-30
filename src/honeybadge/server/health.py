@@ -1,5 +1,7 @@
 """Health check router."""
 
+from typing import Any
+
 from fastapi import APIRouter, Request
 
 from honeybadge.core.constants import VERSION
@@ -8,8 +10,8 @@ router = APIRouter(prefix="/api", tags=["system"])
 
 
 @router.get("/health")
-async def health_check(request: Request):
-    services = {}
+async def health_check(request: Request) -> dict[str, Any]:
+    services: dict[str, Any] = {}
 
     # Check Redis
     try:

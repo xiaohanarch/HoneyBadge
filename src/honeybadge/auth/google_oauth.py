@@ -1,6 +1,7 @@
 """Google OAuth2 Integration for HoneyBadge SSO."""
 
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 import structlog
@@ -34,7 +35,7 @@ class GoogleOAuth2:
         client_id: str,
         client_secret: str,
         redirect_uri: str,
-        scopes: list[str] = None,
+        scopes: list[str] | None = None,
     ):
         """
         Initialize Google OAuth2 client.
@@ -78,7 +79,7 @@ class GoogleOAuth2:
 
         return f"{self._auth_base}?{urllib.parse.urlencode(params)}"
 
-    async def exchange_code_for_token(self, code: str) -> dict:
+    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
         """
         Exchange authorization code for access token.
 
@@ -100,7 +101,7 @@ class GoogleOAuth2:
                 },
             )
             response.raise_for_status()
-            return response.json()
+            return response.json()  # type: ignore[no-any-return]
 
     async def get_user_info(self, access_token: str) -> GoogleUserInfo:
         """
@@ -127,7 +128,7 @@ class GoogleOAuth2:
                 picture=data.get("picture"),
             )
 
-    async def refresh_access_token(self, refresh_token: str) -> dict:
+    async def refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
         """
         Refresh an expired access token.
 
@@ -148,4 +149,4 @@ class GoogleOAuth2:
                 },
             )
             response.raise_for_status()
-            return response.json()
+            return response.json()  # type: ignore[no-any-return]

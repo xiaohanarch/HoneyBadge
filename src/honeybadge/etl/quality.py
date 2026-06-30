@@ -544,7 +544,7 @@ class ReferentialIntegrityCheck:
             #     orphans = await conn.fetch(query, batch_id)
 
             # Placeholder - assume passed
-            orphans = []
+            orphans: list[Any] = []
 
             if orphans:
                 orphan_count = sum(r["cnt"] for r in orphans)
@@ -803,7 +803,7 @@ class DataQualityChecker:
         # async with self._pool.acquire() as conn:
         #     rows = await conn.fetch(query, batch_id)
 
-        failed_values = []  # TODO: rows from actual query
+        failed_values: list[Any] = []  # TODO: rows from actual query
 
         return ValidationResult(
             rule_name=rule.name,
@@ -819,7 +819,7 @@ class DataQualityChecker:
         rule: ValidationRule,
     ) -> ValidationResult:
         """Check business rule constraints."""
-        failed_values = []
+        failed_values: list[Any] = []
 
         # Check value set constraint
         if rule.value_set is not None:
@@ -880,7 +880,7 @@ class DataQualityChecker:
         """
 
         # TODO: Implement actual query and regex check
-        failed_values = []
+        failed_values: list[Any] = []
 
         return ValidationResult(
             rule_name=rule.name,

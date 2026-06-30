@@ -4,6 +4,7 @@ Manages multiple LLM providers with primary/fallback routing and
 model selection based on query complexity.
 """
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
@@ -152,7 +153,7 @@ class LLMProviderManager:
         provider_config = self._provider_configs.get(name, {})
         models = provider_config.get("models", {})
         default_model = provider_config.get("model", "unknown")
-        return models.get(complexity, default_model)
+        return models.get(complexity, default_model)  # type: ignore[no-any-return]
 
     async def chat(
         self,
@@ -294,7 +295,7 @@ class LLMProviderManager:
         request: LLMRequest,
         query_complexity: str = QueryComplexity.COMPLEX,
         provider_name: str | None = None,
-    ):
+    ) -> AsyncIterator[str]:
         """
         Execute streaming chat completion with fallback support.
 

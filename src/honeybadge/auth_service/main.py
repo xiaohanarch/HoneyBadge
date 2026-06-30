@@ -126,7 +126,7 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def options_middleware(request: Request, call_next):
+async def options_middleware(request: Request, call_next: Any) -> Any:
     """Globally intercept OPTIONS preflight requests and return CORS headers.
 
     Without this, some HTTP clients (notably the Vite proxy forwarding from a
@@ -489,7 +489,7 @@ def _sign_roles_jwt(user: dict[str, Any], username: str) -> str:
         "iss": "honeybadge-auth",
         "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=_ALGORITHM)
+    return jwt.encode(payload, JWT_SECRET, algorithm=_ALGORITHM)  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +554,7 @@ async def health() -> HealthResponse:
 
 
 @app.get("/auth/google", tags=["auth"])
-async def google_auth_redirect():
+async def google_auth_redirect() -> RedirectResponse:
     """Redirect to Google OAuth2 authorization page.
 
     Returns 302 redirect if Google SSO is enabled, 404 if not.
@@ -568,7 +568,11 @@ async def google_auth_redirect():
 
 
 @app.get("/auth/google/callback", response_model=LoginResponse, tags=["auth"])
-async def google_auth_callback(code: str = None, state: str = None, error: str = None):
+async def google_auth_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> LoginResponse | RedirectResponse:
     """Handle Google OAuth2 callback.
 
     Validates state, exchanges code for tokens, fetches user info,
@@ -658,7 +662,7 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
 
 
 @app.get("/auth/google/config", response_model=GoogleConfigResponse, tags=["auth"])
-async def google_auth_config():
+async def google_auth_config() -> GoogleConfigResponse:
     """Return Google SSO configuration for frontend."""
     return GoogleConfigResponse(
         enabled=GOOGLE_ENABLED,

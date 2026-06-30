@@ -62,7 +62,7 @@ class NebulaGraphClient:
         max_retries = 5
         base_delay = 2  # seconds
 
-        def _connect():
+        def _connect() -> Any:
             config = NebulaConfig()
             config.max_connection_pool_size = self.max_pool_size
             config.timeout = self.timeout
@@ -132,10 +132,13 @@ class NebulaGraphClient:
         if not self._pool:
             await self.connect()
 
+        assert self._pool is not None  # connect() sets _pool
+
         loop = asyncio.get_running_loop()
         start_time = time.time()
 
-        def _exec():
+        def _exec() -> Any:
+            assert self._pool is not None
             session = self._pool.get_session(self.user, self.password)
             try:
                 if space:
@@ -221,12 +224,13 @@ class NebulaSession:
         """Open session."""
         import asyncio
 
-        if not self._client._pool:
+        if not self._client or not self._client._pool:
             raise NebulaGraphError("Client not connected")
 
         loop = asyncio.get_running_loop()
 
-        def _open():
+        def _open() -> Any:
+            assert self._client is not None and self._client._pool is not None
             session = self._client._pool.get_session(
                 self._client.user, self._client.password
             )
@@ -238,7 +242,7 @@ class NebulaSession:
                 )
             return session
 
-        self._session = await loop.run_in_executor(None, _open)
+        self._session = await loop.run_in_executor(None, _open)  # type: ignore[func-returns-value]
 
     async def close(self) -> None:
         """Close session."""
@@ -256,7 +260,7 @@ class NebulaSession:
         loop = asyncio.get_running_loop()
         start_time = time.time()
 
-        def _exec():
+        def _exec() -> Any:
             result = self._session.execute(ngql)
             execution_time_ms = int((time.time() - start_time) * 1000)
 
