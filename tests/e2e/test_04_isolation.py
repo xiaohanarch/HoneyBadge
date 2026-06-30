@@ -76,12 +76,16 @@ class TestUserIsolation:
         assert analyst_session_indicator.count() == 0, \
             "Admin should not see analyst's private session"
 
-    def test_tc303_cross_org_data_isolation(self, create_user_page):
+    def test_tc303_cross_org_data_isolation(self, reset_manager, create_user_page):
         """TC-303: Data is isolated between organizations.
 
         admin (org_ids=None) sees ALL data
         analyst (org_ids=[1000]) sees ONLY org 1000 data
         subsidiary_lead (org_ids=[1011]) sees ONLY org 1011 data
+
+        # reset_manager: TC-303 is the 3rd test in the file; by this point the
+        # Manager session has ~4 accumulated turns from TC-301/302, and glm-5.2
+        # enters repetition loops at 5-10 turns, causing the 240s Stage-1 timeout.
 
         Key assertion: counts should differ significantly
         - admin sees ~13000 records (all 40 orgs)
