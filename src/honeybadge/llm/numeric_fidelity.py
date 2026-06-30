@@ -1,4 +1,3 @@
-# eval/scorers/numeric_fidelity.py
 """Numeric fidelity checker for LLM summarization (anti-hallucination L4 validation).
 
 This checker verifies that every numeric value present in the raw query results
@@ -6,12 +5,17 @@ appears unchanged in the LLM-generated summary. It is a programmatic enforcement
 of the "不要修改任何数值" prompt instruction used by ``summarize_results()`` in
 ``adapter.py`` (the L4 raw-result-passthrough layer).
 
-L4 enforcement gap:
-    This checker is NOT yet wired into ``summarize_results()``. The L4 guarantee
-    currently relies on prompt instructions alone. Wiring this checker as a
-    post-hoc validation in ``summarize_results()`` is a follow-up task — it would
-    log a warning (not fail) when numbers do not match, surfacing LLM
-    hallucination attempts without breaking production.
+Wiring:
+    ``summarize_results()`` calls ``check_and_log_fidelity()`` immediately after
+    the LLM returns a summary. The guard is **log-only** — on mismatch it emits a
+    ``numeric_fidelity_mismatch`` warning (with ``trace_id``) and returns; it
+    never raises, so LLM hallucination attempts surface in logs without breaking
+    the production chat path. The ``LLMResponse`` is returned unchanged.
+
+Canonical home:
+    This module lives in the runtime package so it is importable from both the
+    production chat path and the eval suite. The eval layer imports from here;
+    the previous ``eval/scorers/numeric_fidelity.py`` copy has been removed.
 
 Limitation:
     Chinese number formats (``10万``, ``1.5亿``) are NOT recognized. Only ASCII
@@ -20,13 +24,22 @@ Limitation:
     missing number (the digit run ``100000`` is absent) — which is the desired
     adversarial signal, but the checker cannot positively confirm that ``10万``
     equals ``100000``.
+
+Known limitation (pre-strip validation):
+    ``summarize_results()`` validates ``response.content`` BEFORE the caller
+    strips ``<think>...</think>`` tags. A split-brain model (correct numbers in
+    ``<think>``, wrong in visible text) could false-PASS. Post-strip validation
+    is a documented future refinement.
 """
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
-from eval.scorers.rule_checks import CheckResult
+import structlog
+
+logger = structlog.get_logger()
 
 # Matches comma-grouped numbers (``100,000`` / ``1,234,567.89``) OR plain
 # integers/decimals (``42`` / ``123.45`` / ``100000``). The comma-grouped
@@ -34,6 +47,18 @@ from eval.scorers.rule_checks import CheckResult
 # 6-digit integer like ``100000`` is NOT split into ``100`` + ``000`` — it
 # falls through to the plain ``\d+`` alternative and matches as one number.
 _NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+
+
+@dataclass
+class NumericFidelityResult:
+    """Result of a numeric fidelity check.
+
+    Mirrors the ``passed``/``detail`` shape of ``eval.scorers.rule_checks.CheckResult``
+    so the eval suite can consume it without adaptation.
+    """
+
+    passed: bool
+    detail: str = ""
 
 
 def _normalize(number: str) -> str:
@@ -58,7 +83,7 @@ def validate_numeric_fidelity(
     summary: str,
     raw_results: list[dict[str, Any]],
     columns: list[str],
-) -> CheckResult:
+) -> NumericFidelityResult:
     """Check that all numbers in ``raw_results`` appear unchanged in ``summary``.
 
     Logic:
@@ -71,7 +96,7 @@ def validate_numeric_fidelity(
       6. Empty ``raw_results`` -> PASS (nothing to verify).
     """
     if not raw_results:
-        return CheckResult(True, "No raw results to verify")
+        return NumericFidelityResult(True, "No raw results to verify")
 
     raw_numbers: set[str] = set()
     for row in raw_results:
@@ -84,14 +109,45 @@ def validate_numeric_fidelity(
             raw_numbers.update(extract_numbers(str(value)))
 
     if not raw_numbers:
-        return CheckResult(True, "No numeric values in raw results")
+        return NumericFidelityResult(True, "No numeric values in raw results")
 
     summary_numbers = extract_numbers(summary)
     missing = sorted(n for n in raw_numbers if n not in summary_numbers)
 
     if missing:
-        return CheckResult(
+        return NumericFidelityResult(
             False,
             f"Numeric values from raw results missing or modified in summary: {missing}",
         )
-    return CheckResult(True, "All raw numeric values present in summary")
+    return NumericFidelityResult(True, "All raw numeric values present in summary")
+
+
+def check_and_log_fidelity(
+    summary: str,
+    raw_results: list[dict[str, Any]],
+    columns: list[str],
+    trace_id: str | None = None,
+) -> None:
+    """Post-hoc L4 guard: log a warning if summary numbers diverge from raw.
+
+    Called by ``summarize_results()`` immediately after the LLM returns. This is
+    a **log-only** guard — it never raises, so a fidelity mismatch (or an
+    unexpected error inside the checker) surfaces in logs without breaking the
+    production chat path. The caller returns the ``LLMResponse`` unchanged
+    regardless of the outcome.
+    """
+    try:
+        result = validate_numeric_fidelity(summary, raw_results, columns)
+    except Exception as exc:
+        logger.warning(
+            "numeric_fidelity_check_error",
+            trace_id=trace_id,
+            error=str(exc),
+        )
+        return
+    if not result.passed:
+        logger.warning(
+            "numeric_fidelity_mismatch",
+            trace_id=trace_id,
+            detail=result.detail,
+        )

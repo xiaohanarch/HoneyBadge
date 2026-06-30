@@ -1,10 +1,16 @@
 # tests/eval/test_numeric_fidelity.py
-"""Unit tests for eval.scorers.numeric_fidelity — deterministic, no LLM."""
+"""Unit tests for honeybadge.llm.numeric_fidelity — deterministic, no LLM.
+
+The checker was promoted from ``eval/scorers/`` to the runtime package so it is
+importable from both the production chat path and the eval suite. These tests
+exercise the runtime-canonical copy; the logic is unchanged from the original
+eval-only implementation.
+"""
 from __future__ import annotations
 
 from typing import Any
 
-from eval.scorers.numeric_fidelity import extract_numbers, validate_numeric_fidelity
+from honeybadge.llm.numeric_fidelity import extract_numbers, validate_numeric_fidelity
 
 # --- extract_numbers ---
 

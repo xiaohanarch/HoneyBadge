@@ -22,6 +22,7 @@ from honeybadge.core.exceptions import (
     LLMTimeoutError,
     RateLimitExceeded,
 )
+from honeybadge.llm.numeric_fidelity import check_and_log_fidelity
 from honeybadge.llm.prompt_loader import load_prompt
 
 logger = structlog.get_logger()
@@ -1029,6 +1030,10 @@ async def summarize_results(
 
     try:
         response = await adapter.chat(request)
+        # L4 post-hoc guard: log-only. Surfaces LLM numeric-hallucination
+        # attempts without breaking the chat path. The response is returned
+        # unchanged regardless of the check outcome.
+        check_and_log_fidelity(response.content, raw_results, columns, trace_id)
         return response
     except Exception as e:
         logger.error(
