@@ -9,11 +9,11 @@ Provides metrics for:
 """
 
 from honeybadge.metrics.collectors import (
+    HICLAW_METRICS,
     LLM_METRICS,
     NEBULA_METRICS,
-    HICLAW_METRICS,
-    VALIDATION_METRICS,
     QUERY_METRICS,
+    VALIDATION_METRICS,
 )
 
 __all__ = [

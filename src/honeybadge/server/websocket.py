@@ -17,10 +17,8 @@ from honeybadge.db.postgres import PostgreSQLClient
 from honeybadge.llm.adapter import OpenAICompatibleAdapter
 from honeybadge.llm.adapter import generate_ngql as llm_generate_ngql
 from honeybadge.llm.adapter import summarize_results as llm_summarize_results
-from honeybadge.llm.adapter import LLMGenerationError, LLMSummarizationError
-from honeybadge.core.exceptions import NebulaGraphError
 from honeybadge.permission_service.config import PERMISSION_CONFIG
-from honeybadge.permission_service.permission_enforcer import PermissionEnforcer, PermissionViolationError
+from honeybadge.permission_service.permission_enforcer import PermissionEnforcer
 
 _permission_enforcer = PermissionEnforcer()
 
@@ -245,17 +243,6 @@ async def get_filtered_schema_str(
         if header_match:
             entity_name = header_match.group(1).lower()
             # Check if this entity matches any keyword
-            is_tag = section.startswith("### Supplier") or section.startswith("### Invoice") or \
-                     section.startswith("### Payment") or section.startswith("### PurchaseOrder") or \
-                     section.startswith("### Receipt") or section.startswith("### Item") or \
-                     section.startswith("### Organization") or section.startswith("### Employee") or \
-                     section.startswith("### Currency") or section.startswith("### UOM") or \
-                     section.startswith("### GLJournalEntry") or section.startswith("### BOM") or \
-                     section.startswith("### Contract") or section.startswith("### SalesOrder") or \
-                     section.startswith("### Shipment") or section.startswith("### ARInvoice") or \
-                     section.startswith("### ARReceipt") or section.startswith("### SupplierQualification") or \
-                     section.startswith("### ApprovalRecord") or section.startswith("### PurchaseRequisition")
-
             matches = False
             for kw in keywords:
                 aliases = _ENTITY_KEYWORDS.get(kw, [kw])

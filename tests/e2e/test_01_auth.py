@@ -10,17 +10,24 @@ Test Coverage:
 - TC-007: JWT token contains correct user data
 - TC-008: Login page renders correctly
 """
+import base64
 import json
 import os
-import base64
+
 import pytest
 from playwright.sync_api import expect
-from tests.e2e.selectors import (
-    LOGIN_USERNAME, LOGIN_PASSWORD, LOGIN_BUTTON, LOGIN_CONTAINER,
-    SSO_BUTTON, CHAT_HEADER, CHAT_TEXTAREA, USER_AVATAR, LOGOUT_ITEM,
-    CONNECTION_TAG,
-)
 
+from tests.e2e.selectors import (
+    CHAT_HEADER,
+    CHAT_TEXTAREA,
+    LOGIN_BUTTON,
+    LOGIN_CONTAINER,
+    LOGIN_PASSWORD,
+    LOGIN_USERNAME,
+    LOGOUT_ITEM,
+    SSO_BUTTON,
+    USER_AVATAR,
+)
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 

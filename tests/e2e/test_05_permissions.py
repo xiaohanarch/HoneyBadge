@@ -20,13 +20,14 @@ Data实际情况:
 - admin: org_ids=None, data_scope=ALL
 """
 import re
+
 import pytest
 from playwright.sync_api import expect
-from tests.e2e.conftest import send_query_on_page, BASE_URL, API_BASE_URL
+
+from tests.e2e.conftest import send_query_on_page
 from tests.e2e.selectors import (
-    CHAT_TEXTAREA, MSG_ASSISTANT, TRACE_ID_LINK,
-    CYPHER_COLLAPSE_HEADER, CYPHER_CODE,
-    DATA_COLLAPSE_HEADER, DATA_ROWS, DATA_HEADERS,
+    DATA_HEADERS,
+    MSG_ASSISTANT,
 )
 
 

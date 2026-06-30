@@ -16,11 +16,9 @@ Test Coverage:
 - TC-711: Service mesh connectivity
 - TC-712: Docker container status
 """
-import pytest
-from playwright.sync_api import expect
-import httpx
 import docker
-
+import httpx
+import pytest
 
 BASE_URL = "http://localhost:3000"
 API_BASE_URL = "http://localhost:8090"
@@ -38,7 +36,7 @@ class TestInfrastructure:
         try:
             sock = socket.create_connection(("localhost", 9669), timeout=10)
             sock.close()
-        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+        except (TimeoutError, ConnectionRefusedError, OSError) as e:
             pytest.fail(f"Cannot connect to NebulaGraph at localhost:9669: {e}")
 
     def test_tc702_postgresql_healthy(self, api_client):
@@ -163,8 +161,8 @@ class TestInfrastructure:
     def test_tc713_nebula_schema_completeness(self):
         """TC-713: NebulaGraph has expected number of tags and edges."""
         try:
-            from nebula3.gclient.net import ConnectionPool
             from nebula3.Config import Config as NebulaConfig
+            from nebula3.gclient.net import ConnectionPool
         except ImportError:
             pytest.skip("nebula3 Python client not installed")
 

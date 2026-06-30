@@ -28,21 +28,20 @@ Scheduling:
 
 import argparse
 import asyncio
-import json
 import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
 from honeybadge.core.constants import VERSION
-from honeybadge.etl.quality import DataQualityChecker, DQStatus
-from honeybadge.etl.transform import GraphTransformer, VERTEX_MAPPINGS, EDGE_MAPPINGS
+from honeybadge.etl.quality import DataQualityChecker
+from honeybadge.etl.transform import EDGE_MAPPINGS, VERTEX_MAPPINGS, GraphTransformer
 
 logger = structlog.get_logger()
 
@@ -84,9 +83,9 @@ class PipelineConfig:
     nebula_space: str = "honeybadge"
 
     # Pipeline settings
-    batch_id: Optional[str] = None
+    batch_id: str | None = None
     load_mode: LoadMode = LoadMode.INCREMENTAL
-    tables: Optional[list[str]] = None  # None means all tables
+    tables: list[str] | None = None  # None means all tables
     output_dir: str = "import"
     import_concurrency: int = 10
 
@@ -119,7 +118,7 @@ class PipelineState:
     status: PipelineStatus = PipelineStatus.PENDING
     load_mode: LoadMode = LoadMode.INCREMENTAL
     start_time: datetime = field(default_factory=datetime.utcnow)
-    end_time: Optional[datetime] = None
+    end_time: datetime | None = None
 
     # Stage timings
     quality_check_duration_sec: int = 0
@@ -213,9 +212,9 @@ class ETLPipelineRunner:
             config: Pipeline configuration
         """
         self.config = config
-        self.state: Optional[PipelineState] = None
-        self._quality_checker: Optional[DataQualityChecker] = None
-        self._transformer: Optional[GraphTransformer] = None
+        self.state: PipelineState | None = None
+        self._quality_checker: DataQualityChecker | None = None
+        self._transformer: GraphTransformer | None = None
 
     async def run(self) -> PipelineState:
         """
@@ -579,7 +578,7 @@ class ETLPipelineRunner:
         # Read template
         template_path = Path(self.config.importer_config_template)
         if template_path.exists():
-            with open(template_path, "r", encoding="utf-8") as f:
+            with open(template_path, encoding="utf-8") as f:
                 template_content = f.read()
         else:
             # Generate minimal config

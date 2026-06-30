@@ -1,22 +1,21 @@
 """Unit tests for anomaly detection patterns."""
-from unittest.mock import MagicMock, patch
-import pytest
-from common.severity import Severity
-from common.session_state import Anomaly
-from common.mcp_client import QueryResult
-from anomaly_detection.lib.patterns import (
-    THREE_WAY_TOLERANCE,
-    DUPLICATE_INVOICE_COUNT,
-    PAYMENT_DEVIATION_FACTOR,
-    NEW_SUPPLIER_DAYS,
-    SUPPLIER_CONCENTRATION,
-)
+from unittest.mock import MagicMock
+
 from anomaly_detection.lib.detect import (
-    detect_three_way_mismatch,
     detect_duplicate_invoices,
-    detect_unusual_payments,
     detect_supplier_concentration,
+    detect_three_way_mismatch,
+    detect_unusual_payments,
 )
+from anomaly_detection.lib.patterns import (
+    DUPLICATE_INVOICE_COUNT,
+    NEW_SUPPLIER_DAYS,
+    PAYMENT_DEVIATION_FACTOR,
+    SUPPLIER_CONCENTRATION,
+    THREE_WAY_TOLERANCE,
+)
+from common.mcp_client import QueryResult
+from common.severity import Severity
 
 
 def _make_result(rows, trace_id="t1"):

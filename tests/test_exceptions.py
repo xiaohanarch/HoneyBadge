@@ -1,6 +1,5 @@
 """Tests for exception module."""
 
-import pytest
 
 from honeybadge.core.exceptions import (
     DatabaseError,

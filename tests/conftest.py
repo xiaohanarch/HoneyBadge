@@ -1,8 +1,8 @@
 """Pytest configuration — add non-package directories to sys.path."""
-import sys
-import os
 import importlib
 import importlib.util
+import os
+import sys
 
 # Make mcp-servers/honeybadge-nebula-mcp importable as a top-level package
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

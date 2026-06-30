@@ -17,18 +17,17 @@ from typing import Any
 import httpx
 import structlog
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, Response
 from jose import jwt
 from pydantic import BaseModel
 
 from honeybadge.server.auth import authenticate_user
+
 from .google_oauth import (
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
-    GOOGLE_ENABLED,
-    AUTH_SERVICE_URL,
     DEFAULT_ROLE,
+    GOOGLE_CLIENT_ID,
+    GOOGLE_ENABLED,
     GoogleOAuthError,
     _build_google_auth_url,
     _build_state,
@@ -127,7 +126,7 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def options_middleware(request: Request, call_next):
+async def options_middleware(request: Request, call_next: Any) -> Any:
     """Globally intercept OPTIONS preflight requests and return CORS headers.
 
     Without this, some HTTP clients (notably the Vite proxy forwarding from a
@@ -251,7 +250,7 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                     raise HTTPException(
                         status_code=502,
                         detail="Invalid response from Matrix homeserver",
-                    )
+                    ) from None
                 access_token: str = data["access_token"]
                 logger.info(
                     "matrix_register_success",
@@ -270,7 +269,7 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                 raise HTTPException(
                     status_code=502,
                     detail="Invalid response from Matrix homeserver",
-                )
+                ) from None
             errcode = reg_data.get("errcode", "")
 
             if reg_response.status_code == 400 and errcode == "M_USER_IN_USE":
@@ -301,7 +300,7 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                         raise HTTPException(
                             status_code=502,
                             detail="Invalid response from Matrix homeserver",
-                        )
+                        ) from None
                     access_token = login_data["access_token"]
                     logger.info(
                         "matrix_login_success",
@@ -490,7 +489,7 @@ def _sign_roles_jwt(user: dict[str, Any], username: str) -> str:
         "iss": "honeybadge-auth",
         "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=_ALGORITHM)
+    return jwt.encode(payload, JWT_SECRET, algorithm=_ALGORITHM)  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
@@ -555,7 +554,7 @@ async def health() -> HealthResponse:
 
 
 @app.get("/auth/google", tags=["auth"])
-async def google_auth_redirect():
+async def google_auth_redirect() -> RedirectResponse:
     """Redirect to Google OAuth2 authorization page.
 
     Returns 302 redirect if Google SSO is enabled, 404 if not.
@@ -569,7 +568,11 @@ async def google_auth_redirect():
 
 
 @app.get("/auth/google/callback", response_model=LoginResponse, tags=["auth"])
-async def google_auth_callback(code: str = None, state: str = None, error: str = None):
+async def google_auth_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> LoginResponse | RedirectResponse:
     """Handle Google OAuth2 callback.
 
     Validates state, exchanges code for tokens, fetches user info,
@@ -591,7 +594,7 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
         tokens = await _exchange_code_for_tokens(code)
     except GoogleOAuthError as e:
         logger.error("google_token_exchange_failed", error=str(e))
-        raise HTTPException(status_code=502, detail="Invalid token response from Google")
+        raise HTTPException(status_code=502, detail="Invalid token response from Google") from e
 
     if "access_token" not in tokens:
         raise HTTPException(status_code=502, detail="Invalid token response from Google")
@@ -601,7 +604,7 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
         userinfo = await _fetch_google_userinfo(tokens["access_token"])
     except GoogleOAuthError as e:
         logger.error("google_userinfo_fetch_failed", error=str(e))
-        raise HTTPException(status_code=502, detail="Invalid userinfo from Google")
+        raise HTTPException(status_code=502, detail="Invalid userinfo from Google") from e
 
     if "sub" not in userinfo or "email" not in userinfo:
         raise HTTPException(status_code=502, detail="Invalid userinfo from Google")
@@ -659,7 +662,7 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
 
 
 @app.get("/auth/google/config", response_model=GoogleConfigResponse, tags=["auth"])
-async def google_auth_config():
+async def google_auth_config() -> GoogleConfigResponse:
     """Return Google SSO configuration for frontend."""
     return GoogleConfigResponse(
         enabled=GOOGLE_ENABLED,

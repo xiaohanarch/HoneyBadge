@@ -29,8 +29,8 @@ class AuditTrailResponse(BaseModel):
 @router.get("/{trace_id}", response_model=AuditTrailResponse)
 async def get_audit_trail(
     trace_id: str,
-    user: dict = Depends(get_current_user),
-    pg=Depends(get_pg),
+    user: dict[str, Any] = Depends(get_current_user),
+    pg: Any = Depends(get_pg),
 ) -> AuditTrailResponse:
     """Get audit trail by trace_id.
 
@@ -43,7 +43,7 @@ async def get_audit_trail(
     try:
         result = await pg.get_audit_log(trace_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to query audit log: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to query audit log: {e}") from e
 
     if result is None:
         raise HTTPException(status_code=404, detail=f"Audit log not found for trace_id: {trace_id}")

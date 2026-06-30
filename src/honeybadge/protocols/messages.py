@@ -1,9 +1,8 @@
 """WebSocket message protocol for HoneyBadge."""
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -87,7 +86,7 @@ class ProgressPayload(BaseModel):
     step: str = Field(..., description="Current step description")
     step_number: int = Field(..., ge=1, description="Current step number")
     total_steps: int = Field(..., ge=1, description="Total number of steps")
-    detail: Optional[str] = Field(None, description="Optional detail text")
+    detail: str | None = Field(None, description="Optional detail text")
 
 
 class ProgressMessage(BaseModel):
@@ -153,7 +152,7 @@ class ErrorPayload(BaseModel):
 
     code: ErrorCode = Field(..., description="Error code")
     message: str = Field(..., description="Error message")
-    trace_id: Optional[str] = Field(None, description="Associated trace ID")
+    trace_id: str | None = Field(None, description="Associated trace ID")
 
 
 class ErrorMessage(BaseModel):

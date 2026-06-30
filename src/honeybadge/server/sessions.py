@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
 class CreateSessionRequest(BaseModel):
-    title: Optional[str] = None
+    title: str | None = None
 
 
 class UpdateSessionRequest(BaseModel):
@@ -21,7 +21,10 @@ class UpdateSessionRequest(BaseModel):
 
 
 @router.get("")
-async def list_sessions(user=Depends(get_current_user), pg=Depends(get_pg)):
+async def list_sessions(
+    user: dict[str, Any] = Depends(get_current_user),
+    pg: Any = Depends(get_pg),
+) -> list[dict[str, Any]]:
     async with pg._pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT session_id as id, title, created_at, updated_at, message_count, status
@@ -34,7 +37,11 @@ async def list_sessions(user=Depends(get_current_user), pg=Depends(get_pg)):
 
 
 @router.post("")
-async def create_session(body: CreateSessionRequest, user=Depends(get_current_user), pg=Depends(get_pg)):
+async def create_session(
+    body: CreateSessionRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+    pg: Any = Depends(get_pg),
+) -> dict[str, Any]:
     session_id = str(uuid.uuid4())
     title = body.title or "新会话"
     now = datetime.now(timezone.utc)
@@ -50,7 +57,11 @@ async def create_session(body: CreateSessionRequest, user=Depends(get_current_us
 
 
 @router.get("/{session_id}")
-async def get_session(session_id: str, user=Depends(get_current_user), pg=Depends(get_pg)):
+async def get_session(
+    session_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    pg: Any = Depends(get_pg),
+) -> dict[str, Any]:
     async with pg._pool.acquire() as conn:
         row = await conn.fetchrow(
             """SELECT session_id as id, title, created_at, updated_at, message_count, status
@@ -64,7 +75,12 @@ async def get_session(session_id: str, user=Depends(get_current_user), pg=Depend
 
 
 @router.put("/{session_id}")
-async def update_session(session_id: str, body: UpdateSessionRequest, user=Depends(get_current_user), pg=Depends(get_pg)):
+async def update_session(
+    session_id: str,
+    body: UpdateSessionRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+    pg: Any = Depends(get_pg),
+) -> dict[str, Any]:
     async with pg._pool.acquire() as conn:
         result = await conn.execute(
             """UPDATE honeybadge_audit.chat_sessions
@@ -77,7 +93,11 @@ async def update_session(session_id: str, body: UpdateSessionRequest, user=Depen
 
 
 @router.delete("/{session_id}")
-async def delete_session(session_id: str, user=Depends(get_current_user), pg=Depends(get_pg)):
+async def delete_session(
+    session_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    pg: Any = Depends(get_pg),
+) -> dict[str, Any]:
     async with pg._pool.acquire() as conn:
         await conn.execute(
             """UPDATE honeybadge_audit.chat_sessions
@@ -88,7 +108,11 @@ async def delete_session(session_id: str, user=Depends(get_current_user), pg=Dep
 
 
 @router.get("/{session_id}/messages")
-async def get_messages(session_id: str, user=Depends(get_current_user), pg=Depends(get_pg)):
+async def get_messages(
+    session_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    pg: Any = Depends(get_pg),
+) -> list[dict[str, Any]]:
     async with pg._pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT id, session_id, role, content, message_type, metadata, created_at

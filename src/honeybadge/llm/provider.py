@@ -4,7 +4,8 @@ Manages multiple LLM providers with primary/fallback routing and
 model selection based on query complexity.
 """
 
-from typing import Any, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
 import structlog
 
@@ -62,7 +63,7 @@ class LLMProviderManager:
     def __init__(
         self,
         config: dict[str, Any],
-        redis_client: Optional[Any] = None,
+        redis_client: Any | None = None,
     ) -> None:
         """
         Initialize the provider manager.
@@ -93,7 +94,7 @@ class LLMProviderManager:
     def _create_adapter(
         name: str,
         config: dict[str, Any],
-        redis_client: Optional[Any] = None,
+        redis_client: Any | None = None,
     ) -> LLMAdapter:
         """
         Create an LLM adapter from configuration.
@@ -115,7 +116,7 @@ class LLMProviderManager:
         else:
             raise ValueError(f"Unknown adapter type: {adapter_type}")
 
-    def get_provider(self, name: Optional[str] = None) -> LLMAdapter:
+    def get_provider(self, name: str | None = None) -> LLMAdapter:
         """
         Get a provider by name.
 
@@ -135,7 +136,7 @@ class LLMProviderManager:
 
     def get_model(
         self,
-        provider_name: Optional[str] = None,
+        provider_name: str | None = None,
         complexity: str = QueryComplexity.COMPLEX,
     ) -> str:
         """
@@ -152,13 +153,13 @@ class LLMProviderManager:
         provider_config = self._provider_configs.get(name, {})
         models = provider_config.get("models", {})
         default_model = provider_config.get("model", "unknown")
-        return models.get(complexity, default_model)
+        return models.get(complexity, default_model)  # type: ignore[no-any-return]
 
     async def chat(
         self,
         request: LLMRequest,
         query_complexity: str = QueryComplexity.COMPLEX,
-        provider_name: Optional[str] = None,
+        provider_name: str | None = None,
     ) -> LLMResponse:
         """
         Execute chat completion with automatic fallback.
@@ -237,7 +238,7 @@ class LLMProviderManager:
                     e,
                 )
 
-            raise LLMError(f"Unexpected LLM error: {e}")
+            raise LLMError(f"Unexpected LLM error: {e}") from e
 
     async def _chat_with_fallback(
         self,
@@ -287,14 +288,14 @@ class LLMProviderManager:
                 f"Both primary and fallback LLM providers failed. "
                 f"Primary error: {original_error}. "
                 f"Fallback error: {e}"
-            )
+            ) from e
 
     async def chat_stream(
         self,
         request: LLMRequest,
         query_complexity: str = QueryComplexity.COMPLEX,
-        provider_name: Optional[str] = None,
-    ):
+        provider_name: str | None = None,
+    ) -> AsyncIterator[str]:
         """
         Execute streaming chat completion with fallback support.
 
@@ -351,9 +352,9 @@ class LLMProviderManager:
                     raise LLMError(
                         f"Both primary and fallback streaming failed. "
                         f"Original: {e}, Fallback: {fallback_error}"
-                    )
+                    ) from fallback_error
             else:
-                raise LLMError(f"Streaming failed: {e}")
+                raise LLMError(f"Streaming failed: {e}") from e
 
     async def health_check_all(self) -> dict[str, bool]:
         """

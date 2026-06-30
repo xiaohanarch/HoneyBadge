@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import json
 import sys
+from typing import Any
 
 from honeybadge.core.constants import VERSION
 
@@ -30,15 +31,15 @@ def main() -> None:
 
     if args.command == "nebula-mcp":
         sys.path.insert(0, "mcp-servers/honeybadge-nebula-mcp")
-        from server import mcp  # type: ignore[import]
+        from server import mcp  # type: ignore[import-not-found]
         mcp.run(transport="sse", host="0.0.0.0", port=8000)
     elif args.command == "audit-mcp":
         sys.path.insert(0, "mcp-servers/honeybadge-audit-mcp")
-        from server import mcp  # type: ignore[import]
+        from server import mcp
         mcp.run(transport="sse", host="0.0.0.0", port=8000)
     elif args.command == "cache-mcp":
         sys.path.insert(0, "mcp-servers/honeybadge-cache-mcp")
-        from server import mcp  # type: ignore[import]
+        from server import mcp
         mcp.run(transport="sse", host="0.0.0.0", port=8000)
 
 
@@ -47,11 +48,11 @@ def main() -> None:
 # =============================================================================
 
 async def _call_mcp_tool(
-    base_url: str, tool_name: str, arguments: dict, timeout: float = 30.0
-) -> dict:
+    base_url: str, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0
+) -> dict[str, Any]:
     """Call an MCP tool over SSE and return the parsed JSON result."""
-    from mcp.client.sse import sse_client
     from mcp.client.session import ClientSession
+    from mcp.client.sse import sse_client
 
     async with sse_client(f"{base_url}/sse") as (read, write):
         async with ClientSession(read, write) as session:
@@ -62,7 +63,7 @@ async def _call_mcp_tool(
             )
     if result.content and hasattr(result.content[0], "text"):
         try:
-            return json.loads(result.content[0].text)
+            return json.loads(result.content[0].text)  # type: ignore[no-any-return]
         except json.JSONDecodeError:
             return {"text": result.content[0].text}
     return {}

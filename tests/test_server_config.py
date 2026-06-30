@@ -1,8 +1,6 @@
 """Tests for ServerConfig dataclass."""
 
-import os
 
-import pytest
 
 from honeybadge.server.config import ServerConfig
 

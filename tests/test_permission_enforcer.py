@@ -1,23 +1,25 @@
 """Tests for PermissionEnforcer — the L3 hard enforcement gate."""
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
 
 # conftest.py adds mcp-servers/honeybadge-nebula-mcp to sys.path
 from permission_enforcer import PermissionEnforcer, PermissionViolationError
+
 from honeybadge.permission_service.models import PermissionContext
 
 
 def _ctx(**kwargs):
-    defaults = dict(
-        user_id="test",
-        allowed_processes=["PTP"],
-        org_ids=None,
-        dept_ids=None,
-        data_scope="ALL",
-    )
+    defaults = {
+        "user_id": "test",
+        "allowed_processes": ["PTP"],
+        "org_ids": None,
+        "dept_ids": None,
+        "data_scope": "ALL",
+    }
     defaults.update(kwargs)
     return PermissionContext(**defaults)
 

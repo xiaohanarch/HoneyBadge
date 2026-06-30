@@ -18,16 +18,19 @@ Test Coverage:
 """
 import os
 import re
+
 import pytest
 from playwright.sync_api import expect
-from tests.e2e.selectors import (
-    CHAT_TEXTAREA, MSG_ASSISTANT, MSG_USER, SEND_BUTTON,
-    TRACE_ID_LINK, EXECUTION_TIME,
-    CYPHER_COLLAPSE_HEADER, CYPHER_CODE,
-    DATA_COLLAPSE_HEADER, DATA_ROWS, DATA_TABLE,
-    NEW_CHAT_BUTTON, MESSAGES_CONTAINER, PROGRESS_AREA,
-)
 
+from tests.e2e.selectors import (
+    CHAT_TEXTAREA,
+    EXECUTION_TIME,
+    MESSAGES_CONTAINER,
+    MSG_ASSISTANT,
+    NEW_CHAT_BUTTON,
+    PROGRESS_AREA,
+    TRACE_ID_LINK,
+)
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
@@ -60,7 +63,7 @@ class TestChatFunctionality:
         assert len(result["text"]) > 20, f"Response too short: '{result['text'][:50]}'"
 
         # Trace ID should be present
-        assert result["trace_id"], f"No trace ID in response"
+        assert result["trace_id"], "No trace ID in response"
 
     def test_tc103_streaming_response(self, admin_logged_in, wait_for_chat_ready):
         """TC-103: Streaming response shows text growing over time."""

@@ -1,15 +1,9 @@
 """L1-L3 validators for nGQL Anti-Hallucination Framework."""
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import structlog
-
-from honeybadge.core.exceptions import (
-    PermissionValidationError,
-    SchemaValidationError,
-    SyntaxValidationError,
-)
 
 logger = structlog.get_logger()
 
@@ -21,7 +15,7 @@ class ValidationIssue:
     level: str  # "error" or "warning"
     code: str
     message: str
-    position: Optional[int] = None  # Character position in query
+    position: int | None = None  # Character position in query
 
 
 @dataclass
@@ -32,11 +26,11 @@ class ValidationResult:
     errors: list[ValidationIssue] = field(default_factory=list)
     warnings: list[ValidationIssue] = field(default_factory=list)
 
-    def add_error(self, code: str, message: str, position: Optional[int] = None) -> None:
+    def add_error(self, code: str, message: str, position: int | None = None) -> None:
         self.errors.append(ValidationIssue("error", code, message, position))
         self.valid = False
 
-    def add_warning(self, code: str, message: str, position: Optional[int] = None) -> None:
+    def add_warning(self, code: str, message: str, position: int | None = None) -> None:
         self.warnings.append(ValidationIssue("warning", code, message, position))
 
 
@@ -74,7 +68,7 @@ class NgqlValidator:
     L3: Permission filter validation
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize validator."""
         self._schema_tags: dict[str, SchemaTag] = {}
         self._schema_edges: dict[str, SchemaEdge] = {}
@@ -171,7 +165,7 @@ class NgqlValidator:
             starts_valid = True
 
         if not starts_valid and not upper_ngql.startswith("--"):
-            result.add_warning("W001", f"Query does not start with a known keyword")
+            result.add_warning("W001", "Query does not start with a known keyword")
 
         # Check for dangerous write operations
         write_keywords = [
@@ -195,10 +189,9 @@ class NgqlValidator:
         # Check for unqualified property access in MATCH/WHERE
         unqualified_pattern = r"(?<!\.)\b(\w+)\.(\w+)\b(?!\.)"
         matches = re.finditer(unqualified_pattern, ngql_stripped)
-
-        for match in matches:
-            # This is a basic check - actual implementation would be more sophisticated
-            pass
+        # NOTE: unqualified property access check is a stub — the pattern is
+        # detected but not yet wired to result.add_warning. Future work.
+        _ = matches  # placeholder until sophisticated check is implemented
 
         return result
 
@@ -223,8 +216,6 @@ class NgqlValidator:
         if not self._schema_tags:
             result.add_warning("W003", "No schema loaded, skipping L2 validation")
             return result
-
-        ngql_upper = ngql.upper()
 
         # Extract potential tag references
         # In nGQL, tags are often referenced in patterns like:
@@ -358,7 +349,6 @@ class NgqlValidator:
             "RECEIPT",
         ]
 
-        import re
 
         ngql_upper = ngql.upper()
 
@@ -387,7 +377,7 @@ class NgqlValidator:
     def validate(
         self,
         ngql: str,
-        user_context: Optional[dict[str, Any]] = None,
+        user_context: dict[str, Any] | None = None,
     ) -> ValidationResult:
         """
         Run full validation pipeline (L1 + L2 + L3).

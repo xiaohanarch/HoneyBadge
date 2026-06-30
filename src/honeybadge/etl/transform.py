@@ -9,10 +9,10 @@ Key concepts:
     - GraphTransformer: Transforms ODS data into CSV files for nebula-importer
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
@@ -1152,10 +1152,10 @@ class TransformResult:
     """Result of a transformation operation."""
 
     success: bool
-    output_path: Optional[str] = None
+    output_path: str | None = None
     records_processed: int = 0
     records_written: int = 0
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     def __bool__(self) -> bool:
         return self.success
@@ -1442,7 +1442,7 @@ class GraphTransformer:
         """
 
         if incremental:
-            sql += f" AND dq_status = 'passed'"
+            sql += " AND dq_status = 'passed'"
 
         return sql
 
@@ -1473,7 +1473,7 @@ class GraphTransformer:
         """
 
         if incremental:
-            sql += f" AND dq_status = 'passed'"
+            sql += " AND dq_status = 'passed'"
 
         return sql
 

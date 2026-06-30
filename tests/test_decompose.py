@@ -1,12 +1,13 @@
 """Unit tests for question decomposition and cross-reference."""
 from unittest.mock import MagicMock
+
 import pytest
 from common.mcp_client import QueryResult
 from multi_step_analysis.lib.decompose import (
     SubQuery,
-    decompose,
-    cross_reference,
     compare_trends,
+    cross_reference,
+    decompose,
 )
 
 
@@ -21,7 +22,7 @@ class TestSubQuery:
     def test_is_frozen_dataclass(self):
         sq = SubQuery(description="desc", question="q", round=1)
         assert sq.question == "q"
-        with pytest.raises(Exception):
+        with pytest.raises(AttributeError):
             sq.question = "modified"
 
 

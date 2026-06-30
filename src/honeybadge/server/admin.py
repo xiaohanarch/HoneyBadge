@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 @router.get("/users")
-async def list_users(_admin: dict = Depends(require_admin)) -> list[dict[str, Any]]:
+async def list_users(_admin: dict[str, Any] = Depends(require_admin)) -> list[dict[str, Any]]:
     """List all users (admin only).
 
     Returns the demo user store without password hashes.

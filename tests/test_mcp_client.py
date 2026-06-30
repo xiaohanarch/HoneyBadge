@@ -1,7 +1,7 @@
 """Unit tests for MCPClient — mocked subprocess over mcporter."""
 import json
-import subprocess
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 from common.mcp_client import MCPClient, QueryResult
 
@@ -13,7 +13,7 @@ class TestQueryResult:
             rows=[{"a": 1}], row_count=1, execution_time_ms=10, success=True
         )
         assert qr.trace_id == "t1"
-        with pytest.raises(Exception):
+        with pytest.raises(AttributeError):
             qr.trace_id = "modified"  # frozen
 
 

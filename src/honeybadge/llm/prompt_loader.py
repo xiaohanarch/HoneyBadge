@@ -23,12 +23,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 _prompt_cache: dict[str, str] = {}
 """In-memory cache of name → file content. Populated lazily on first access."""
 
-_resolved_dir: Optional[Path] = None
+_resolved_dir: Path | None = None
 """Cached resolved prompts directory. ``None`` means "not resolved yet"."""
 
 
@@ -46,7 +45,7 @@ def _candidate_paths() -> list[Path]:
     return paths
 
 
-def _resolve_dir(explicit: Optional[Path] = None) -> Optional[Path]:
+def _resolve_dir(explicit: Path | None = None) -> Path | None:
     """Return the first existing prompts directory, or ``None`` if none exist."""
     candidates: list[Path] = []
     if explicit is not None:
@@ -58,7 +57,7 @@ def _resolve_dir(explicit: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
-def _get_dir(prompts_dir: Optional[Path] = None) -> Optional[Path]:
+def _get_dir(prompts_dir: Path | None = None) -> Path | None:
     """Resolve (and cache) the prompts directory.
 
     An explicit ``prompts_dir`` bypasses the cache and re-resolves each call,
@@ -72,7 +71,7 @@ def _get_dir(prompts_dir: Optional[Path] = None) -> Optional[Path]:
     return _resolved_dir
 
 
-def load_prompt(name: str, prompts_dir: Optional[Path] = None) -> Optional[str]:
+def load_prompt(name: str, prompts_dir: Path | None = None) -> str | None:
     """Load ``prompts/{name}.md`` and return its content.
 
     Returns ``None`` if the prompts directory or the file is missing. Results

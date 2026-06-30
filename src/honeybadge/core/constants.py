@@ -177,6 +177,7 @@ VID_PREFIX_XLA_EVENT = "XLA"
 VID_PREFIX_ACCT_DIST = "ACD"
 VID_PREFIX_APPROVAL = "APR"
 VID_PREFIX_CONTRACT = "CNT"
+VID_PREFIX_UOM = "UOM"
 
 # =============================================================================
 # Matrix/Chat Configuration

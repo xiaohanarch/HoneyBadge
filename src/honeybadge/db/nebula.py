@@ -1,9 +1,10 @@
 """NebulaGraph database client for HoneyBadge."""
 
 import time
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 import structlog
 from nebula3.Config import Config as NebulaConfig
@@ -22,7 +23,7 @@ class NebulaQueryResult:
     rows: list[dict[str, Any]]
     execution_time_ms: int
     success: bool
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     @property
     def row_count(self) -> int:
@@ -51,7 +52,7 @@ class NebulaGraphClient:
         self.password = password
         self.max_pool_size = max_pool_size
         self.timeout = timeout
-        self._pool: Optional[ConnectionPool] = None
+        self._pool: ConnectionPool | None = None
 
     async def connect(self) -> None:
         """Establish connection pool to NebulaGraph with retry logic."""
@@ -61,7 +62,7 @@ class NebulaGraphClient:
         max_retries = 5
         base_delay = 2  # seconds
 
-        def _connect():
+        def _connect() -> Any:
             config = NebulaConfig()
             config.max_connection_pool_size = self.max_pool_size
             config.timeout = self.timeout
@@ -73,7 +74,6 @@ class NebulaGraphClient:
                 )
             return pool
 
-        last_error = None
         for attempt in range(max_retries):
             try:
                 self._pool = await loop.run_in_executor(None, _connect)
@@ -87,7 +87,6 @@ class NebulaGraphClient:
             except NebulaGraphError:
                 raise
             except Exception as e:
-                last_error = e
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
                     logger.warning(
@@ -103,7 +102,7 @@ class NebulaGraphClient:
                 else:
                     raise NebulaGraphError(
                         f"Failed to connect to NebulaGraph after {max_retries} attempts: {e}"
-                    )
+                    ) from e
 
     async def disconnect(self) -> None:
         """Close connection pool."""
@@ -125,7 +124,7 @@ class NebulaGraphClient:
     async def execute(
         self,
         ngql: str,
-        space: Optional[str] = None,
+        space: str | None = None,
     ) -> NebulaQueryResult:
         """Execute nGQL statement."""
         import asyncio
@@ -133,10 +132,13 @@ class NebulaGraphClient:
         if not self._pool:
             await self.connect()
 
+        assert self._pool is not None  # connect() sets _pool
+
         loop = asyncio.get_running_loop()
         start_time = time.time()
 
-        def _exec():
+        def _exec() -> Any:
+            assert self._pool is not None
             session = self._pool.get_session(self.user, self.password)
             try:
                 if space:
@@ -187,14 +189,13 @@ class NebulaGraphClient:
         except NebulaGraphError:
             raise
         except Exception as e:
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            raise NebulaGraphError(f"Query execution failed: {e}", query=ngql)
+            raise NebulaGraphError(f"Query execution failed: {e}", query=ngql) from e
 
     async def execute_file(
-        self, filepath: str, space: Optional[str] = None
+        self, filepath: str, space: str | None = None
     ) -> list[NebulaQueryResult]:
         """Execute nGQL statements from a file."""
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
         statements = [
@@ -223,12 +224,13 @@ class NebulaSession:
         """Open session."""
         import asyncio
 
-        if not self._client._pool:
+        if not self._client or not self._client._pool:
             raise NebulaGraphError("Client not connected")
 
         loop = asyncio.get_running_loop()
 
-        def _open():
+        def _open() -> Any:
+            assert self._client is not None and self._client._pool is not None
             session = self._client._pool.get_session(
                 self._client.user, self._client.password
             )
@@ -240,7 +242,7 @@ class NebulaSession:
                 )
             return session
 
-        self._session = await loop.run_in_executor(None, _open)
+        self._session = await loop.run_in_executor(None, _open)  # type: ignore[func-returns-value]
 
     async def close(self) -> None:
         """Close session."""
@@ -258,7 +260,7 @@ class NebulaSession:
         loop = asyncio.get_running_loop()
         start_time = time.time()
 
-        def _exec():
+        def _exec() -> Any:
             result = self._session.execute(ngql)
             execution_time_ms = int((time.time() - start_time) * 1000)
 

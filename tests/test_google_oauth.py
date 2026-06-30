@@ -1,6 +1,7 @@
 """Tests for google_oauth module."""
 import os
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 # Set environment variables before importing the module under test
@@ -30,7 +31,7 @@ class TestGoogleOAuth:
             "id_token": "test-id-token",
             "token_type": "Bearer"
         })
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_response):
             result = await _exchange_code_for_tokens("test-code")
             assert result["access_token"] == "test-access-token"
             assert result["id_token"] == "test-id-token"
@@ -47,7 +48,7 @@ class TestGoogleOAuth:
             "name": "Test User",
             "picture": "https://example.com/pic.jpg"
         })
-        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response) as mock_get:
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
             result = await _fetch_google_userinfo("test-access-token")
             assert result["sub"] == "123456789"
             assert result["email"] == "testuser@gmail.com"
@@ -75,6 +76,7 @@ class TestGoogleOAuth:
     def test_verify_state_tampered_signature_rejected(self):
         """Verify that a state with tampered signature is rejected."""
         import os
+
         from honeybadge.auth_service.google_oauth import _build_state, _verify_state
         os.environ["STATE_SECRET"] = "test-secret"
         state = _build_state()
@@ -86,6 +88,7 @@ class TestGoogleOAuth:
     def test_verify_state_wrong_secret_rejected(self):
         """Verify that a state built with different secret fails verification."""
         import os
+
         from honeybadge.auth_service.google_oauth import _build_state, _verify_state
         os.environ["STATE_SECRET"] = "secret-one"
         state = _build_state()
@@ -96,6 +99,7 @@ class TestGoogleOAuth:
     def test_build_state_produces_hmac_signed_token(self):
         """Verify _build_state produces properly formatted HMAC-signed token."""
         import os
+
         from honeybadge.auth_service.google_oauth import _build_state, _verify_state
         os.environ["STATE_SECRET"] = "consistent-secret"
         state = _build_state()

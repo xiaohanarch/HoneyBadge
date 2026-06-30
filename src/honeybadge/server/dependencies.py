@@ -1,6 +1,7 @@
 """FastAPI dependency injection for DB clients and orchestrator."""
 
-from typing import Optional
+
+from typing import Any
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -12,8 +13,8 @@ security = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> dict:
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> dict[str, Any]:
     """Extract and validate JWT from Authorization header."""
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -31,7 +32,7 @@ async def get_current_user(
     return payload
 
 
-async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     """Verify the authenticated user has the 'admin' role.
 
     Use as a route dependency to enforce admin-only access at the REST API
@@ -43,17 +44,17 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
-def get_pg(request: Request):
+def get_pg(request: Request) -> Any:
     return request.app.state.pg
 
 
-def get_redis(request: Request):
+def get_redis(request: Request) -> Any:
     return request.app.state.redis
 
 
-def get_nebula(request: Request):
+def get_nebula(request: Request) -> Any:
     return request.app.state.nebula
 
 
-def get_orchestrator(request: Request):
+def get_orchestrator(request: Request) -> Any:
     return request.app.state.orchestrator

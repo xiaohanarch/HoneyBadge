@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import redis.asyncio as aioredis
 import structlog
@@ -24,7 +24,7 @@ class RedisClient:
         host: str = "localhost",
         port: int = 6379,
         db: int = 0,
-        password: Optional[str] = None,
+        password: str | None = None,
         session_prefix: str = "session",
         cache_prefix: str = "cache",
     ):
@@ -34,7 +34,7 @@ class RedisClient:
         self.password = password
         self.session_prefix = session_prefix
         self.cache_prefix = cache_prefix
-        self._client: Optional[aioredis.Redis] = None
+        self._client: aioredis.Redis | None = None
 
     async def connect(self) -> None:
         """Connect to Redis."""
@@ -49,7 +49,7 @@ class RedisClient:
             await self._client.ping()
             logger.info("redis_connected", host=self.host, port=self.port, db=self.db)
         except Exception as e:
-            raise RedisError(f"Failed to connect to Redis: {e}")
+            raise RedisError(f"Failed to connect to Redis: {e}") from e
 
     async def disconnect(self) -> None:
         """Disconnect from Redis."""
@@ -69,7 +69,7 @@ class RedisClient:
     # Session Operations
     # =========================================================================
 
-    async def get_session(self, user_id: str, session_id: str) -> Optional[dict[str, Any]]:
+    async def get_session(self, user_id: str, session_id: str) -> dict[str, Any] | None:
         """Get session data."""
         if not self._client:
             raise RedisError("Not connected to Redis")
@@ -78,7 +78,9 @@ class RedisClient:
         data = await self._client.hgetall(key)
         if not data:
             return None
-        return self._deserialize_session(data)
+        # decode_responses=True ensures str keys/values, but the redis-py
+        # type stubs still report bytes|str. Cast to the runtime type.
+        return self._deserialize_session(dict(data))  # type: ignore[arg-type]
 
     async def set_session(
         self,
@@ -93,7 +95,7 @@ class RedisClient:
 
         key = f"{self.session_prefix}:{user_id}:{session_id}"
         serialized = self._serialize_session(data)
-        await self._client.hset(key, mapping=serialized)
+        await self._client.hset(key, mapping=serialized)  # type: ignore[arg-type]
         await self._client.expire(key, ttl)
         return True
 
@@ -110,7 +112,7 @@ class RedisClient:
     # Cache Operations
     # =========================================================================
 
-    async def get_cache(self, key: str) -> Optional[Any]:
+    async def get_cache(self, key: str) -> Any | None:
         """Get cached value."""
         if not self._client:
             raise RedisError("Not connected to Redis")
@@ -166,7 +168,7 @@ class RedisClient:
 
     def _deserialize_session(self, data: dict[str, str]) -> dict[str, Any]:
         """Deserialize session data from Redis hash."""
-        result = {}
+        result: dict[str, Any] = {}
         for key, value in data.items():
             if key in ("created_at", "last_active"):
                 try:

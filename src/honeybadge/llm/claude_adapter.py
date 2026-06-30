@@ -2,8 +2,8 @@
 
 import json
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Optional
 
 import httpx
 import structlog
@@ -23,7 +23,7 @@ class ClaudeResponse:
     finish_reason: str
     latency_ms: int
     success: bool = True
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 class ClaudeAdapter:
@@ -54,7 +54,7 @@ class ClaudeAdapter:
         self.endpoint = endpoint.rstrip("/")
         self.version = version
         self.timeout = timeout
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""

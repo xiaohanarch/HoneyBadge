@@ -5,7 +5,6 @@ mcporter on worker side must point to /mcp (not /sse).
 """
 import pathlib
 
-
 SERVERS = [
     "mcp-servers/honeybadge-nebula-mcp/server.py",
     "mcp-servers/honeybadge-audit-mcp/server.py",

@@ -8,9 +8,10 @@ import asyncio
 import json
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, AsyncIterator, Optional
+from typing import Any
 
 import httpx
 import structlog
@@ -51,12 +52,12 @@ class LLMRequest:
     """
 
     messages: list[dict[str, str]]
-    model: Optional[str] = None
+    model: str | None = None
     temperature: float = 0.1
     max_tokens: int = 4096
     stream: bool = False
-    trace_id: Optional[str] = None
-    user_id: Optional[str] = None
+    trace_id: str | None = None
+    user_id: str | None = None
 
 
 @dataclass
@@ -115,7 +116,7 @@ class LLMAdapter(ABC):
         ...
 
     @abstractmethod
-    async def chat_stream(self, request: LLMRequest) -> AsyncIterator[str]:
+    def chat_stream(self, request: LLMRequest) -> AsyncIterator[str]:
         """
         Streaming chat completion.
 
@@ -177,7 +178,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
     def __init__(
         self,
         config: dict[str, Any],
-        redis_client: Optional[Any] = None,
+        redis_client: Any | None = None,
     ) -> None:
         """
         Initialize OpenAI-compatible adapter.
@@ -198,15 +199,15 @@ class OpenAICompatibleAdapter(LLMAdapter):
         self.rate_limit = config.get("rate_limit", {})
 
         self._redis_client = redis_client
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
         # Token meter (initialized later with Redis client if available)
-        self._token_meter: Optional[TokenMeter] = None
+        self._token_meter: TokenMeter | None = None
         if redis_client:
             self._token_meter = TokenMeter(redis_client)
 
         # Rate limiter
-        self._rate_limiter: Optional[TokenRateLimiter] = None
+        self._rate_limiter: TokenRateLimiter | None = None
         if self.rate_limit and redis_client:
             self._rate_limiter = TokenRateLimiter(
                 redis_client,
@@ -353,7 +354,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
 
             response.raise_for_status()
 
-        except httpx.TimeoutException as e:
+        except httpx.TimeoutException:
             latency_ms = int((time.monotonic() - start_time) * 1000)
             logger.error(
                 "llm_timeout",
@@ -361,7 +362,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 latency_ms=latency_ms,
                 trace_id=request.trace_id,
             )
-            raise LLMTimeoutError(f"LLM request timed out after {self.timeout}s")
+            raise LLMTimeoutError(f"LLM request timed out after {self.timeout}s") from None
 
         except httpx.HTTPError as e:
             latency_ms = int((time.monotonic() - start_time) * 1000)
@@ -371,7 +372,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 latency_ms=latency_ms,
                 trace_id=request.trace_id,
             )
-            raise LLMError(f"LLM HTTP error: {e}")
+            raise LLMError(f"LLM HTTP error: {e}") from e
 
         data = response.json()
         latency_ms = int((time.monotonic() - start_time) * 1000)
@@ -465,9 +466,9 @@ class OpenAICompatibleAdapter(LLMAdapter):
                         break
 
         except httpx.TimeoutException:
-            raise LLMTimeoutError(f"LLM streaming request timed out after {self.timeout}s")
+            raise LLMTimeoutError(f"LLM streaming request timed out after {self.timeout}s") from None
         except httpx.HTTPError as e:
-            raise LLMError(f"LLM streaming HTTP error: {e}")
+            raise LLMError(f"LLM streaming HTTP error: {e}") from e
 
     async def health_check(self) -> bool:
         """
@@ -487,7 +488,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
     @property
     def default_model(self) -> str:
         """Get the default model identifier."""
-        return self.default_model_name
+        return self.default_model_name  # type: ignore[no-any-return]
 
 
 # =============================================================================
@@ -552,7 +553,7 @@ class TokenMeter:
     async def get_usage(
         self,
         user_id: str,
-        date: Optional[str] = None,
+        date: str | None = None,
     ) -> int:
         """
         Get user's token usage for a specific day.
@@ -571,7 +572,7 @@ class TokenMeter:
 
     async def get_global_usage(
         self,
-        date: Optional[str] = None,
+        date: str | None = None,
     ) -> int:
         """
         Get global token usage for a specific day.
@@ -590,7 +591,7 @@ class TokenMeter:
     async def get_model_usage(
         self,
         model: str,
-        date: Optional[str] = None,
+        date: str | None = None,
     ) -> int:
         """
         Get token usage for a specific model on a specific day.
@@ -698,8 +699,8 @@ async def generate_ngql(
     question: str,
     schema_info: str,
     ontology_info: str,
-    user_context: Optional[dict[str, Any]] = None,
-    trace_id: Optional[str] = None,
+    user_context: dict[str, Any] | None = None,
+    trace_id: str | None = None,
 ) -> LLMResponse:
     """
     Generate nGQL query from natural language question.
@@ -921,7 +922,7 @@ LIMIT 5
         raise LLMGenerationError(
             f"Failed to generate nGQL from question: {e}",
             question=question,
-        )
+        ) from e
 
 
 async def summarize_results(
@@ -929,8 +930,8 @@ async def summarize_results(
     question: str,
     raw_results: list[dict[str, Any]],
     columns: list[str],
-    trace_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    trace_id: str | None = None,
+    user_id: str | None = None,
 ) -> LLMResponse:
     """
     Generate human-readable summary of query results.
@@ -1042,4 +1043,4 @@ async def summarize_results(
             result_count=len(raw_results),
             trace_id=trace_id,
         )
-        raise LLMSummarizationError(f"Failed to summarize results: {e}")
+        raise LLMSummarizationError(f"Failed to summarize results: {e}") from e

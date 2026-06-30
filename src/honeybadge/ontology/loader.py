@@ -28,8 +28,6 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
-
 
 _ALWAYS_INCLUDE = {"overview"}
 _CONSTRAINTS_KEY = "constraints"
@@ -95,13 +93,13 @@ def _default_search_paths() -> list[Path]:
 class OntologyLoader:
     """Loads per-domain ontology markdown files and routes questions to domains."""
 
-    def __init__(self, ontology_dir: Optional[Path] = None) -> None:
+    def __init__(self, ontology_dir: Path | None = None) -> None:
         self.ontology_dir: Path = self._resolve_dir(ontology_dir)
         self._domains: dict[str, OntologyDomain] = {}
         self._loaded: bool = False
 
     @staticmethod
-    def _resolve_dir(explicit: Optional[Path]) -> Path:
+    def _resolve_dir(explicit: Path | None) -> Path:
         candidates: list[Path] = []
         if explicit is not None:
             candidates.append(Path(explicit))
@@ -155,7 +153,7 @@ class OntologyLoader:
         self._ensure_loaded()
         return sorted(self._domains.keys())
 
-    def get_domain(self, key: str) -> Optional[OntologyDomain]:
+    def get_domain(self, key: str) -> OntologyDomain | None:
         self._ensure_loaded()
         return self._domains.get(key)
 
@@ -233,7 +231,7 @@ class OntologyLoader:
 
 # ---------------------------------------------------------------------- singleton
 
-_default_loader: Optional[OntologyLoader] = None
+_default_loader: OntologyLoader | None = None
 
 
 def get_loader() -> OntologyLoader:

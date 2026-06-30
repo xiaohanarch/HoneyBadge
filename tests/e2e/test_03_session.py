@@ -13,12 +13,15 @@ Test Coverage:
 - TC-208: Export session conversation
 """
 import os
+
 import pytest
 from playwright.sync_api import expect
-from tests.e2e.selectors import (
-    NEW_CHAT_BUTTON, SESSION_ITEM, MSG_ASSISTANT,
-)
 
+from tests.e2e.selectors import (
+    MSG_ASSISTANT,
+    NEW_CHAT_BUTTON,
+    SESSION_ITEM,
+)
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
@@ -177,7 +180,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create enough sessions to trigger pagination
-        for i in range(15):
+        for _ in range(15):
             new_session_btn = page.locator(NEW_CHAT_BUTTON)
             if new_session_btn.count() > 0:
                 new_session_btn.first.click()

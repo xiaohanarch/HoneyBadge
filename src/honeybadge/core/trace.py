@@ -1,11 +1,11 @@
 """Trace ID generation for HoneyBadge audit logging."""
 
-from datetime import datetime
-from typing import Optional
 import uuid
+from datetime import datetime
+from typing import Any
 
 
-def generate_trace_id(prefix: Optional[str] = "TRC") -> str:
+def generate_trace_id(prefix: str | None = "TRC") -> str:
     """
     Generate a unique trace ID for audit logging.
 
@@ -27,7 +27,7 @@ def generate_trace_id(prefix: Optional[str] = "TRC") -> str:
     return f"{prefix}-{date_part}-{time_part}-{uuid_part}"
 
 
-def parse_trace_id(trace_id: str) -> dict:
+def parse_trace_id(trace_id: str) -> dict[str, Any]:
     """
     Parse a trace ID into its components.
 

@@ -1,7 +1,7 @@
 """L2 schema cache for Anti-Hallucination Framework (L2 Schema Validation)."""
 from dataclasses import dataclass, field
 
-from honeybadge.protocols.validator import SchemaTag, SchemaEdge, SchemaProperty
+from honeybadge.protocols.validator import SchemaEdge, SchemaTag
 
 
 @dataclass
