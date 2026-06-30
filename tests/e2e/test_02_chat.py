@@ -17,7 +17,6 @@ Test Coverage:
 - TC-112: Raw data toggle
 """
 import os
-import platform
 import re
 import pytest
 from playwright.sync_api import expect
@@ -169,21 +168,18 @@ class TestChatFunctionality:
         # Response should contain some numeric data (referencing previous context)
         assert len(result["text"]) > 10, "Context follow-up response too short"
 
-    @pytest.mark.skip(
-        reason=(
-            "tc110 sends 3 sequential queries, each ~60s. With pytest --timeout=300 "
-            "the timeout thread kill triggers an asyncio deadlock in playwright's "
-            "sync API: MainThread blocks in selector.poll inside greenlet_main, and "
-            "asyncio's child watcher thread blocks in os.waitpid. The deadlock occurs "
-            "on Linux/ECS too (originally observed only on Windows). When the timeout "
-            "fires, pytest-timeout cannot safely kill the thread, so it terminates "
-            "the entire pytest process — abandoning all subsequent tests. "
-            "Skip unconditionally until tc110 is rewritten with shorter steps or the "
-            "playwright async API. Tracked in docs/1.1.0-upgrade-followups.md Bucket 4."
-        ),
-    )
-    def test_tc110_multiple_queries_with_traces(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
-        """TC-110: Multiple queries each produce responses with unique trace IDs."""
+    @pytest.mark.timeout(600)
+    def test_tc110_multiple_queries_with_traces(
+        self, reset_manager, admin_logged_in, wait_for_chat_ready, send_query_and_get_response
+    ):
+        """TC-110: Multiple queries each produce responses with unique trace IDs.
+
+        3 sequential queries × ~60s = ~180s with a fresh Manager. The 600s timeout
+        gives ample headroom so pytest-timeout never fires mid-query (the thread-kill
+        deadlock with Playwright sync API happens when the timeout interrupts a query
+        in flight). reset_manager ensures each query completes in ~60s instead of
+        hitting the 240s Stage-1 timeout from glm-5.2 repetition loops at 5-10 turns.
+        """
         page = admin_logged_in
         wait_for_chat_ready()
 
@@ -204,17 +200,17 @@ class TestChatFunctionality:
         if len(trace_ids) >= 2:
             assert len(set(trace_ids)) == len(trace_ids), f"Duplicate trace IDs: {trace_ids}"
 
-    @pytest.mark.skipif(
-        platform.system() == "Windows",
-        reason=(
-            "Same Python 3.14 + asyncio + Playwright + pytest-timeout deadlock as TC-110 "
-            "(see docs/1.1.0-upgrade-followups.md Bucket 4). Test infra issue on Windows only; "
-            "runs fine on Linux/ECS now that TC-105 (PR #62 + #63) seeded data and TC-102 (PR #64) "
-            "delivers contract-002 with execution_time_ms."
-        ),
-    )
-    def test_tc111_execution_time_display(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-111: Execution time is displayed in response."""
+    @pytest.mark.timeout(600)
+    def test_tc111_execution_time_display(
+        self, reset_manager, admin_logged_in, wait_for_chat_ready, send_chat_query
+    ):
+        """TC-111: Execution time is displayed in response.
+
+        Single query (~60-90s) is well within the 600s safety timeout. The
+        Windows-only skipif was overly cautious — the deadlock concern only
+        applies when pytest-timeout interrupts a long-running multi-query test.
+        reset_manager prevents accumulated-turn repetition from TC-110.
+        """
         page = admin_logged_in
         wait_for_chat_ready()
 
