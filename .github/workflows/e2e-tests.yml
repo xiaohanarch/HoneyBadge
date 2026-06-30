@@ -32,7 +32,7 @@ jobs:
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
 
     steps:
       - name: Checkout
@@ -193,6 +193,25 @@ jobs:
           exit 1
         timeout-minutes: 2
 
+      - name: Diagnose LLM connectivity
+        continue-on-error: true
+        run: |
+          echo "=== Testing aigw-bypass proxy ==="
+          # Test that the aigw-bypass nginx proxy can reach the upstream LLM API
+          timeout 30 docker exec honeybadge-hiclaw-aigw-bypass curl -sS -o /dev/null -w "%{http_code}" \
+            -X POST http://localhost:8080/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -d '{"model":"glm-4-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' \
+            2>&1 || echo "(curl failed)"
+          echo ""
+          echo "=== aigw-bypass error log (last 20 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-aigw-bypass tail -20 /var/log/nginx/error.log 2>/dev/null || echo "(no error log)"
+          echo "=== Manager openclaw process ==="
+          timeout 10 docker exec honeybadge-hiclaw-manager pgrep -fa openclaw 2>/dev/null || echo "(openclaw not running)"
+          echo "=== Manager init log tail ==="
+          timeout 10 docker exec honeybadge-hiclaw-manager tail -20 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || echo "(no init log)"
+        timeout-minutes: 5
+
       - name: Run E2E Tests - Auth & Chat
         if: github.event.inputs.test_filter == '' || contains('auth,chat', github.event.inputs.test_filter)
         run: |
@@ -257,14 +276,23 @@ jobs:
           retention-days: 7
 
       - name: Dump container logs on failure
-        if: failure()
+        if: failure() || cancelled()
         run: |
           echo "=== Docker ps ==="
           docker ps -a
           echo "=== Compose logs (tail=2000) ==="
           docker compose -f deploy/docker/docker-compose.yaml logs --tail=2000 || true
           echo "=== Manager init log (background init — invisible in compose logs) ==="
-          docker exec honeybadge-hiclaw-manager cat /var/log/hiclaw/honeybadge-init.log 2>/dev/null || echo "(init log not available)"
+          timeout 10 docker exec honeybadge-hiclaw-manager cat /var/log/hiclaw/honeybadge-init.log 2>/dev/null || echo "(init log not available)"
+          echo "=== aigw-bypass access log (last 50 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-aigw-bypass tail -50 /var/log/nginx/access.log 2>/dev/null || echo "(access log not available)"
+          echo "=== aigw-bypass error log (last 50 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-aigw-bypass tail -50 /var/log/nginx/error.log 2>/dev/null || echo "(error log not available)"
+          echo "=== Worker openclaw.json (graph-worker) ==="
+          timeout 10 docker exec honeybadge-hiclaw-graph-worker cat /root/hiclaw-fs/agents/graph-worker/openclaw.json 2>/dev/null || echo "(openclaw.json not available)"
+          echo "=== Manager state.json ==="
+          timeout 10 docker exec honeybadge-hiclaw-manager cat /root/hiclaw-fs/agents/manager/state.json 2>/dev/null || echo "(state.json not available)"
+        timeout-minutes: 10
 
   # ===========================================================================
   # Test Summary — runs after e2e, posts a step-summary table.
