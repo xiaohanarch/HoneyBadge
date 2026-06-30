@@ -46,7 +46,7 @@
           <el-tag :type="connected ? 'success' : 'danger'" size="small">
             {{ connected ? '已连接' : '未连接' }}
           </el-tag>
-          <el-dropdown @command="handleUserCommand">
+          <el-dropdown trigger="click" @command="handleUserCommand">
             <span class="user-avatar">
               <el-avatar :size="32" :icon="UserFilled" />
             </span>

@@ -29,7 +29,7 @@ SESSION_TITLE = '.session-title'
 SESSION_ACTIONS = '.session-actions'
 NEW_CHAT_BUTTON = 'button:has-text("新对话")'
 USER_AVATAR = '.user-avatar'
-LOGOUT_ITEM = '.el-dropdown-item:has-text("退出登录")'
+LOGOUT_ITEM = '.el-dropdown-menu__item:has-text("退出登录")'
 
 # =============================================================================
 # Messages (ChatMessage.vue)
