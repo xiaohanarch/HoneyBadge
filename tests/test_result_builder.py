@@ -1,8 +1,7 @@
 """Unit tests for result_builder — replaces SOUL.md heredoc."""
 import json
-from pathlib import Path
-import pytest
-from common.result_builder import TaskResult, build, _parse_summary
+
+from common.result_builder import TaskResult, _parse_summary, build
 
 
 class TestParseSummary:

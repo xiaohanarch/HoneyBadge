@@ -1,6 +1,7 @@
 """Health check router."""
 
 from fastapi import APIRouter, Request
+
 from honeybadge.core.constants import VERSION
 
 router = APIRouter(prefix="/api", tags=["system"])

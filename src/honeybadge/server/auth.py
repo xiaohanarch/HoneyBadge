@@ -16,7 +16,7 @@ strong secrets loaded from environment variables via ServerConfig.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -84,7 +84,7 @@ _ALGORITHM = "HS256"
 # ---------------------------------------------------------------------------
 
 
-def authenticate_user(username: str, password: str) -> Optional[dict[str, Any]]:
+def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
     """Verify username and password against the demo user store.
 
     Args:
@@ -138,7 +138,7 @@ def create_refresh_token(data: dict[str, Any], secret: str, expire_days: int) ->
     return jwt.encode(payload, secret, algorithm=_ALGORITHM)
 
 
-def decode_token(token: str, secret: str) -> Optional[dict[str, Any]]:
+def decode_token(token: str, secret: str) -> dict[str, Any] | None:
     """Decode and verify a JWT token.
 
     Returns None on any error: expired, invalid signature, malformed, etc.

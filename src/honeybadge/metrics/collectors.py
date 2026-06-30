@@ -4,9 +4,8 @@ Defines all Prometheus metrics used in the HoneyBadge system organized by compon
 All metrics follow the pattern: honeybadge_{component}_{name}
 """
 
-from prometheus_client import Counter, Histogram, Gauge, Info, REGISTRY, CollectorRegistry
-from typing import Optional
 
+from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge, Histogram
 
 # =============================================================================
 # LLM Metrics
@@ -24,7 +23,7 @@ class LLMMetricsCollector:
     - llm_provider_health: Provider health status (gauge, labels: provider)
     """
 
-    def __init__(self, registry: Optional[CollectorRegistry] = None) -> None:
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
         """Initialize LLM metrics collectors."""
         self._registry = registry or REGISTRY
 
@@ -146,7 +145,7 @@ class NebulaMetricsCollector:
     - nebula_session_duration_seconds: Session lifetime histogram
     """
 
-    def __init__(self, registry: Optional[CollectorRegistry] = None) -> None:
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
         """Initialize NebulaGraph metrics collectors."""
         self._registry = registry or REGISTRY
 
@@ -266,7 +265,7 @@ class HiClawMetricsCollector:
     - hiclaw_task_errors_total: Task errors (counter)
     """
 
-    def __init__(self, registry: Optional[CollectorRegistry] = None) -> None:
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
         """Initialize HiClaw metrics collectors."""
         self._registry = registry or REGISTRY
 
@@ -392,7 +391,7 @@ class ValidationMetricsCollector:
     - validation_duration_seconds: Validation time histogram
     """
 
-    def __init__(self, registry: Optional[CollectorRegistry] = None) -> None:
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
         """Initialize validation metrics collectors."""
         self._registry = registry or REGISTRY
 
@@ -467,7 +466,7 @@ class QueryMetricsCollector:
     - query_e2e_duration_seconds: Full chain duration including LLM+validation+execution
     """
 
-    def __init__(self, registry: Optional[CollectorRegistry] = None) -> None:
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
         """Initialize query metrics collectors."""
         self._registry = registry or REGISTRY
 

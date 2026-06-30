@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import asyncpg
 import structlog
@@ -25,7 +25,7 @@ class AuditLogEntry:
     session_id: str
     execution_time_ms: int
     row_count: int
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 class PostgreSQLClient:
@@ -52,7 +52,7 @@ class PostgreSQLClient:
         self.database = database
         self.min_pool_size = min_pool_size
         self.max_pool_size = max_pool_size
-        self._pool: Optional[asyncpg.Pool] = None
+        self._pool: asyncpg.Pool | None = None
 
     async def connect(self) -> None:
         """Connect to PostgreSQL and create pool."""
@@ -182,7 +182,7 @@ class PostgreSQLClient:
             logger.error("audit_log_write_failed", trace_id=entry.trace_id, error=str(e))
             raise PostgreSQLError(f"Failed to write audit log: {e}")
 
-    async def get_audit_log(self, trace_id: str) -> Optional[dict[str, Any]]:
+    async def get_audit_log(self, trace_id: str) -> dict[str, Any] | None:
         """Get audit log entry by trace_id."""
         if not self._pool:
             raise PostgreSQLError("Not connected to PostgreSQL")

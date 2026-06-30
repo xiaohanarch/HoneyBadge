@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import redis.asyncio as aioredis
 import structlog
@@ -24,7 +24,7 @@ class RedisClient:
         host: str = "localhost",
         port: int = 6379,
         db: int = 0,
-        password: Optional[str] = None,
+        password: str | None = None,
         session_prefix: str = "session",
         cache_prefix: str = "cache",
     ):
@@ -34,7 +34,7 @@ class RedisClient:
         self.password = password
         self.session_prefix = session_prefix
         self.cache_prefix = cache_prefix
-        self._client: Optional[aioredis.Redis] = None
+        self._client: aioredis.Redis | None = None
 
     async def connect(self) -> None:
         """Connect to Redis."""
@@ -69,7 +69,7 @@ class RedisClient:
     # Session Operations
     # =========================================================================
 
-    async def get_session(self, user_id: str, session_id: str) -> Optional[dict[str, Any]]:
+    async def get_session(self, user_id: str, session_id: str) -> dict[str, Any] | None:
         """Get session data."""
         if not self._client:
             raise RedisError("Not connected to Redis")
@@ -110,7 +110,7 @@ class RedisClient:
     # Cache Operations
     # =========================================================================
 
-    async def get_cache(self, key: str) -> Optional[Any]:
+    async def get_cache(self, key: str) -> Any | None:
         """Get cached value."""
         if not self._client:
             raise RedisError("Not connected to Redis")

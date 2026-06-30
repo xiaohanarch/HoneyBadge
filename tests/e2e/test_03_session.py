@@ -13,12 +13,15 @@ Test Coverage:
 - TC-208: Export session conversation
 """
 import os
+
 import pytest
 from playwright.sync_api import expect
-from tests.e2e.selectors import (
-    NEW_CHAT_BUTTON, SESSION_ITEM, MSG_ASSISTANT,
-)
 
+from tests.e2e.selectors import (
+    MSG_ASSISTANT,
+    NEW_CHAT_BUTTON,
+    SESSION_ITEM,
+)
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 

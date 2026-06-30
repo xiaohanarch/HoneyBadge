@@ -1,6 +1,6 @@
 """Debug TC105: capture page state during query."""
 import json
-import pytest
+
 from playwright.sync_api import Page
 
 

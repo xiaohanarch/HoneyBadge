@@ -9,7 +9,6 @@ import pytest
 
 from honeybadge.ontology import OntologyLoader, get_loader
 
-
 # --------------------------------------------------------------------- fixtures
 
 

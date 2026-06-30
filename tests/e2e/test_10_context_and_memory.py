@@ -20,12 +20,13 @@ RBP + LLM Context Value:
 - 每个用户看到的只有自己的会话列表和消息历史
 """
 import pytest
-from playwright.sync_api import expect
+
 from tests.e2e.conftest import send_query_on_page
 from tests.e2e.selectors import (
-    CHAT_TEXTAREA, MSG_ASSISTANT, NEW_CHAT_BUTTON,
+    CHAT_TEXTAREA,
+    MSG_ASSISTANT,
+    NEW_CHAT_BUTTON,
 )
-
 
 BASE_URL = "http://localhost:3000"
 

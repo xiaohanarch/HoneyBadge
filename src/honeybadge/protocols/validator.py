@@ -1,15 +1,9 @@
 """L1-L3 validators for nGQL Anti-Hallucination Framework."""
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import structlog
-
-from honeybadge.core.exceptions import (
-    PermissionValidationError,
-    SchemaValidationError,
-    SyntaxValidationError,
-)
 
 logger = structlog.get_logger()
 
@@ -21,7 +15,7 @@ class ValidationIssue:
     level: str  # "error" or "warning"
     code: str
     message: str
-    position: Optional[int] = None  # Character position in query
+    position: int | None = None  # Character position in query
 
 
 @dataclass
@@ -32,11 +26,11 @@ class ValidationResult:
     errors: list[ValidationIssue] = field(default_factory=list)
     warnings: list[ValidationIssue] = field(default_factory=list)
 
-    def add_error(self, code: str, message: str, position: Optional[int] = None) -> None:
+    def add_error(self, code: str, message: str, position: int | None = None) -> None:
         self.errors.append(ValidationIssue("error", code, message, position))
         self.valid = False
 
-    def add_warning(self, code: str, message: str, position: Optional[int] = None) -> None:
+    def add_warning(self, code: str, message: str, position: int | None = None) -> None:
         self.warnings.append(ValidationIssue("warning", code, message, position))
 
 
@@ -171,7 +165,7 @@ class NgqlValidator:
             starts_valid = True
 
         if not starts_valid and not upper_ngql.startswith("--"):
-            result.add_warning("W001", f"Query does not start with a known keyword")
+            result.add_warning("W001", "Query does not start with a known keyword")
 
         # Check for dangerous write operations
         write_keywords = [
@@ -358,7 +352,6 @@ class NgqlValidator:
             "RECEIPT",
         ]
 
-        import re
 
         ngql_upper = ngql.upper()
 
@@ -387,7 +380,7 @@ class NgqlValidator:
     def validate(
         self,
         ngql: str,
-        user_context: Optional[dict[str, Any]] = None,
+        user_context: dict[str, Any] | None = None,
     ) -> ValidationResult:
         """
         Run full validation pipeline (L1 + L2 + L3).

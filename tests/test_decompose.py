@@ -1,12 +1,13 @@
 """Unit tests for question decomposition and cross-reference."""
 from unittest.mock import MagicMock
+
 import pytest
 from common.mcp_client import QueryResult
 from multi_step_analysis.lib.decompose import (
     SubQuery,
-    decompose,
-    cross_reference,
     compare_trends,
+    cross_reference,
+    decompose,
 )
 
 

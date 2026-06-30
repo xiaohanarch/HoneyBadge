@@ -4,7 +4,7 @@ Manages multiple LLM providers with primary/fallback routing and
 model selection based on query complexity.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
@@ -62,7 +62,7 @@ class LLMProviderManager:
     def __init__(
         self,
         config: dict[str, Any],
-        redis_client: Optional[Any] = None,
+        redis_client: Any | None = None,
     ) -> None:
         """
         Initialize the provider manager.
@@ -93,7 +93,7 @@ class LLMProviderManager:
     def _create_adapter(
         name: str,
         config: dict[str, Any],
-        redis_client: Optional[Any] = None,
+        redis_client: Any | None = None,
     ) -> LLMAdapter:
         """
         Create an LLM adapter from configuration.
@@ -115,7 +115,7 @@ class LLMProviderManager:
         else:
             raise ValueError(f"Unknown adapter type: {adapter_type}")
 
-    def get_provider(self, name: Optional[str] = None) -> LLMAdapter:
+    def get_provider(self, name: str | None = None) -> LLMAdapter:
         """
         Get a provider by name.
 
@@ -135,7 +135,7 @@ class LLMProviderManager:
 
     def get_model(
         self,
-        provider_name: Optional[str] = None,
+        provider_name: str | None = None,
         complexity: str = QueryComplexity.COMPLEX,
     ) -> str:
         """
@@ -158,7 +158,7 @@ class LLMProviderManager:
         self,
         request: LLMRequest,
         query_complexity: str = QueryComplexity.COMPLEX,
-        provider_name: Optional[str] = None,
+        provider_name: str | None = None,
     ) -> LLMResponse:
         """
         Execute chat completion with automatic fallback.
@@ -293,7 +293,7 @@ class LLMProviderManager:
         self,
         request: LLMRequest,
         query_complexity: str = QueryComplexity.COMPLEX,
-        provider_name: Optional[str] = None,
+        provider_name: str | None = None,
     ):
         """
         Execute streaming chat completion with fallback support.

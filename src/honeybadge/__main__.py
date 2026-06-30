@@ -50,8 +50,8 @@ async def _call_mcp_tool(
     base_url: str, tool_name: str, arguments: dict, timeout: float = 30.0
 ) -> dict:
     """Call an MCP tool over SSE and return the parsed JSON result."""
-    from mcp.client.sse import sse_client
     from mcp.client.session import ClientSession
+    from mcp.client.sse import sse_client
 
     async with sse_client(f"{base_url}/sse") as (read, write):
         async with ClientSession(read, write) as session:

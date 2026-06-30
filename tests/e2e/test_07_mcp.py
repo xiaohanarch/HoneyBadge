@@ -12,11 +12,11 @@ Test Coverage:
 - TC-607: MCP connection error handling
 - TC-608: Multiple MCP servers can be called in sequence
 """
+import httpx
 import pytest
 from playwright.sync_api import expect
-import httpx
-from tests.e2e.selectors import CHAT_TEXTAREA, MSG_ASSISTANT
 
+from tests.e2e.selectors import CHAT_TEXTAREA, MSG_ASSISTANT
 
 BASE_URL = "http://localhost:3000"
 API_BASE_URL = "http://localhost:8090"
@@ -132,7 +132,7 @@ class TestMCPServices:
         wait_for_chat_ready()
 
         result = send_query_and_get_response("查询供应商")
-        assert result["data_row_count"] > 0, f"NebulaGraph query should return data rows"
+        assert result["data_row_count"] > 0, "NebulaGraph query should return data rows"
 
     def test_tc610_audit_mcp_write_verification(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-610: Query creates audit record retrievable by trace_id."""
@@ -142,7 +142,6 @@ class TestMCPServices:
         result = send_query_and_get_response("查询采购订单")
         assert result["trace_id"], "Query should produce a trace_id"
 
-        import httpx
         api = httpx.Client(base_url="http://localhost:8090", timeout=30)
         try:
             resp = api.get("/api/audit", params={"trace_id": result["trace_id"]})

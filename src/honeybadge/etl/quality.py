@@ -14,7 +14,7 @@ Quality check results:
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
@@ -67,19 +67,19 @@ class ValidationRule:
     params: dict[str, Any] = field(default_factory=dict)
 
     # For expect_column_values_to_be_in_set
-    value_set: Optional[list[Any]] = None
+    value_set: list[Any] | None = None
 
     # For expect_column_values_to_be_between
-    min_value: Optional[Any] = None
-    max_value: Optional[Any] = None
+    min_value: Any | None = None
+    max_value: Any | None = None
     or_equal: bool = False
 
     # For expect_column_values_to_match_regex
-    regex_pattern: Optional[str] = None
+    regex_pattern: str | None = None
 
     # For expect_column_pair_values_A_to_be_greater_than_B
-    column_a: Optional[str] = None
-    column_b: Optional[str] = None
+    column_a: str | None = None
+    column_b: str | None = None
 
 
 # Validation rules for Purchase Order
@@ -351,7 +351,7 @@ class IntegrityCheckResult:
     passed: bool
     orphan_count: int = 0
     sample_values: list[Any] = field(default_factory=list)
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -362,7 +362,7 @@ class ValidationResult:
     passed: bool
     column: str
     failed_values: list[Any] = field(default_factory=list)
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -604,7 +604,7 @@ class DataQualityChecker:
         self.postgres_dsn = postgres_dsn
         self.quarantine_threshold = quarantine_threshold
         self._pool = None
-        self._ref_checker: Optional[ReferentialIntegrityCheck] = None
+        self._ref_checker: ReferentialIntegrityCheck | None = None
 
     async def connect(self) -> None:
         """Connect to the ODS PostgreSQL database."""

@@ -1,6 +1,7 @@
 """Tests for session and auth API endpoints using FastAPI TestClient."""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from fastapi.testclient import TestClient
 
 

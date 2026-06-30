@@ -17,18 +17,17 @@ from typing import Any
 import httpx
 import structlog
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, Response
 from jose import jwt
 from pydantic import BaseModel
 
 from honeybadge.server.auth import authenticate_user
+
 from .google_oauth import (
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
-    GOOGLE_ENABLED,
-    AUTH_SERVICE_URL,
     DEFAULT_ROLE,
+    GOOGLE_CLIENT_ID,
+    GOOGLE_ENABLED,
     GoogleOAuthError,
     _build_google_auth_url,
     _build_state,

@@ -24,17 +24,19 @@ Test Coverage:
 - TC-512: NEW - Numbers in raw data table appear in LLM summary
 - TC-513: NEW - Audit log records are immutable
 """
+import os
 import re
+
 import pytest
 from playwright.sync_api import expect
+
 from tests.e2e.selectors import (
-    CHAT_TEXTAREA, MSG_ASSISTANT, MSG_ERROR, TRACE_ID_LINK,
-    EXECUTION_TIME, CYPHER_COLLAPSE_HEADER, CYPHER_CODE,
-    DATA_COLLAPSE_HEADER, DATA_ROWS, DATA_TABLE, META_INFO,
+    CHAT_TEXTAREA,
+    EXECUTION_TIME,
+    MSG_ASSISTANT,
+    TRACE_ID_LINK,
 )
 
-
-import os
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8090")
 
@@ -92,7 +94,7 @@ class TestAntiHallucination:
 
         # Must have data table with actual rows
         assert result["has_data_table"], "No data table collapse block in response"
-        assert result["data_row_count"] > 0, f"Data table has 0 rows"
+        assert result["data_row_count"] > 0, "Data table has 0 rows"
 
         # Must also have text summary
         assert len(result["text"]) > 20, "Summary text too short"
@@ -144,7 +146,7 @@ class TestAntiHallucination:
         import httpx
         api = httpx.Client(base_url=API_BASE_URL, timeout=30)
         try:
-            resp = api.get(f"/api/audit", params={"trace_id": result["trace_id"]})
+            resp = api.get("/api/audit", params={"trace_id": result["trace_id"]})
             # Accept 200 (record found) or 404 (audit API not yet implemented)
             # But if 200, verify structure
             if resp.status_code == 200:
@@ -213,7 +215,7 @@ class TestAntiHallucination:
         result = send_query_and_get_response("帮我分析一下最近的采购趋势", settle_timeout_ms=480000)
 
         # System should produce a response (may be "no data" or actual analysis)
-        assert len(result["text"]) > 10, f"No meaningful response for ambiguous query"
+        assert len(result["text"]) > 10, "No meaningful response for ambiguous query"
         assert result["trace_id"], "Ambiguous query should still get a trace_id"
 
     def test_tc512_numeric_fidelity(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):

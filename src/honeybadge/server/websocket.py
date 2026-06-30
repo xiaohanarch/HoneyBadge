@@ -17,10 +17,8 @@ from honeybadge.db.postgres import PostgreSQLClient
 from honeybadge.llm.adapter import OpenAICompatibleAdapter
 from honeybadge.llm.adapter import generate_ngql as llm_generate_ngql
 from honeybadge.llm.adapter import summarize_results as llm_summarize_results
-from honeybadge.llm.adapter import LLMGenerationError, LLMSummarizationError
-from honeybadge.core.exceptions import NebulaGraphError
 from honeybadge.permission_service.config import PERMISSION_CONFIG
-from honeybadge.permission_service.permission_enforcer import PermissionEnforcer, PermissionViolationError
+from honeybadge.permission_service.permission_enforcer import PermissionEnforcer
 
 _permission_enforcer = PermissionEnforcer()
 

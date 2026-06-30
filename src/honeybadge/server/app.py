@@ -12,12 +12,12 @@ from pydantic import BaseModel
 
 from honeybadge.core.constants import VERSION
 from honeybadge.server.auth import (
+    DEMO_USERS,
     authenticate_user,
     create_access_token,
     create_refresh_token,
     decode_token,
     user_to_response,
-    DEMO_USERS,
 )
 from honeybadge.server.config import ServerConfig
 from honeybadge.server.dependencies import get_current_user
@@ -161,10 +161,10 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         return {"token": access_token, "refresh_token": new_refresh, "user": user_to_response(user)}
 
     # --- Mount routers ---
+    from honeybadge.server.admin import router as admin_router
+    from honeybadge.server.audit import router as audit_router
     from honeybadge.server.health import router as health_router
     from honeybadge.server.sessions import router as sessions_router
-    from honeybadge.server.audit import router as audit_router
-    from honeybadge.server.admin import router as admin_router
 
     app.include_router(health_router)
     app.include_router(sessions_router)
@@ -173,7 +173,8 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
 
     # --- WebSocket endpoint ---
     from fastapi import WebSocket, WebSocketDisconnect
-    from honeybadge.server.websocket import process_query, build_query_response
+
+    from honeybadge.server.websocket import build_query_response, process_query
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):

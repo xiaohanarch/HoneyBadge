@@ -2,7 +2,6 @@
 import pathlib
 import subprocess
 
-
 SCRIPT = "hiclaw/manager/agent/skills/fast-query/fast-query.sh"
 
 

@@ -1,9 +1,10 @@
 """NebulaGraph database client for HoneyBadge."""
 
 import time
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 import structlog
 from nebula3.Config import Config as NebulaConfig
@@ -22,7 +23,7 @@ class NebulaQueryResult:
     rows: list[dict[str, Any]]
     execution_time_ms: int
     success: bool
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     @property
     def row_count(self) -> int:
@@ -51,7 +52,7 @@ class NebulaGraphClient:
         self.password = password
         self.max_pool_size = max_pool_size
         self.timeout = timeout
-        self._pool: Optional[ConnectionPool] = None
+        self._pool: ConnectionPool | None = None
 
     async def connect(self) -> None:
         """Establish connection pool to NebulaGraph with retry logic."""
@@ -125,7 +126,7 @@ class NebulaGraphClient:
     async def execute(
         self,
         ngql: str,
-        space: Optional[str] = None,
+        space: str | None = None,
     ) -> NebulaQueryResult:
         """Execute nGQL statement."""
         import asyncio
@@ -191,10 +192,10 @@ class NebulaGraphClient:
             raise NebulaGraphError(f"Query execution failed: {e}", query=ngql)
 
     async def execute_file(
-        self, filepath: str, space: Optional[str] = None
+        self, filepath: str, space: str | None = None
     ) -> list[NebulaQueryResult]:
         """Execute nGQL statements from a file."""
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
         statements = [

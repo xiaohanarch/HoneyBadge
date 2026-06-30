@@ -1,5 +1,4 @@
 """Unit tests for severity classification."""
-import pytest
 from common.severity import Severity, classify
 
 

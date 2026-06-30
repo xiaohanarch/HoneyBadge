@@ -8,14 +8,22 @@ import os
 import re
 import subprocess
 import time
+
 import pytest
-from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
+from playwright.sync_api import Browser, Page, sync_playwright
+
 from tests.e2e.selectors import (
-    LOGIN_USERNAME, LOGIN_PASSWORD, LOGIN_BUTTON,
-    CHAT_TEXTAREA, MSG_ASSISTANT, MSG_USER, MESSAGES_CONTAINER,
-    TRACE_ID_LINK, CYPHER_COLLAPSE_HEADER, CYPHER_CODE,
-    DATA_COLLAPSE_HEADER, DATA_ROWS, DATA_TABLE,
-    NEW_CHAT_BUTTON, SESSION_ITEM, INPUT_CONTAINER,
+    CHAT_TEXTAREA,
+    CYPHER_CODE,
+    CYPHER_COLLAPSE_HEADER,
+    DATA_COLLAPSE_HEADER,
+    DATA_ROWS,
+    LOGIN_BUTTON,
+    LOGIN_PASSWORD,
+    LOGIN_USERNAME,
+    MSG_ASSISTANT,
+    NEW_CHAT_BUTTON,
+    TRACE_ID_LINK,
 )
 
 MANAGER_CONTAINER = "honeybadge-hiclaw-manager"

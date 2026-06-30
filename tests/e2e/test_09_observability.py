@@ -14,10 +14,9 @@ Test Coverage:
 - TC-809: Alert rules are configured
 - TC-810: Service metrics available
 """
+import httpx
 import pytest
 from playwright.sync_api import expect
-import httpx
-
 
 BASE_URL = "http://localhost:3000"
 

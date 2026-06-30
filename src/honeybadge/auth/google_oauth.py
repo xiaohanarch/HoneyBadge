@@ -1,7 +1,6 @@
 """Google OAuth2 Integration for HoneyBadge SSO."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 import httpx
 import structlog
@@ -16,7 +15,7 @@ class GoogleUserInfo:
     sub: str  # Google user ID
     email: str
     name: str
-    picture: Optional[str] = None
+    picture: str | None = None
 
 
 class GoogleOAuth2:

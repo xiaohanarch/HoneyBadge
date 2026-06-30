@@ -1,12 +1,15 @@
 """Tests for permission service models and config."""
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import pytest
 from dataclasses import asdict
+
+import pytest
+
+from honeybadge.permission_service.config import PERMISSION_CONFIG, PROCESS_TAGS
 from honeybadge.permission_service.models import PermissionContext
-from honeybadge.permission_service.config import PROCESS_TAGS, PERMISSION_CONFIG
 
 
 class TestPermissionContext:
@@ -91,6 +94,7 @@ class TestPermissionServiceAPI:
     @pytest.fixture
     def client(self):
         from fastapi.testclient import TestClient
+
         from honeybadge.permission_service.main import app
         return TestClient(app)
 

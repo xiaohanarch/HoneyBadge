@@ -1,7 +1,7 @@
 """Unit tests for MCPClient — mocked subprocess over mcporter."""
 import json
-import subprocess
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 from common.mcp_client import MCPClient, QueryResult
 

@@ -8,7 +8,6 @@ import pytest
 
 from honeybadge.llm.prompt_loader import load_prompt, reload
 
-
 # --------------------------------------------------------------------- fixtures
 
 

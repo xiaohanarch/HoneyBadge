@@ -1,8 +1,6 @@
 """Tests for JWT auth module (src/honeybadge/server/auth.py)."""
 
-import time
 
-import pytest
 
 from honeybadge.server.auth import (
     DEMO_USERS,

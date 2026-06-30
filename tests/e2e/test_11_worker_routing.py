@@ -10,16 +10,16 @@ Test Coverage:
 - TC-1105: Analysis keyword variants all produce structured query responses
 - TC-1106: Greeting does not trigger graph query pipeline
 """
-import re
-import pytest
 from datetime import datetime, timezone
-from playwright.sync_api import expect
-from tests.e2e.selectors import (
-    CHAT_TEXTAREA, MSG_ASSISTANT,
-    TRACE_ID_LINK, CYPHER_COLLAPSE_HEADER, CYPHER_CODE,
-    DATA_COLLAPSE_HEADER, DATA_ROWS,
-)
 
+import pytest
+
+from tests.e2e.selectors import (
+    CYPHER_COLLAPSE_HEADER,
+    DATA_COLLAPSE_HEADER,
+    MSG_ASSISTANT,
+    TRACE_ID_LINK,
+)
 
 
 def _get_worker_logs_since(container_name: str, since: datetime) -> str:
@@ -75,7 +75,7 @@ class TestWorkerRouting:
             task_indicators = ["spec.md", "task received", "cypher-query"]
             has_task = any(ind in analytics_logs.lower() for ind in task_indicators)
             assert not has_task, \
-                f"analytics-worker should NOT receive simple lookup query, but logs show task activity"
+                "analytics-worker should NOT receive simple lookup query, but logs show task activity"
 
     def test_tc1102_analysis_query_routes_to_analytics_worker(
         self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response,

@@ -2,8 +2,8 @@
 
 import json
 import time
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 
 import httpx
 import structlog
@@ -34,7 +34,7 @@ class MiniMaxResponse:
     finish_reason: str
     latency_ms: int
     success: bool = True
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 class MiniMaxAdapter:
@@ -61,7 +61,7 @@ class MiniMaxAdapter:
         self.api_key = api_key
         self.endpoint = endpoint.rstrip("/")
         self.timeout = timeout
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""

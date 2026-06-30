@@ -2,7 +2,6 @@
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -13,7 +12,7 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
 class CreateSessionRequest(BaseModel):
-    title: Optional[str] = None
+    title: str | None = None
 
 
 class UpdateSessionRequest(BaseModel):

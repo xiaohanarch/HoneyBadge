@@ -20,7 +20,7 @@ Data实际情况:
 - subsidiary_lead: org_ids=[1011], data_scope=ORG → sees ONLY org 1011 (~337 PO)
 """
 import pytest
-from playwright.sync_api import expect
+
 from tests.e2e.conftest import send_query_on_page
 from tests.e2e.selectors import MSG_ASSISTANT
 

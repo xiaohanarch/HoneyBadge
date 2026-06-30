@@ -1,5 +1,4 @@
 """Unit tests for AnomalyTracker — cross-round anomaly persistence."""
-import json
 import pytest
 from common.session_state import Anomaly, AnomalyTracker
 
