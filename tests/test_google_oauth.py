@@ -31,7 +31,7 @@ class TestGoogleOAuth:
             "id_token": "test-id-token",
             "token_type": "Bearer"
         })
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_response):
             result = await _exchange_code_for_tokens("test-code")
             assert result["access_token"] == "test-access-token"
             assert result["id_token"] == "test-id-token"
@@ -48,7 +48,7 @@ class TestGoogleOAuth:
             "name": "Test User",
             "picture": "https://example.com/pic.jpg"
         })
-        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response) as mock_get:
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
             result = await _fetch_google_userinfo("test-access-token")
             assert result["sub"] == "123456789"
             assert result["email"] == "testuser@gmail.com"

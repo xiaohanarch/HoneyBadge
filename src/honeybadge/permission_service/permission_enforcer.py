@@ -122,9 +122,9 @@ def _name_anonymous_nodes(ngql: str) -> str:
     Only PTP/OTC tags are rewritten (MASTER tags do not need org_id filtering).
     Variable name collisions with existing variables are avoided.
     """
-    existing_vars: set[str] = set(
+    existing_vars: set[str] = {
         var for var, _ in _TAG_VAR_RE.findall(ngql) if var
-    )
+    }
     counter = 0
 
     def _replace(match: re.Match[str]) -> str:
@@ -291,7 +291,7 @@ class PermissionEnforcer:
 
         # --- 1. Process tag check (hard reject) ---
         # Check tags from both MATCH (var:Tag) and LOOKUP ON Tag patterns
-        all_tags = set(tag for _, tag in tag_vars) | set(lookup_tags)
+        all_tags = {tag for _, tag in tag_vars} | set(lookup_tags)
         for tag in all_tags:
             category = _get_tag_category(tag)
             if category is None or category == "MASTER":

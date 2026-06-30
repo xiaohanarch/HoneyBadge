@@ -7,7 +7,7 @@ class TestAnomalyDataclass:
     def test_is_frozen(self):
         a = Anomaly(type="duplicate_invoice", severity="WARNING", evidence={"id": 1}, round=1)
         assert a.type == "duplicate_invoice"
-        with pytest.raises(Exception):
+        with pytest.raises(AttributeError):
             a.type = "modified"
 
 

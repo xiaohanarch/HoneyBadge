@@ -22,7 +22,7 @@ class TestSubQuery:
     def test_is_frozen_dataclass(self):
         sq = SubQuery(description="desc", question="q", round=1)
         assert sq.question == "q"
-        with pytest.raises(Exception):
+        with pytest.raises(AttributeError):
             sq.question = "modified"
 
 

@@ -189,10 +189,9 @@ class NgqlValidator:
         # Check for unqualified property access in MATCH/WHERE
         unqualified_pattern = r"(?<!\.)\b(\w+)\.(\w+)\b(?!\.)"
         matches = re.finditer(unqualified_pattern, ngql_stripped)
-
-        for match in matches:
-            # This is a basic check - actual implementation would be more sophisticated
-            pass
+        # NOTE: unqualified property access check is a stub — the pattern is
+        # detected but not yet wired to result.add_warning. Future work.
+        _ = matches  # placeholder until sophisticated check is implemented
 
         return result
 
@@ -217,8 +216,6 @@ class NgqlValidator:
         if not self._schema_tags:
             result.add_warning("W003", "No schema loaded, skipping L2 validation")
             return result
-
-        ngql_upper = ngql.upper()
 
         # Extract potential tag references
         # In nGQL, tags are often referenced in patterns like:

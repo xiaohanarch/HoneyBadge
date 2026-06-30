@@ -180,7 +180,7 @@ class TestSessionManagement:
         wait_for_chat_ready()
 
         # Create enough sessions to trigger pagination
-        for i in range(15):
+        for _ in range(15):
             new_session_btn = page.locator(NEW_CHAT_BUTTON)
             if new_session_btn.count() > 0:
                 new_session_btn.first.click()

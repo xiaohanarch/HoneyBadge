@@ -13,13 +13,13 @@ from honeybadge.permission_service.models import PermissionContext
 
 
 def _ctx(**kwargs):
-    defaults = dict(
-        user_id="test",
-        allowed_processes=["PTP"],
-        org_ids=None,
-        dept_ids=None,
-        data_scope="ALL",
-    )
+    defaults = {
+        "user_id": "test",
+        "allowed_processes": ["PTP"],
+        "org_ids": None,
+        "dept_ids": None,
+        "data_scope": "ALL",
+    }
     defaults.update(kwargs)
     return PermissionContext(**defaults)
 

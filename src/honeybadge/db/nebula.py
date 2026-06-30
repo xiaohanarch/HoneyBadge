@@ -74,7 +74,6 @@ class NebulaGraphClient:
                 )
             return pool
 
-        last_error = None
         for attempt in range(max_retries):
             try:
                 self._pool = await loop.run_in_executor(None, _connect)
@@ -88,7 +87,6 @@ class NebulaGraphClient:
             except NebulaGraphError:
                 raise
             except Exception as e:
-                last_error = e
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
                     logger.warning(
@@ -188,7 +186,6 @@ class NebulaGraphClient:
         except NebulaGraphError:
             raise
         except Exception as e:
-            execution_time_ms = int((time.time() - start_time) * 1000)
             raise NebulaGraphError(f"Query execution failed: {e}", query=ngql) from e
 
     async def execute_file(
