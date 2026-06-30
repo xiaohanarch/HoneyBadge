@@ -515,6 +515,7 @@ async def process_query(
             question=question,
             raw_results=query_result.rows,
             columns=query_result.columns,
+            trace_id=trace_id,
         )
         summary = re.sub(r"<think>.*?</think>", "", summary_response.content, flags=re.DOTALL).strip()
 

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from eval.scorers.numeric_fidelity import validate_numeric_fidelity
+from honeybadge.llm.numeric_fidelity import validate_numeric_fidelity
 
 if TYPE_CHECKING:
     from eval.ci.conftest import SummarizeCase
