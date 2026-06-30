@@ -164,10 +164,12 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     from honeybadge.server.health import router as health_router
     from honeybadge.server.sessions import router as sessions_router
     from honeybadge.server.audit import router as audit_router
+    from honeybadge.server.admin import router as admin_router
 
     app.include_router(health_router)
     app.include_router(sessions_router)
     app.include_router(audit_router)
+    app.include_router(admin_router)
 
     # --- WebSocket endpoint ---
     from fastapi import WebSocket, WebSocketDisconnect
