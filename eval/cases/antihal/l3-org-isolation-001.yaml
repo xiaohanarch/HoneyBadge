@@ -1,0 +1,18 @@
+id: ANTIHAL-L3-001
+category: antihal_permission
+subcategory: org_isolation
+question: "查询所有采购订单"
+user_context: analyst
+
+ci:
+  golden_ngql: |
+    MATCH (po:PurchaseOrder)
+    WHERE po.PurchaseOrder.org_id IN [1000]
+    RETURN po.PurchaseOrder.po_number AS po_number
+    LIMIT 100
+  checks:
+    - type: syntax_valid
+    - type: has_org_id
+    - type: has_limit
+    - type: expected_tags
+      tags: [PurchaseOrder]

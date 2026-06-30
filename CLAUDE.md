@@ -43,6 +43,7 @@ honeybadge-server (FastAPI :8090) handles audit REST + sessions only
 - `deploy/hiclaw/` — `Dockerfile.manager`, `Dockerfile.worker`, `init-workers.sh` (bootstraps `openclaw.json + SOUL.md + AGENTS.md` into MinIO — must run after first `docker compose up`)
 - `deploy/k8s/` — kustomize manifests for k3s/ECS production deployment
 - `prompts/ontology/` — 12 LLM-optimized ontology files routed by `> **Keywords**:` header
+- `eval/` — LLM eval suite (CI layer: rule-based scoring, zero LLM; offline layer: real LLM + LLM-as-judge + N-run statistics). See README §6.4 for architecture.
 - `tests/` — unit tests at top level, `tests/e2e/` for end-to-end (markers in `pytest.ini`)
 - `openspec/` — change specifications
 - `scripts/ralph/` — Ralph (autonomous loop) artifacts; not part of the runtime
@@ -84,6 +85,17 @@ pytest tests/test_validator.py::test_specific_case -v
 pytest -c pytest.ini                  # all e2e
 pytest -c pytest.ini -m auth          # by marker (auth, chat, session, isolation, permission, antihal, mcp, infra, observability)
 pytest -c pytest.ini tests/e2e/test_02_chat.py --timeout=180
+
+# Eval suite — CI layer (zero LLM, rule-based, runs in CI)
+py -3.12 -m pytest eval/ci/ -m eval_ci --timeout=30
+py -3.12 -m pytest tests/eval/ eval/ci/ -v --timeout=60   # all eval unit tests + CI layer
+
+# Eval suite — offline layer (real LLM + LLM-as-judge, requires LLM_ENDPOINT/LLM_API_KEY/LLM_MODEL)
+py -3.12 -m eval.runner --offline --runs 3 --threshold 0.8 --report html
+
+# Eval suite — dataset construction scripts
+py -3.12 -m eval.scripts.seed_from_e2e --output eval/cases/seeded/       # extract from E2E tests
+py -3.12 -m eval.scripts.generate_cases --output eval/cases/generated/ --count 40  # LLM-expand coverage
 
 # Run MCP servers locally
 honeybadge nebula-mcp     # or: python -m honeybadge nebula-mcp

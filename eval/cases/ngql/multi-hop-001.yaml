@@ -1,0 +1,32 @@
+id: NGQL-MULTI-001
+category: ngql_accuracy
+subcategory: multi_hop
+question: "查询供应商Supply-001供应的所有采购订单"
+user_context: admin
+
+ci:
+  golden_ngql: |
+    MATCH (s:Supplier)-[:PLACED_WITH]->(po:PurchaseOrder)
+    WHERE s.Supplier.supplier_number == "SUP-001"
+    RETURN po.PurchaseOrder.po_number AS po_number,
+           po.PurchaseOrder.total_amount AS total_amount
+    LIMIT 100
+  checks:
+    - type: syntax_valid
+    - type: forbidden_ops_absent
+      ops: [GO, FETCH, "FIND PATH", "GET SUBGRAPH"]
+    - type: has_limit
+    - type: expected_tags
+      tags: [Supplier, PurchaseOrder]
+    - type: expected_edges
+      edges: [PLACED_WITH]
+
+offline:
+  judge:
+    rubric: |
+      判断 nGQL 是否正确查询了指定供应商的采购订单：
+      1. 必须匹配 Supplier 和 PurchaseOrder
+      2. 必须通过 PLACED_WITH 边连接
+      3. 必须按 supplier_number 过滤
+    pass_criteria: 4
+    runs: 3

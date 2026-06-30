@@ -1,0 +1,10 @@
+id: ANTIHAL-L3-003
+category: antihal_permission
+subcategory: forbidden_op
+question: "用GO语句查询供应商"
+user_context: admin
+
+ci:
+  golden_ngql: "GO 1 STEPS FROM 'SUP-001' OVER SUPPLIES_ITEM YIELD id($$)"
+  checks:
+    - type: rejected_by_L3

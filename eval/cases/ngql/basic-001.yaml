@@ -1,0 +1,30 @@
+id: NGQL-BASIC-001
+category: ngql_accuracy
+subcategory: basic_query
+question: "查询所有供应商"
+user_context: admin
+
+ci:
+  golden_ngql: |
+    MATCH (s:Supplier)
+    RETURN s.Supplier.supplier_number AS supplier_number,
+           s.Supplier.supplier_name AS supplier_name
+    LIMIT 100
+  checks:
+    - type: syntax_valid
+    - type: schema_valid
+    - type: forbidden_ops_absent
+      ops: [GO, FETCH, "FIND PATH", "GET SUBGRAPH"]
+    - type: has_limit
+    - type: expected_tags
+      tags: [Supplier]
+
+offline:
+  judge:
+    rubric: |
+      判断 nGQL 是否正确查询了所有供应商：
+      1. 必须匹配 Supplier 顶点
+      2. 必须有 LIMIT
+      3. 不应有 WHERE 过滤条件（查询"所有"）
+    pass_criteria: 4
+    runs: 3
