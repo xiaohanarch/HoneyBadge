@@ -1,0 +1,14 @@
+id: SUMMARIZE-ADV-001
+category: summarize_fidelity
+subcategory: adversarial
+question: "查询订单 PO-002 的金额与偏差"
+user_context: admin
+
+summarize:
+  columns: [po_number, amount, deviation]
+  raw_results:
+    - po_number: "PO-002"
+      amount: "100000"
+      deviation: "100.00"
+  expected_summary: "订单 PO-002 金额 100000 元，偏差 100.00。"
+  tampered_summary: "订单 PO-002 金额 10 万元，偏差 100.01。"

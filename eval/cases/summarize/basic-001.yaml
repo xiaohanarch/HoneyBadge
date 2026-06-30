@@ -1,0 +1,13 @@
+id: SUMMARIZE-BASIC-001
+category: summarize_fidelity
+subcategory: basic
+question: "查询采购订单 PO-001 的金额"
+user_context: admin
+
+summarize:
+  columns: [po_number, amount]
+  raw_results:
+    - po_number: "PO-001"
+      amount: "100000"
+  expected_summary: "采购订单 PO-001 的金额为 100000 元。"
+  tampered_summary: "采购订单 PO-001 的金额为 123000 元。"
