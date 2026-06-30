@@ -153,11 +153,11 @@ async def verify_postgres() -> bool:
     try:
         import asyncpg
 
-        host = os.getenv("POSTGRES_HOST", "localhost")
-        port = int(os.getenv("POSTGRES_PORT", "5432"))
-        user = os.getenv("POSTGRES_USER", "honeybadge")
-        password = os.getenv("POSTGRES_PASSWORD", "honeybadge123")
-        db = os.getenv("POSTGRES_DB", "honeybadge_audit")
+        host = os.getenv("PG_HOST", "localhost")
+        port = int(os.getenv("PG_PORT", "5432"))
+        user = os.getenv("PG_USER", "honeybadge")
+        password = os.getenv("PG_PASSWORD", "honeybadge123")
+        db = os.getenv("PG_DATABASE", "honeybadge_audit")
 
         conn = await asyncpg.connect(
             host=host,
