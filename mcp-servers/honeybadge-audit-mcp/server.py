@@ -42,11 +42,11 @@ async def _get_pg() -> PostgreSQLClient:
     global _pg_client
     if _pg_client is None:
         _pg_client = PostgreSQLClient(
-            host=os.environ.get("POSTGRES_HOST", "localhost"),
-            port=int(os.environ.get("POSTGRES_PORT", "5432")),
-            user=os.environ.get("POSTGRES_USER", "honeybadge"),
-            password=os.environ.get("POSTGRES_PASSWORD", ""),
-            database=os.environ.get("POSTGRES_DB", "honeybadge_audit"),
+            host=os.environ.get("PG_HOST", "localhost"),
+            port=int(os.environ.get("PG_PORT", "5432")),
+            user=os.environ.get("PG_USER", "honeybadge"),
+            password=os.environ.get("PG_PASSWORD", ""),
+            database=os.environ.get("PG_DATABASE", "honeybadge_audit"),
         )
         await _pg_client.connect()
         await _pg_client.init_schema()

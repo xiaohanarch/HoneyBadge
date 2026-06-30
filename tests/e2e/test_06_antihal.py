@@ -112,8 +112,14 @@ class TestAntiHallucination:
         assert "审计ID" in trace_text or "TRC-" in trace_text, \
             f"Trace ID link text doesn't contain expected prefix: '{trace_text}'"
 
-    def test_tc506_l3_permission_always_injected(self, admin_logged_in, wait_for_chat_ready, send_chat_query, expand_cypher_block):
+    @pytest.mark.timeout(600)
+    def test_tc506_l3_permission_always_injected(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_chat_query, expand_cypher_block):
         """TC-506: L3 - Even admin queries have some form of Cypher execution (not raw SQL)."""
+        # reset_manager: by TC-506 the admin Manager session has ~5 accumulated
+        # turns; glm-5.2 enters repetition loops at 5-10 turns and stops emitting
+        # any message (Stage-1 timeout, kills the pytest process via --timeout).
+        # Also raised pytest timeout to 600s — "查询所有数据不过滤" is a broad query
+        # that may route to analytics-worker (~6 min).
         page = admin_logged_in
         wait_for_chat_ready()
 
@@ -195,12 +201,16 @@ class TestAntiHallucination:
         expect(textarea).to_be_visible()
         expect(textarea).to_be_enabled()
 
+    @pytest.mark.timeout(600)
     def test_tc511_cypher_retry_produces_valid_response(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-511: NEW - Ambiguous query triggers retry mechanism, still produces response."""
         page = admin_logged_in
         wait_for_chat_ready()
 
-        result = send_query_and_get_response("帮我分析一下最近的采购趋势")
+        # "分析...趋势" routes to analytics-worker (~6 min). Default 240s settle
+        # and 300s pytest timeout are too short — use 480s settle (matches TC-310/315)
+        # and 600s pytest timeout.
+        result = send_query_and_get_response("帮我分析一下最近的采购趋势", settle_timeout_ms=480000)
 
         # System should produce a response (may be "no data" or actual analysis)
         assert len(result["text"]) > 10, f"No meaningful response for ambiguous query"

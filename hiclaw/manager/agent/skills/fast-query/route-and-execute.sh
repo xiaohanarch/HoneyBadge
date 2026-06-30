@@ -38,13 +38,28 @@ done
 [[ -z "$QUESTION" ]] && { echo '{"error":"--question is required"}'; exit 1; }
 [[ -z "$USER_ID" ]]  && { echo '{"error":"--user-id is required"}';  exit 1; }
 
+# Recover real user_id when the LLM defaults to "manager".
+# The Manager LLM sometimes forgets to re-extract USER_ID from the
+# Matrix sender metadata, passing "manager" (its own identity) instead.
+# This causes L3 to use org_ids=[1] (default restrictive permissions)
+# instead of the user's actual permissions.
+# Same recovery pattern as dispatch-to-worker.sh lines 42-61.
+if [[ "$USER_ID" == "manager" ]]; then
+    if [[ -f /tmp/.last-route-user-id ]]; then
+        RECOVERED_ID=$(cat /tmp/.last-route-user-id 2>/dev/null || true)
+        if [[ -n "$RECOVERED_ID" && "$RECOVERED_ID" != "manager" ]]; then
+            echo "RECOVERED_USER_ID=$RECOVERED_ID (was 'manager', recovered from previous route-and-execute.sh)" >&2
+            USER_ID="$RECOVERED_ID"
+        fi
+    fi
+fi
+
 # Persist user_id so dispatch-to-worker.sh can recover it.
-# The Manager LLM calls route-and-execute.sh and dispatch.sh as separate
-# bash tool invocations — USER_ID doesn't carry over. When the LLM
-# forgets to re-extract USER_ID for dispatch.sh, it defaults to "manager"
-# (its own identity), causing L3 to use org_ids=[1] → 0 results.
-# dispatch.sh reads this file when --user-id is "manager" or empty.
-echo "$USER_ID" > /tmp/.last-route-user-id
+# Don't overwrite with "manager" — preserves the last good value for
+# subsequent calls in the same session.
+if [[ "$USER_ID" != "manager" ]]; then
+    echo "$USER_ID" > /tmp/.last-route-user-id
+fi
 
 # Step 1: Route
 ROUTE=$(bash /opt/honeybadge/config/manager/agent/skills/fast-query/router.sh "$QUESTION")
