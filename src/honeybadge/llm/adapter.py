@@ -362,7 +362,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 latency_ms=latency_ms,
                 trace_id=request.trace_id,
             )
-            raise LLMTimeoutError(f"LLM request timed out after {self.timeout}s")
+            raise LLMTimeoutError(f"LLM request timed out after {self.timeout}s") from None
 
         except httpx.HTTPError as e:
             latency_ms = int((time.monotonic() - start_time) * 1000)
@@ -372,7 +372,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 latency_ms=latency_ms,
                 trace_id=request.trace_id,
             )
-            raise LLMError(f"LLM HTTP error: {e}")
+            raise LLMError(f"LLM HTTP error: {e}") from e
 
         data = response.json()
         latency_ms = int((time.monotonic() - start_time) * 1000)
@@ -466,9 +466,9 @@ class OpenAICompatibleAdapter(LLMAdapter):
                         break
 
         except httpx.TimeoutException:
-            raise LLMTimeoutError(f"LLM streaming request timed out after {self.timeout}s")
+            raise LLMTimeoutError(f"LLM streaming request timed out after {self.timeout}s") from None
         except httpx.HTTPError as e:
-            raise LLMError(f"LLM streaming HTTP error: {e}")
+            raise LLMError(f"LLM streaming HTTP error: {e}") from e
 
     async def health_check(self) -> bool:
         """
@@ -922,7 +922,7 @@ LIMIT 5
         raise LLMGenerationError(
             f"Failed to generate nGQL from question: {e}",
             question=question,
-        )
+        ) from e
 
 
 async def summarize_results(
@@ -1043,4 +1043,4 @@ async def summarize_results(
             result_count=len(raw_results),
             trace_id=trace_id,
         )
-        raise LLMSummarizationError(f"Failed to summarize results: {e}")
+        raise LLMSummarizationError(f"Failed to summarize results: {e}") from e

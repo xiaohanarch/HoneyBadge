@@ -104,7 +104,7 @@ class NebulaGraphClient:
                 else:
                     raise NebulaGraphError(
                         f"Failed to connect to NebulaGraph after {max_retries} attempts: {e}"
-                    )
+                    ) from e
 
     async def disconnect(self) -> None:
         """Close connection pool."""
@@ -189,7 +189,7 @@ class NebulaGraphClient:
             raise
         except Exception as e:
             execution_time_ms = int((time.time() - start_time) * 1000)
-            raise NebulaGraphError(f"Query execution failed: {e}", query=ngql)
+            raise NebulaGraphError(f"Query execution failed: {e}", query=ngql) from e
 
     async def execute_file(
         self, filepath: str, space: str | None = None

@@ -250,7 +250,7 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                     raise HTTPException(
                         status_code=502,
                         detail="Invalid response from Matrix homeserver",
-                    )
+                    ) from None
                 access_token: str = data["access_token"]
                 logger.info(
                     "matrix_register_success",
@@ -269,7 +269,7 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                 raise HTTPException(
                     status_code=502,
                     detail="Invalid response from Matrix homeserver",
-                )
+                ) from None
             errcode = reg_data.get("errcode", "")
 
             if reg_response.status_code == 400 and errcode == "M_USER_IN_USE":
@@ -300,7 +300,7 @@ async def _provision_matrix_account(username: str, password: str) -> str:
                         raise HTTPException(
                             status_code=502,
                             detail="Invalid response from Matrix homeserver",
-                        )
+                        ) from None
                     access_token = login_data["access_token"]
                     logger.info(
                         "matrix_login_success",
@@ -590,7 +590,7 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
         tokens = await _exchange_code_for_tokens(code)
     except GoogleOAuthError as e:
         logger.error("google_token_exchange_failed", error=str(e))
-        raise HTTPException(status_code=502, detail="Invalid token response from Google")
+        raise HTTPException(status_code=502, detail="Invalid token response from Google") from e
 
     if "access_token" not in tokens:
         raise HTTPException(status_code=502, detail="Invalid token response from Google")
@@ -600,7 +600,7 @@ async def google_auth_callback(code: str = None, state: str = None, error: str =
         userinfo = await _fetch_google_userinfo(tokens["access_token"])
     except GoogleOAuthError as e:
         logger.error("google_userinfo_fetch_failed", error=str(e))
-        raise HTTPException(status_code=502, detail="Invalid userinfo from Google")
+        raise HTTPException(status_code=502, detail="Invalid userinfo from Google") from e
 
     if "sub" not in userinfo or "email" not in userinfo:
         raise HTTPException(status_code=502, detail="Invalid userinfo from Google")

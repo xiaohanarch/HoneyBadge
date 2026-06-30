@@ -49,7 +49,7 @@ class RedisClient:
             await self._client.ping()
             logger.info("redis_connected", host=self.host, port=self.port, db=self.db)
         except Exception as e:
-            raise RedisError(f"Failed to connect to Redis: {e}")
+            raise RedisError(f"Failed to connect to Redis: {e}") from e
 
     async def disconnect(self) -> None:
         """Disconnect from Redis."""

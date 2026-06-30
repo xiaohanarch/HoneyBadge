@@ -237,7 +237,7 @@ class LLMProviderManager:
                     e,
                 )
 
-            raise LLMError(f"Unexpected LLM error: {e}")
+            raise LLMError(f"Unexpected LLM error: {e}") from e
 
     async def _chat_with_fallback(
         self,
@@ -287,7 +287,7 @@ class LLMProviderManager:
                 f"Both primary and fallback LLM providers failed. "
                 f"Primary error: {original_error}. "
                 f"Fallback error: {e}"
-            )
+            ) from e
 
     async def chat_stream(
         self,
@@ -351,9 +351,9 @@ class LLMProviderManager:
                     raise LLMError(
                         f"Both primary and fallback streaming failed. "
                         f"Original: {e}, Fallback: {fallback_error}"
-                    )
+                    ) from fallback_error
             else:
-                raise LLMError(f"Streaming failed: {e}")
+                raise LLMError(f"Streaming failed: {e}") from e
 
     async def health_check_all(self) -> dict[str, bool]:
         """

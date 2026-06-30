@@ -78,8 +78,20 @@ where = ["src"]
 [tool.ruff]
 target-version = "py310"
 line-length = 120
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
-ignore = ["E501"]
+# B008: FastAPI Depends()/HTTPBearer() in default args is the intended pattern.
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# app.py uses intentional lazy imports inside create_app() to avoid import-time
+# side effects and circular-import footguns common in FastAPI app factories.
+"src/honeybadge/server/app.py" = ["E402"]
+# MCP test files manipulate sys.path before importing the server package.
+"tests/test_audit_mcp.py" = ["E402"]
+"tests/test_cache_mcp.py" = ["E402"]
+"tests/test_nebula_mcp.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -87,6 +99,11 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# matrix_client (matrix-js-sdk bridge) ships no py.typed marker.
+module = ["honeybadge.gateway.matrix_client", "honeybadge.gateway.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

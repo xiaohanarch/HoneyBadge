@@ -43,7 +43,7 @@ async def get_audit_trail(
     try:
         result = await pg.get_audit_log(trace_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to query audit log: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to query audit log: {e}") from e
 
     if result is None:
         raise HTTPException(status_code=404, detail=f"Audit log not found for trace_id: {trace_id}")

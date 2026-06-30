@@ -73,7 +73,7 @@ class PostgreSQLClient:
                 database=self.database,
             )
         except Exception as e:
-            raise PostgreSQLError(f"Failed to connect to PostgreSQL: {e}")
+            raise PostgreSQLError(f"Failed to connect to PostgreSQL: {e}") from e
 
     async def disconnect(self) -> None:
         """Disconnect from PostgreSQL."""
@@ -180,7 +180,7 @@ class PostgreSQLClient:
 
         except Exception as e:
             logger.error("audit_log_write_failed", trace_id=entry.trace_id, error=str(e))
-            raise PostgreSQLError(f"Failed to write audit log: {e}")
+            raise PostgreSQLError(f"Failed to write audit log: {e}") from e
 
     async def get_audit_log(self, trace_id: str) -> dict[str, Any] | None:
         """Get audit log entry by trace_id."""
