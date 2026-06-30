@@ -455,3 +455,19 @@ query_duration = Histogram(
     buckets=[1, 2, 5, 10, 15, 30, 60]
 )
 ```
+
+---
+
+## 6. 防幻觉框架的自动化评估（Eval Suite）
+
+防幻觉框架的正确性本身需要被验证。Eval Suite（`eval/` 目录）对 L1-L3 各层提供自动化测试：
+
+| 评估层 | 运行时机 | 验证内容 | 对应防线 |
+|--------|---------|---------|---------|
+| CI 层 | 每次 PR | 黄金 nGQL 通过 `forbidden_ops_absent` 检查 | L1 语法 |
+| CI 层 | 每次 PR | `rejected_by_L1` 检测写操作被拒绝 | L1 写操作检测 |
+| CI 层 | 每次 PR | `has_org_id` 验证非管理员查询包含组织过滤 | L3 权限隔离 |
+| CI 层 | 每次 PR | `rejected_by_L3` 验证禁止的查询类型被拒绝 | L3 进程 ACL |
+| Offline 层 | 手动/定期 | LLM 生成的 nGQL 在 N 次运行中的通过率 | 全链路 |
+
+详见 README §6.4 与设计文档 `docs/superpowers/specs/2026-06-29-eval-suite-design.md`。

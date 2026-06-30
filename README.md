@@ -870,6 +870,80 @@ ERP 源数据 → 抽取(SeaTunnel) → ODS 暂存层 → 质量校验 → 图�
 | 及时率 | 数据在约定时间内到达 | > 99% |
 | 引用完整率 | 关系两端节点都存在的比例 | > 99.5% |
 
+### 6.4 第四层：LLM 输出质量评估（Eval Suite）
+
+防幻觉架构（5.1）保证了 LLM "只翻译不回答"，但 LLM 生成的 nGQL 本身是否正确？Eval Suite 对此进行自动化评估。
+
+**两层架构**：
+
+| 层级 | 运行时机 | 是否调用 LLM | 评估内容 |
+|------|---------|-------------|---------|
+| **CI 层** | 每次 PR / CI | 否（纯规则） | 黄金 nGQL 是否通过 12 项规则检查 |
+| **Offline 层** | 手动 / 定期 | 是（真实 LLM + Judge LLM） | LLM 生成的 nGQL 质量（N 次运行通过率） |
+
+**CI 层 — 12 项规则检查**：
+
+```
+eval/cases/*.yaml → pytest parametrization → rule_checks.run_check()
+```
+
+| 检查类型 | 说明 |
+|---------|------|
+| `syntax_valid` | nGQL 语法基本合法性 |
+| `schema_valid` | Schema 合规（Stub，CI 无 DB 连接） |
+| `has_limit` | 查询必须包含 LIMIT（防止全表扫描） |
+| `forbidden_ops_absent` | 禁止 GO / FETCH / FIND PATH / GET SUBGRAPH |
+| `expected_tags` | 查询涉及预期的 Tag |
+| `expected_edges` | 查询涉及预期的 Edge |
+| `order_by_uses_alias` | ORDER BY 必须使用别名（NebulaGraph 限制） |
+| `no_optional_match_where` | OPTIONAL MATCH 的 WHERE 不能引用主查询变量 |
+| `has_org_id` | 非管理员查询必须包含 org_id 过滤（权限隔离） |
+| `rejected_by_L1` | 期望被 L1 拒绝（写操作检测） |
+| `rejected_by_L3` | 期望被 L3 拒绝（权限禁止的查询类型） |
+
+**Offline 层 — LLM-as-Judge**：
+
+```
+用户问题 → generate_ngql(真实 LLM) → 规则检查 → LLM-as-Judge 评分(1-5) → N 次运行统计
+```
+
+- 每个用例运行 N 次（默认 3 次），通过率 ≥ 阈值（默认 0.8）则判定通过
+- Judge LLM 使用更强模型，根据 rubric 评分
+- 单次 LLM 失败（超时 / 500 / 限流）不会中断整个评估套件
+- 输出报告：JSON / HTML / Markdown
+
+**用例分类**：
+
+| 类别 | 说明 | 种子用例数 |
+|------|------|-----------|
+| `ngql_accuracy` | nGQL 生成准确性（基础查询、排序、聚合、多跳、供应商风险） | 5 |
+| `antihal_permission` | 防幻觉与权限（L1 写操作拒绝、L1 语法拒绝、L3 组织隔离、L3 进程 ACL、禁止操作拒绝） | 5 |
+| `e2e_quality` | 端到端问答质量（规划中） | 0 |
+
+**数据集构建工具**：
+
+- `seed_from_e2e.py` — 从 E2E 测试中提取问题，生成 YAML 用例骨架（已提取 39 个）
+- `generate_cases.py` — 基于 Schema + 业务规则，用 LLM 生成多样化测试用例
+
+**运行方式**：
+
+```bash
+# CI 层（零 LLM，秒级完成）
+py -3.12 -m pytest eval/ci/ -m eval_ci --timeout=30
+
+# Offline 层（需配置 LLM_ENDPOINT / LLM_API_KEY / LLM_MODEL 环境变量）
+py -3.12 -m eval.runner --offline --runs 3 --threshold 0.8 --report html
+
+# 从 E2E 测试提取种子用例
+py -3.12 -m eval.scripts.seed_from_e2e --output eval/cases/seeded/
+
+# 用 LLM 生成更多用例
+py -3.12 -m eval.scripts.generate_cases --output eval/cases/generated/ --count 40
+```
+
+> 设计文档：`docs/superpowers/specs/2026-06-29-eval-suite-design.md`
+> 实施计划：`docs/superpowers/plans/2026-06-29-eval-suite.md`
+
 ---
 
 ## 七、数据规模与容量规划
@@ -1481,6 +1555,15 @@ HoneyBadge/
 │
 ├── scripts/
 │   └── generate_test_data.py    # 测试数据生成（含 12 种欺诈模式）
+│
+├── eval/                        # LLM 评估套件（见 §6.4）
+│   ├── case_loader.py           # YAML 用例加载 + 数据类
+│   ├── scorers/                 # 规则检查 + LLM-as-Judge
+│   ├── ci/                      # CI 层（pytest 参数化，零 LLM）
+│   ├── runner.py                # Offline 层 CLI（真实 LLM + Judge）
+│   ├── reporters/               # JSON / HTML / Markdown 报告
+│   ├── scripts/                 # 数据集构建（seed_from_e2e, generate_cases）
+│   └── cases/                   # YAML 用例（ngql_accuracy, antihal_permission）
 │
 ├── tests/e2e/                   # 端到端测试
 ├── docs/phase1/                 # Phase 1 文档
