@@ -128,25 +128,14 @@ class TestSessionManagement:
         session_items = page.locator(SESSION_ITEM)
         assert session_items.count() >= 3, f"Expected >=3 sessions, got {session_items.count()}"
 
-    @pytest.mark.skip(
-        reason="Feature gap (not a timing issue). After page.reload(), "
-        "ChatView.onMounted calls loadMessages(sessionId) which GETs "
-        "/api/sessions/{id}/messages — but the chat_messages table is never "
-        "populated. The chat hot path uses Matrix (in-memory Pinia store only); "
-        "handleSend -> sendQuery sends via Matrix and the Room.timeline handler "
-        "updates the Pinia store but never persists to the backend. The backend "
-        "(sessions.py) has a chat_messages table + GET endpoint but NO write "
-        "path (no POST, and no side-channel writer). To unskip: implement "
-        "message persistence — either a POST /api/sessions/{id}/messages "
-        "endpoint + frontend hook on message receive, or a Matrix-side writer. "
-        "See docs/1.1.0-upgrade-evidence/1.1.1-deferred-tests.md"
-    )
     def test_tc205_session_persistence(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-205: Session data persists after page reload.
 
-        Sessions ARE persisted (handleNewChat POSTs /api/sessions), but
-        messages are NOT (no write path to chat_messages). After reload,
-        loadMessages returns [] and the message area shows the empty state.
+        Messages are restored from the Matrix DM room timeline (Tuwunel
+        homeserver stores them server-side). After reload, onMounted runs:
+        fetchCurrentUser -> loadSessions -> connect -> loadMessages, where
+        loadMessages reads room.timeline via scrollback and converts each
+        MatrixEvent via matrixEventToChatMessage.
         """
         page = admin_logged_in
         wait_for_chat_ready()
@@ -161,9 +150,9 @@ class TestSessionManagement:
         page.wait_for_load_state("domcontentloaded")
 
         # After reload, onMounted runs: fetchCurrentUser -> loadSessions ->
-        # loadMessages(lastSession) -> connect. Sessions restore from the
-        # backend, but messages do NOT (chat_messages is never written to).
-        # This assertion will fail until message persistence is implemented.
+        # connect -> loadMessages(lastSession). loadMessages reads the DM room
+        # timeline from Matrix (scrollback) and populates the Pinia store, so
+        # the assistant reply reappears without any backend write path.
         messages = page.locator(MSG_ASSISTANT)
         expect(messages.last).to_be_visible(timeout=60000)
 
