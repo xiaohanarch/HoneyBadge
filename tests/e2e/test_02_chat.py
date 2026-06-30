@@ -226,8 +226,11 @@ class TestChatFunctionality:
         time_text = exec_time.inner_text()
         assert re.search(r'\d+', time_text), f"Execution time has no number: '{time_text}'"
 
-    def test_tc112_raw_data_toggle(self, admin_logged_in, wait_for_chat_ready, send_chat_query, expand_data_table):
+    def test_tc112_raw_data_toggle(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_chat_query, expand_data_table):
         """TC-112: Raw data can be toggled visible and has rows."""
+        # reset_manager: TC-112 is the ~10th admin query in the file; glm-5.2
+        # enters repetition loops at 5-10 accumulated turns and stops emitting,
+        # causing the 240s Stage-1 wait to time out.
         page = admin_logged_in
         wait_for_chat_ready()
 
