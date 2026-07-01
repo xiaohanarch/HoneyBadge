@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,12 @@ from eval.case_loader import EvalCase
 from eval.scorers.llm_judge import LLMJudge
 from eval.scorers.rule_checks import run_check
 from eval.stats import EvalResult, compute_pass_rate
+from honeybadge.permission_service.config import PERMISSION_CONFIG
+from honeybadge.permission_service.models import PermissionContext
+from honeybadge.permission_service.permission_enforcer import (
+    PermissionEnforcer,
+    PermissionViolationError,
+)
 
 logger = structlog.get_logger()
 
@@ -96,20 +103,22 @@ def render_ontology(question: str) -> str:
         return ""
 
 
-def _build_user_context(user_context: str) -> dict[str, Any] | None:
-    """Map a case's user_context label to a permission context dict.
+def _build_permission_context(user_context: str) -> PermissionContext | None:
+    """Map a case's user_context label to a PermissionContext.
 
-    org_ids=None means admin (no org filter). procurement_lead and auditor
-    are both in org 1000 (corrected from Task 4's bug fix).
+    Uses the canonical PERMISSION_CONFIG so the eval pipeline matches
+    production behaviour (e.g. procurement_lead/auditor have org_ids=None
+    for full access, not org_ids=[1000] as in the old simplified dict).
     """
-    profiles: dict[str, dict[str, Any]] = {
-        "admin": {"user_id": "admin", "org_ids": None},
-        "analyst": {"user_id": "analyst", "org_ids": [1000]},
-        "procurement_lead": {"user_id": "procurement_lead", "org_ids": [1000]},
-        "subsidiary_lead": {"user_id": "subsidiary_lead", "org_ids": [1021]},
-        "auditor": {"user_id": "auditor", "org_ids": [1000]},
-    }
-    return profiles.get(user_context)
+    return PERMISSION_CONFIG.get(user_context)
+
+
+def _perm_ctx_to_dict(ctx: PermissionContext | None) -> dict[str, Any] | None:
+    """Convert PermissionContext to dict for rule checks.
+
+    Rule checks read ctx.get("org_ids") which works with asdict(PermissionContext).
+    """
+    return asdict(ctx) if ctx else None
 
 
 def _parse_timeout(env_var: str, default: int = 300) -> int:
@@ -157,6 +166,7 @@ async def run_offline_eval(
     adapter = build_llm_adapter()
     judge = LLMJudge(build_judge_adapter())
     schema_info = get_schema_info()
+    enforcer = PermissionEnforcer()
 
     # Lazy import to avoid circular deps at module load time.
     from honeybadge.llm.adapter import generate_ngql
@@ -166,7 +176,8 @@ async def run_offline_eval(
         if case.offline is None:
             continue
 
-        ctx = _build_user_context(case.user_context)
+        perm_ctx = _build_permission_context(case.user_context)
+        ctx_dict = _perm_ctx_to_dict(perm_ctx)
         run_passes: list[bool] = []
         run_scores: list[int] = []
         rule_failures: list[str] = []
@@ -175,27 +186,59 @@ async def run_offline_eval(
         case_runs = case.offline.judge.runs if case.offline.judge.runs is not None else runs
         for run_idx in range(case_runs):
             try:
-                # 1. Generate nGQL with real LLM
+                # 1. Generate nGQL with real LLM (no user_context — L3
+                #    PermissionEnforcer handles org_id injection, not the LLM).
                 llm_resp = await generate_ngql(
                     adapter,
                     case.question,
                     schema_info=schema_info,
                     ontology_info=render_ontology(case.question),
-                    user_context=ctx,
+                    user_context=None,
                 )
                 generated_ngql = _strip_fences(llm_resp.content)
 
-                # 2. Rule scoring (skip if no ci section)
+                # 2. L3 PermissionEnforcer — inject org_id filters, reject
+                #    forbidden processes.  Mirrors production: the MCP server
+                #    calls enforce() after LLM generation.
+                if perm_ctx is not None:
+                    try:
+                        generated_ngql, _perm_warnings = enforcer.enforce(
+                            generated_ngql, perm_ctx
+                        )
+                    except PermissionViolationError as e:
+                        # L3 rejected the query.
+                        if case.category == "antihal_permission":
+                            # Expected behaviour: query correctly blocked.
+                            run_passes.append(True)
+                            run_scores.append(5)
+                            judge_reasons.append(
+                                f"L3 correctly rejected query: {e}"
+                            )
+                        else:
+                            # L3 blocked a query that should have been valid.
+                            run_passes.append(False)
+                            run_scores.append(0)
+                            judge_reasons.append(f"L3 rejected query: {e}")
+                            rule_failures.append(f"L3_rejected: {e}")
+                        logger.debug(
+                            "eval_run_l3_rejected",
+                            case_id=case.id,
+                            run=run_idx + 1,
+                            antihal=case.category == "antihal_permission",
+                        )
+                        continue
+
+                # 3. Rule scoring (skip if no ci section)
                 all_rules_pass = True
                 if case.ci:
                     for check in case.ci.checks:
                         check_dict = {"type": check.type, **check.params}
-                        result = run_check(check_dict, generated_ngql, ctx)
+                        result = run_check(check_dict, generated_ngql, ctx_dict)
                         if not result.passed:
                             all_rules_pass = False
                             rule_failures.append(f"{check.type}: {result.detail}")
 
-                # 3. LLM-as-judge (only if rules pass — save API cost)
+                # 4. LLM-as-judge (only if rules pass — save API cost)
                 if all_rules_pass:
                     score, reason = await judge.evaluate(
                         question=case.question,

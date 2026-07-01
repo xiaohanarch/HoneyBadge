@@ -17,11 +17,24 @@ PROCESS_TAGS: dict[str, set[str]] = {
         "ARInvoice", "ARReceipt",
     },
     "MASTER": {
-        "Organization", "Employee", "Supplier", "Customer", "Item",
+        "Organization", "Employee", "Supplier", "SupplierSite",
+        "Customer", "CustomerSite", "Item",
         "Warehouse", "BOM", "BOMComponent", "Currency", "UOM",
         "GLAccount", "GLJournalEntry", "GLJournalLine",
         "XLAEvent", "AccountingDistribution", "ApprovalRecord",
     },
+}
+
+# MASTER tags that have org_id and should be org-filtered for non-admin users.
+# These are business entities org-scoped in ERP (each org has its own suppliers,
+# customers, items, etc.), not global reference data like Currency/UOM.
+ORG_SCOPED_MASTER_TAGS: set[str] = {
+    "Supplier", "SupplierSite",
+    "Customer", "CustomerSite",
+    "Item",
+    "Employee",
+    "Warehouse",
+    "BOM", "BOMComponent",
 }
 
 PERMISSION_CONFIG: dict[str, PermissionContext] = {
