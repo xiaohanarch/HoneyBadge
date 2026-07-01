@@ -77,10 +77,14 @@ class TestPermissions:
         has_data_indicator = any(kw in response_text for kw in ["条", "记录", "count", "COUNT", "共", "total"])
         assert has_data_indicator, f"Analyst should see PO data from org 1000. Response: {response_text[:200]}"
 
+    @pytest.mark.timeout(600)
     def test_tc402b_analyst_cannot_access_otc(self, reset_manager, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-402b: Analyst blocked from OTC process (SalesOrder).
 
         This is the CORRECT test for TC-402 - analyst should NOT access SalesOrder.
+
+        600s timeout: reset_manager restarts Manager + 2 workers (60-90s overhead)
+        before the LLM query (~180-240s), exceeding the global 300s budget.
         """
         page = analyst_logged_in
         wait_for_chat_ready()
