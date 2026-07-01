@@ -156,17 +156,49 @@ jobs:
           bash deploy/hiclaw/init-workers.sh
         timeout-minutes: 5
 
-      - name: Restart workers
+      - name: Restart HiClaw services (Manager + Workers)
+        # CRITICAL: The Manager MUST be restarted after init-workers.sh
+        # because init-workers.sh patches openclaw.json (allowlist, LLM
+        # route, mcporter config) in MinIO. The running Manager process
+        # does not hot-reload these changes — only a restart picks them
+        # up. Without this restart, the Manager keeps its default
+        # allowlist ([@admin] only) and silently drops all user messages
+        # from @hb-* accounts, causing every chat-dependent test to
+        # timeout at 240s.
         run: |
+          # Truncate the init log so the readiness check waits for a FRESH
+          # "auto-init complete" marker, not the stale one from the first boot.
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
           cd deploy/docker
-          docker compose restart hiclaw-graph-worker hiclaw-analytics-worker
-        timeout-minutes: 3
+          docker compose restart hiclaw-manager hiclaw-graph-worker hiclaw-analytics-worker
+        timeout-minutes: 5
 
-      - name: Wait for workers
+      - name: Wait for Manager readiness
+        # Wait for the Manager's background init (manager-init-internal.sh)
+        # to complete — it syncs patched configs from MinIO and prints
+        # "HoneyBadge auto-init complete!" to the init log. Then allow
+        # 20s for the Matrix client to connect to Tuwunel and sync rooms.
         run: |
-          echo "Waiting for workers to connect..."
-          sleep 30
-        timeout-minutes: 2
+          echo "Waiting for Manager background init..."
+          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          MARKER="HoneyBadge auto-init complete!"
+          for i in {1..30}; do
+            CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
+            if echo "$CONTENT" | grep -q "$MARKER"; then
+              echo "Manager init complete (attempt $i/30)"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 5
+          done
+          if ! echo "$CONTENT" | grep -q "$MARKER"; then
+            echo "::warning::Manager init did not complete within 150s"
+            echo "=== Init log ==="
+            timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "(no init log)"
+          fi
+          echo "Waiting 20s for Matrix client to connect and sync rooms..."
+          sleep 20
+        timeout-minutes: 4
 
       - name: Verify all containers
         run: |
