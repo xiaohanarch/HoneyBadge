@@ -269,7 +269,12 @@ jobs:
             -v --tb=short --junitxml=test-results/auth-chat.xml \
             --timeout=300 2>&1 | tee -a test-output.txt || true
 
-      - name: Clean MinIO task artifacts
+      - name: Clean MinIO task artifacts + restart Manager
+        # CRITICAL: After deleting shared/tasks/ in MinIO, the Manager MUST be
+        # restarted so its background init re-syncs configs and reconnects to
+        # Matrix. Without this restart, the Manager's state becomes stale
+        # (state.json references deleted tasks) and it stops responding to
+        # user queries — causing all subsequent test stages to timeout at 240s.
         if: always()
         run: |
           echo "=== Cleaning MinIO shared/tasks/ ==="
@@ -279,6 +284,28 @@ jobs:
           df -h / | tail -1
           timeout 10 docker exec honeybadge-hiclaw-embedded \
             mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+          echo "=== Restarting Manager after cleanup ==="
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
+          cd deploy/docker
+          docker compose restart hiclaw-manager
+          echo "Waiting for Manager background init..."
+          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          MARKER="HoneyBadge auto-init complete!"
+          for i in {1..30}; do
+            CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
+            if echo "$CONTENT" | grep -q "$MARKER"; then
+              echo "Manager init complete (attempt $i/30)"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 5
+          done
+          if ! echo "$CONTENT" | grep -q "$MARKER"; then
+            echo "::warning::Manager init did not complete within 150s after cleanup"
+          fi
+          echo "Waiting 15s for Matrix client to reconnect..."
+          sleep 15
+        timeout-minutes: 5
 
       - name: Run E2E Tests - Session & Isolation
         if: github.event.inputs.test_filter == '' || contains('session,isolation', github.event.inputs.test_filter)
@@ -288,7 +315,7 @@ jobs:
             -v --tb=short --junitxml=test-results/session-isolation.xml \
             --timeout=300 2>&1 | tee -a test-output.txt || true
 
-      - name: Clean MinIO task artifacts
+      - name: Clean MinIO task artifacts + restart Manager
         if: always()
         run: |
           echo "=== Cleaning MinIO shared/tasks/ ==="
@@ -298,6 +325,28 @@ jobs:
           df -h / | tail -1
           timeout 10 docker exec honeybadge-hiclaw-embedded \
             mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+          echo "=== Restarting Manager after cleanup ==="
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
+          cd deploy/docker
+          docker compose restart hiclaw-manager
+          echo "Waiting for Manager background init..."
+          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          MARKER="HoneyBadge auto-init complete!"
+          for i in {1..30}; do
+            CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
+            if echo "$CONTENT" | grep -q "$MARKER"; then
+              echo "Manager init complete (attempt $i/30)"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 5
+          done
+          if ! echo "$CONTENT" | grep -q "$MARKER"; then
+            echo "::warning::Manager init did not complete within 150s after cleanup"
+          fi
+          echo "Waiting 15s for Matrix client to reconnect..."
+          sleep 15
+        timeout-minutes: 5
 
       - name: Run E2E Tests - Permissions & Anti-Hallucination
         if: github.event.inputs.test_filter == '' || contains('permission,antihal', github.event.inputs.test_filter)
@@ -307,7 +356,7 @@ jobs:
             -v --tb=short --junitxml=test-results/permission-antihal.xml \
             --timeout=300 2>&1 | tee -a test-output.txt || true
 
-      - name: Clean MinIO task artifacts
+      - name: Clean MinIO task artifacts + restart Manager
         if: always()
         run: |
           echo "=== Cleaning MinIO shared/tasks/ ==="
@@ -317,6 +366,28 @@ jobs:
           df -h / | tail -1
           timeout 10 docker exec honeybadge-hiclaw-embedded \
             mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+          echo "=== Restarting Manager after cleanup ==="
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
+          cd deploy/docker
+          docker compose restart hiclaw-manager
+          echo "Waiting for Manager background init..."
+          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          MARKER="HoneyBadge auto-init complete!"
+          for i in {1..30}; do
+            CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
+            if echo "$CONTENT" | grep -q "$MARKER"; then
+              echo "Manager init complete (attempt $i/30)"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 5
+          done
+          if ! echo "$CONTENT" | grep -q "$MARKER"; then
+            echo "::warning::Manager init did not complete within 150s after cleanup"
+          fi
+          echo "Waiting 15s for Matrix client to reconnect..."
+          sleep 15
+        timeout-minutes: 5
 
       - name: Run E2E Tests - MCP & Infra
         if: github.event.inputs.test_filter == '' || contains('mcp,infra', github.event.inputs.test_filter)
@@ -326,7 +397,7 @@ jobs:
             -v --tb=short --junitxml=test-results/mcp-infra.xml \
             --timeout=300 2>&1 | tee -a test-output.txt || true
 
-      - name: Clean MinIO task artifacts
+      - name: Clean MinIO task artifacts + restart Manager
         if: always()
         run: |
           echo "=== Cleaning MinIO shared/tasks/ ==="
@@ -336,6 +407,28 @@ jobs:
           df -h / | tail -1
           timeout 10 docker exec honeybadge-hiclaw-embedded \
             mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+          echo "=== Restarting Manager after cleanup ==="
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
+          cd deploy/docker
+          docker compose restart hiclaw-manager
+          echo "Waiting for Manager background init..."
+          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          MARKER="HoneyBadge auto-init complete!"
+          for i in {1..30}; do
+            CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
+            if echo "$CONTENT" | grep -q "$MARKER"; then
+              echo "Manager init complete (attempt $i/30)"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 5
+          done
+          if ! echo "$CONTENT" | grep -q "$MARKER"; then
+            echo "::warning::Manager init did not complete within 150s after cleanup"
+          fi
+          echo "Waiting 15s for Matrix client to reconnect..."
+          sleep 15
+        timeout-minutes: 5
 
       - name: Run E2E Tests - Observability
         if: false  # skipped — observability tests disabled to fit CI time budget
