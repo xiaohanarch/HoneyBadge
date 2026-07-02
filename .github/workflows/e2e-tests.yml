@@ -111,11 +111,28 @@ jobs:
           grep -v '^#' .env | grep -v '^$' | sed 's/=.*/=<redacted>/'
         timeout-minutes: 1
 
+      - name: Free up disk space
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h /
+          # Remove large pre-installed software we don't use
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
+                      /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk /usr/local/.ghcup
+          sudo apt-get clean
+          echo "=== Disk space after cleanup ==="
+          df -h /
+          echo "=== Docker system prune ==="
+          docker system prune -af --volumes
+          df -h /
+
       - name: Start core services
         run: |
           cd deploy/docker
           docker compose --env-file .env up -d
         timeout-minutes: 10
+
+      - name: Prune Docker build cache
+        run: docker builder prune -af || true
 
       - name: Start observability stack
         if: false  # skipped — observability tests disabled to fit CI time budget
@@ -252,6 +269,17 @@ jobs:
             -v --tb=short --junitxml=test-results/auth-chat.xml \
             --timeout=300 2>&1 | tee -a test-output.txt || true
 
+      - name: Clean MinIO task artifacts
+        if: always()
+        run: |
+          echo "=== Cleaning MinIO shared/tasks/ ==="
+          timeout 10 docker exec honeybadge-hiclaw-embedded \
+            mc rm --recursive --force hiclaw/hiclaw-storage/shared/tasks/ 2>/dev/null || true
+          echo "=== Disk usage ==="
+          df -h / | tail -1
+          timeout 10 docker exec honeybadge-hiclaw-embedded \
+            mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+
       - name: Run E2E Tests - Session & Isolation
         if: github.event.inputs.test_filter == '' || contains('session,isolation', github.event.inputs.test_filter)
         run: |
@@ -259,6 +287,17 @@ jobs:
           pytest tests/e2e/test_03_session.py tests/e2e/test_04_isolation.py \
             -v --tb=short --junitxml=test-results/session-isolation.xml \
             --timeout=300 2>&1 | tee -a test-output.txt || true
+
+      - name: Clean MinIO task artifacts
+        if: always()
+        run: |
+          echo "=== Cleaning MinIO shared/tasks/ ==="
+          timeout 10 docker exec honeybadge-hiclaw-embedded \
+            mc rm --recursive --force hiclaw/hiclaw-storage/shared/tasks/ 2>/dev/null || true
+          echo "=== Disk usage ==="
+          df -h / | tail -1
+          timeout 10 docker exec honeybadge-hiclaw-embedded \
+            mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
 
       - name: Run E2E Tests - Permissions & Anti-Hallucination
         if: github.event.inputs.test_filter == '' || contains('permission,antihal', github.event.inputs.test_filter)
@@ -268,6 +307,17 @@ jobs:
             -v --tb=short --junitxml=test-results/permission-antihal.xml \
             --timeout=300 2>&1 | tee -a test-output.txt || true
 
+      - name: Clean MinIO task artifacts
+        if: always()
+        run: |
+          echo "=== Cleaning MinIO shared/tasks/ ==="
+          timeout 10 docker exec honeybadge-hiclaw-embedded \
+            mc rm --recursive --force hiclaw/hiclaw-storage/shared/tasks/ 2>/dev/null || true
+          echo "=== Disk usage ==="
+          df -h / | tail -1
+          timeout 10 docker exec honeybadge-hiclaw-embedded \
+            mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+
       - name: Run E2E Tests - MCP & Infra
         if: github.event.inputs.test_filter == '' || contains('mcp,infra', github.event.inputs.test_filter)
         run: |
@@ -275,6 +325,17 @@ jobs:
           pytest tests/e2e/test_07_mcp.py tests/e2e/test_08_infra.py \
             -v --tb=short --junitxml=test-results/mcp-infra.xml \
             --timeout=300 2>&1 | tee -a test-output.txt || true
+
+      - name: Clean MinIO task artifacts
+        if: always()
+        run: |
+          echo "=== Cleaning MinIO shared/tasks/ ==="
+          timeout 10 docker exec honeybadge-hiclaw-embedded \
+            mc rm --recursive --force hiclaw/hiclaw-storage/shared/tasks/ 2>/dev/null || true
+          echo "=== Disk usage ==="
+          df -h / | tail -1
+          timeout 10 docker exec honeybadge-hiclaw-embedded \
+            mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
 
       - name: Run E2E Tests - Observability
         if: false  # skipped — observability tests disabled to fit CI time budget
@@ -310,6 +371,13 @@ jobs:
       - name: Dump container logs on failure
         if: always()
         run: |
+          echo "=== Disk usage (host) ==="
+          df -h /
+          echo "=== Docker disk usage ==="
+          docker system df
+          echo "=== MinIO bucket size ==="
+          timeout 10 docker exec honeybadge-hiclaw-embedded \
+            mc du hiclaw/hiclaw-storage 2>/dev/null || echo "(mc du failed)"
           echo "=== Docker ps ==="
           docker ps -a
           echo "=== Compose logs (tail=2000) ==="

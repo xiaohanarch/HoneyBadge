@@ -2,22 +2,23 @@
 """CI-layer tests: each eval case's golden_ngql must pass all CI checks."""
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import pytest
 
 from eval.case_loader import EvalCase
 from eval.scorers.rule_checks import run_check
+from honeybadge.permission_service.config import PERMISSION_CONFIG
 
 
 def _build_user_context(user_context: str) -> dict[str, object] | None:
-    """Map the demo user name to a permission context dict."""
-    profiles: dict[str, dict[str, object]] = {
-        "admin": {"user_id": "admin", "org_ids": None},
-        "analyst": {"user_id": "analyst", "org_ids": [1000]},
-        "procurement_lead": {"user_id": "procurement_lead", "org_ids": [1000]},
-        "subsidiary_lead": {"user_id": "subsidiary_lead", "org_ids": [1021]},
-        "auditor": {"user_id": "auditor", "org_ids": [1000]},
-    }
-    return profiles.get(user_context)
+    """Map the demo user name to a permission context dict.
+
+    Uses the canonical PERMISSION_CONFIG so CI matches production behaviour
+    (e.g. procurement_lead/auditor have org_ids=None for full access).
+    """
+    ctx = PERMISSION_CONFIG.get(user_context)
+    return asdict(ctx) if ctx else None
 
 
 @pytest.mark.eval_ci

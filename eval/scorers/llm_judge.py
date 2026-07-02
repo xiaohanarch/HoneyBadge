@@ -49,7 +49,7 @@ class LLMJudge:
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.0,
-            max_tokens=512,
+            max_tokens=2048,
         )
         resp = await self.adapter.chat(request)
         return parse_judge_response(resp.content)
