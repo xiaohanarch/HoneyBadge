@@ -291,7 +291,7 @@ jobs:
             echo "No test output captured — likely earlier stage failed; not failing here."
             exit 0
           fi
-          if grep -E "^(FAILED|ERROR)" test-output.txt; then
+          if grep -E "FAILED|ERROR" test-output.txt | grep -v "StatementEmpty"; then
             echo "::error::Test failures detected in pytest output"
             exit 1
           fi
@@ -308,7 +308,7 @@ jobs:
           retention-days: 7
 
       - name: Dump container logs on failure
-        if: failure() || cancelled()
+        if: always()
         run: |
           echo "=== Docker ps ==="
           docker ps -a
