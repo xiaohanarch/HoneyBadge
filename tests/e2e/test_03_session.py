@@ -113,8 +113,13 @@ class TestSessionManagement:
         new_count = page.locator(SESSION_ITEM).count()
         assert new_count < initial_count, f"Expected session count to decrease. Before: {initial_count}, After: {new_count}"
 
+    @pytest.mark.timeout(720)
     def test_tc204_list_sessions(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-204: Sessions are listed in sidebar."""
+        """TC-204: Sessions are listed in sidebar.
+
+        720s timeout: 3 sequential LLM queries (~3 min each via glm-5.2 +
+        MCP round-trips) cumulatively exceed the global 300s budget.
+        """
         page = admin_logged_in
         wait_for_chat_ready()
 
