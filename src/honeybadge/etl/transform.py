@@ -1045,7 +1045,7 @@ EDGE_MAPPINGS: dict[str, dict[str, Any]] = {
     "RECEIVED_AT": {
         "source_table": "ods_receipt",
         "src_vid": f"{VID_PREFIX_RECEIPT}:{{shipment_header_id}}",
-        "dst_vid": f"{VID_PREFIX_WAREHOUSE}:{{warehouse_id}}",  # Would need warehouse_id lookup
+        "dst_vid": f"{VID_PREFIX_WAREHOUSE}:{{warehouse_code}}",
         "properties": {
             "org_id": "org_id",
             "dept_id": "NULL",
@@ -1132,15 +1132,17 @@ EDGE_MAPPINGS: dict[str, dict[str, Any]] = {
             "dept_id": "NULL",
         },
     },
-    "UNDER_CONTRACT": {
-        "source_table": "ods_purchase_order",
-        "src_vid": f"{VID_PREFIX_PO}:{{po_header_id}}",
-        "dst_vid": f"{VID_PREFIX_CONTRACT}:{{contract_id}}",  # Would need contract_id on PO
-        "properties": {
-            "org_id": "org_id",
-            "dept_id": "NULL",
-        },
-    },
+    # UNDER_CONTRACT disabled: ods_purchase_order has no contract_id column.
+    # Re-enable when contract data is available in ODS.
+    # "UNDER_CONTRACT": {
+    #     "source_table": "ods_purchase_order",
+    #     "src_vid": f"{VID_PREFIX_PO}:{{po_header_id}}",
+    #     "dst_vid": f"{VID_PREFIX_CONTRACT}:{{contract_id}}",
+    #     "properties": {
+    #         "org_id": "org_id",
+    #         "dept_id": "NULL",
+    #     },
+    # },
 }
 
 
@@ -1443,6 +1445,16 @@ class GraphTransformer:
             else:
                 prop_list.append(col_or_expr + " as " + alias)
 
+        # Add columns referenced in vid_template to SELECT (needed for VID generation).
+        import re as _re
+
+        vid_cols = _re.findall(r"\{(\w+)\}", mapping.get("vid_template", ""))
+        existing_cols = {p.split(" as ")[-1] for p in prop_list}
+        for col in vid_cols:
+            if col not in existing_cols:
+                prop_list.append(f"{col} as {col}")
+                existing_cols.add(col)
+
         sql = f"""
             SELECT {', '.join(prop_list)}
             FROM {source_table}
@@ -1450,7 +1462,7 @@ class GraphTransformer:
         """
 
         if incremental:
-            sql += " AND dq_status = 'passed'"
+            sql += " AND dq_status IN ('passed', 'passed_with_warnings')"
 
         return sql
 
@@ -1474,6 +1486,18 @@ class GraphTransformer:
             else:
                 prop_list.append(col_or_expr + " as " + alias)
 
+        # Add columns referenced in src_vid/dst_vid templates to SELECT.
+        import re as _re2
+
+        vid_cols_e: list[str] = []
+        for vid_key in ("src_vid", "dst_vid"):
+            vid_cols_e.extend(_re2.findall(r"\{(\w+)\}", mapping.get(vid_key, "")))
+        existing_cols_e = {p.split(" as ")[-1] for p in prop_list}
+        for col in vid_cols_e:
+            if col not in existing_cols_e:
+                prop_list.append(f"{col} as {col}")
+                existing_cols_e.add(col)
+
         sql = f"""
             SELECT {', '.join(prop_list)}
             FROM {source_table}
@@ -1481,7 +1505,7 @@ class GraphTransformer:
         """
 
         if incremental:
-            sql += " AND dq_status = 'passed'"
+            sql += " AND dq_status IN ('passed', 'passed_with_warnings')"
 
         return sql
 

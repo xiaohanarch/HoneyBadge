@@ -8,11 +8,20 @@
 #
 # Usage:
 #   bash scripts/run_etl_smoke.sh                    # synthetic data (500 POs)
-#   bash scripts/run_etl_smoke.sh --real-data        # real USAspending.gov data (5000 POs)
+#   bash scripts/run_etl_smoke.sh --real-data        # real USAspending.gov data (multi-year, ~30K+ POs)
 #   bash scripts/run_etl_smoke.sh --skip-docker      # skip docker compose up
 #   bash scripts/run_etl_smoke.sh --real-data --skip-docker
 
 set -euo pipefail
+
+# Ensure src/ is on PYTHONPATH so the worktree's code is used
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+export PYTHONPATH="${ROOT_DIR}/src${PYTHONPATH:+:$PYTHONPATH}"
+# Convert to Windows path on Git Bash (Python can't parse /d/... Unix paths)
+if command -v cygpath >/dev/null 2>&1; then
+    export PYTHONPATH="$(cygpath -w "${ROOT_DIR}/src")${PYTHONPATH:+;$PYTHONPATH}"
+fi
 
 # ── Config ──────────────────────────────────────────────────────────────────
 COMPOSE_FILE="deploy/docker/docker-compose.yaml"
@@ -33,7 +42,7 @@ done
 
 if [ "$USE_REAL_DATA" = true ]; then
     CSV_DIR="deploy/test-data/usaspending_csv"
-    EXPECTED_PO_COUNT=5000
+    EXPECTED_PO_COUNT=30000
 else
     CSV_DIR="deploy/test-data/ptp_csv"
     EXPECTED_PO_COUNT=500
@@ -44,10 +53,20 @@ log() { echo -e "\n=== $1 ==="; }
 ok()  { echo "  ✓ $1"; }
 fail(){ echo "  ✗ $1" >&2; exit 1; }
 
+# Auto-detect docker compose v2 (plugin) vs v1 (standalone)
+if docker compose version >/dev/null 2>&1; then
+    DC="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+    DC="docker-compose"
+else
+    echo "ERROR: neither 'docker compose' nor 'docker-compose' found" >&2
+    exit 1
+fi
+
 # ── 1. Start infrastructure ─────────────────────────────────────────────────
 if [ "$SKIP_DOCKER" != "--skip-docker" ]; then
     log "Starting infrastructure (postgres + nebula)"
-    docker compose -f "$COMPOSE_FILE" up -d postgres nebula-graphd nebula-storaged nebula-metad
+    $DC -f "$COMPOSE_FILE" up -d postgres nebula-graphd nebula-storaged nebula-metad
     sleep 5
 
     log "Initializing NebulaGraph schema"
@@ -64,7 +83,7 @@ if [ "$USE_REAL_DATA" = true ]; then
     python scripts/fetch_usaspending_ptp.py \
         --output-dir "$CSV_DIR" \
         --batch-id "$BATCH_ID" \
-        --limit 5000 --year 2024
+        --limit 50000 --years 2020,2021,2022,2023,2024
 else
     python scripts/generate_ptp_csv.py \
         --output-dir "$CSV_DIR" \
@@ -83,8 +102,8 @@ python scripts/load_csv_to_ods.py \
     --batch-id "$BATCH_ID" \
     --postgres-dsn "$POSTGRES_DSN"
 
-# Verify ODS data
-PO_COUNT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres \
+# Verify ODS data (use docker exec directly to avoid compose-file interpolation issues)
+PO_COUNT=$(docker exec honeybadge-postgres \
     psql -U honeybadge -d honeybadge_ods -t \
     -c "SELECT COUNT(*) FROM ods_purchase_order WHERE etl_batch_id = '$BATCH_ID';")
 PO_COUNT=$(echo "$PO_COUNT" | tr -d '[:space:]')
@@ -119,7 +138,7 @@ ok "Transform output verified"
 
 # ── 6. Verify NebulaGraph (if available) ────────────────────────────────────
 log "Verifying NebulaGraph data"
-NEBULA_CHECK=$(docker compose -f "$COMPOSE_FILE" exec -T nebula-graphd \
+NEBULA_CHECK=$(docker exec honeybadge-nebula-graphd \
     nebula-console -addr nebula-graphd -port 9669 -u root -p nebula \
     -e "USE honeybadge; MATCH (s:Supplier) RETURN count(*);" 2>/dev/null || echo "UNAVAILABLE")
 
@@ -132,7 +151,7 @@ fi
 
 # ── 7. Run integration tests ────────────────────────────────────────────────
 log "Running integration tests"
-POSTGRES_DSN="$POSTGRES_DSN" pytest tests/test_etl_pipeline.py -v --timeout=120 || true
+POSTGRES_DSN="$POSTGRES_DSN" python -m pytest tests/test_etl_pipeline.py -v --timeout=120 || true
 
 log "Smoke test complete"
 echo "Batch ID: $BATCH_ID"

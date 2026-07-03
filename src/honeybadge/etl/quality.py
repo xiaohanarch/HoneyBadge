@@ -654,6 +654,20 @@ class DataQualityChecker:
 
         if not rules:
             logger.warning("no_validation_rules", table=table_name)
+            # No rules to validate — mark all records as passed so transform includes them.
+            assert self._pool is not None
+            async with self._pool.acquire() as conn:
+                summary.total_records = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM {table_name} WHERE etl_batch_id = $1",
+                    batch_id,
+                )
+                summary.passed = summary.total_records
+                await conn.execute(
+                    f"UPDATE {table_name} "
+                    "SET dq_status = 'passed' "
+                    "WHERE etl_batch_id = $1 AND dq_status = 'pending'",
+                    batch_id,
+                )
             return summary
 
         # Get total record count
@@ -953,7 +967,7 @@ class DataQualityChecker:
                         real_values = [v for v in values if v != "None"]
                         if real_values:
                             placeholders = ", ".join(
-                                f"${i + 2}" for i in range(len(real_values))
+                                f"${i + 3}" for i in range(len(real_values))
                             )
                             await conn.execute(
                                 f"UPDATE {summary.table_name} "

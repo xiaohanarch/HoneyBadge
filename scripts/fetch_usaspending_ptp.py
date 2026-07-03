@@ -134,7 +134,8 @@ FIELD_MAP = {
 # ── Constants ───────────────────────────────────────────────────────────────
 API_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
 API_PAGE_SIZE = 100  # API max per page
-API_DELAY_SEC = 0.3  # be respectful to the API
+API_DELAY_SEC = 0.15  # be respectful to the API
+API_MAX_PAGES = 100  # USAspending API hard limit: 100 pages × 100 = 10,000 per time_period
 MAX_RETRIES = 3
 
 random.seed(42)
@@ -212,10 +213,16 @@ def _fetch_page(year: int, page: int) -> dict:
 
 
 def fetch_usaspending_pos(year: int, limit: int) -> list[dict]:
-    """Fetch up to `limit` real purchase orders from USAspending.gov API."""
+    """Fetch up to `limit` real purchase orders from USAspending.gov API for a single year.
+
+    Note: The API hard-limits pagination to 100 pages (10,000 records) per time_period.
+    Use fetch_multi_year() to exceed this limit.
+    """
     results: list[dict] = []
     page = 1
-    while len(results) < limit:
+    # API caps at 100 pages per time_period
+    effective_limit = min(limit, API_MAX_PAGES * API_PAGE_SIZE)
+    while len(results) < effective_limit:
         for attempt in range(MAX_RETRIES):
             try:
                 data = _fetch_page(year, page)
@@ -234,20 +241,51 @@ def fetch_usaspending_pos(year: int, limit: int) -> list[dict]:
 
         for r in page_results:
             results.append(r)
-            if len(results) >= limit:
+            if len(results) >= effective_limit:
                 break
 
         meta = data.get("page_metadata", {})
         has_next = meta.get("hasNext", False)
-        print(f"  Page {page}: fetched {len(page_results)} records (total: {len(results)}/{limit})")
+        print(f"  [FY{year}] Page {page}: fetched {len(page_results)} records (total: {len(results)}/{effective_limit})")
 
-        if not has_next or len(results) >= limit:
+        if not has_next or len(results) >= effective_limit:
             break
 
         page += 1
         time.sleep(API_DELAY_SEC)
 
     return results
+
+
+def fetch_multi_year(years: list[int], limit: int) -> list[dict]:
+    """Fetch POs across multiple years to bypass the 10K-per-year API limit.
+
+    Deduplicates by Award ID (same PO can appear in multiple fiscal years).
+    """
+    all_results: list[dict] = []
+    seen_ids: set[str] = set()
+    per_year_limit = min(limit // len(years) + 1, API_MAX_PAGES * API_PAGE_SIZE)
+
+    for year in years:
+        remaining = limit - len(all_results)
+        if remaining <= 0:
+            break
+        year_limit = min(per_year_limit, remaining)
+        print(f"\n  Fetching FY{year} (up to {year_limit} POs)...")
+        year_results = fetch_usaspending_pos(year, year_limit)
+
+        # Deduplicate by Award ID
+        new_count = 0
+        for r in year_results:
+            award_id = r.get("Award ID") or ""
+            if award_id and award_id not in seen_ids:
+                seen_ids.add(award_id)
+                all_results.append(r)
+                new_count += 1
+
+        print(f"  FY{year}: {new_count} new POs (deduped from {len(year_results)}), running total: {len(all_results)}")
+
+    return all_results
 
 
 # ── Master data builders ────────────────────────────────────────────────────
@@ -469,7 +507,7 @@ def gen_po_lines(
     line_id = 0
     for po, po_raw in zip(po_rows, pos_raw, strict=False):
         total = float(po["total_amount"]) if po["total_amount"] else 0.0
-        num_lines = min(random.randint(1, 5), max(1, int(total / 1000) + 1))
+        num_lines = min(random.randint(1, 10), max(1, int(total / 500) + 1))
         # Pick a NAICS item for this PO
         naics = po_raw.get("NAICS") or {}
         naics_code = naics.get("code") or "UNKNOWN"
@@ -518,7 +556,7 @@ def gen_receipts(po_rows: list[dict], batch_id: str) -> list[dict]:
     rows: list[dict] = []
     shipment_header_id = 0
     for po in po_rows:
-        if random.random() > 0.7:
+        if random.random() > 0.80:
             continue
         shipment_header_id += 1
         po_header_id = po["po_header_id"]
@@ -601,7 +639,7 @@ def gen_invoices(po_rows: list[dict], batch_id: str) -> list[dict]:
     )
 
     for i, po in enumerate(po_rows):
-        if random.random() > 0.4:
+        if random.random() > 0.50:
             continue
         inv_id += 1
         po_header_id = po["po_header_id"]
@@ -657,7 +695,7 @@ def gen_invoice_lines(
         po_lines = po_lines_by_header.get(po_header_id, [])
         if not po_lines:
             continue
-        num_inv = min(len(po_lines), random.randint(1, 5))
+        num_inv = min(len(po_lines), random.randint(1, 8))
         for ln in range(1, num_inv + 1):
             inv_line_id += 1
             po_line = po_lines[ln - 1]
@@ -758,14 +796,14 @@ def main() -> int:
     parser.add_argument(
         "--limit",
         type=int,
-        default=5000,
-        help="Maximum number of POs to fetch (default: 5000)",
+        default=50000,
+        help="Maximum number of POs to fetch (default: 50000)",
     )
     parser.add_argument(
-        "--year",
-        type=int,
-        default=2024,
-        help="Fiscal year to fetch data for (default: 2024)",
+        "--years",
+        type=str,
+        default="2020,2021,2022,2023,2024",
+        help="Comma-separated fiscal years to fetch from (default: 2020-2024, spreads load across years to bypass 10K/year API limit)",
     )
     parser.add_argument(
         "--output-dir",
@@ -781,8 +819,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    print(f"Fetching {args.limit} purchase orders from USAspending.gov (FY{args.year})...")
-    pos_raw = fetch_usaspending_pos(args.year, args.limit)
+    years = [int(y.strip()) for y in args.years.split(",")]
+    print(f"Fetching up to {args.limit} purchase orders from USAspending.gov (years: {years})...")
+    pos_raw = fetch_multi_year(years, args.limit)
 
     if not pos_raw:
         print("ERROR: No data fetched from USAspending.gov API. Exiting.")
