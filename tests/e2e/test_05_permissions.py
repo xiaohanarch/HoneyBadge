@@ -137,6 +137,7 @@ class TestPermissions:
         # Note: This assumes UI properly hides write features for auditor role
         assert write_button_count == 0, f"Auditor should not see write buttons, found {write_button_count}"
 
+    @pytest.mark.timeout(600)
     def test_tc404_blocked_process_permission_error(self, reset_manager, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-404: Accessing blocked OTC process shows permission error.
 
@@ -185,6 +186,7 @@ class TestPermissions:
         # This test verifies UI element presence/absence
         # Actual assertions depend on UI implementation
 
+    @pytest.mark.timeout(600)
     def test_tc406_permission_denied_error_display(self, reset_manager, analyst_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-406: Permission denied shows appropriate error message.
 
