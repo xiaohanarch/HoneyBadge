@@ -138,15 +138,17 @@ ok "Transform output verified"
 
 # ── 6. Verify NebulaGraph (if available) ────────────────────────────────────
 log "Verifying NebulaGraph data"
-NEBULA_CHECK=$(docker exec honeybadge-nebula-graphd \
-    nebula-console -addr nebula-graphd -port 9669 -u root -p nebula \
-    -e "USE honeybadge; MATCH (s:Supplier) RETURN count(*);" 2>/dev/null || echo "UNAVAILABLE")
+NEBULA_CHECK=$(docker run --rm --network honeybadge-network \
+    vesoft/nebula-console:v3.8.0 \
+    -addr nebula-graphd -P 9669 -u root -p nebula \
+    -e "USE honeybadge; MATCH (s:Supplier) RETURN count(*) AS cnt;" 2>/dev/null || echo "UNAVAILABLE")
 
 if echo "$NEBULA_CHECK" | grep -q "UNAVAILABLE"; then
     echo "  ⚠ NebulaGraph not available for verification (import may have been skipped)"
 else
-    echo "  NebulaGraph Supplier count: $NEBULA_CHECK"
-    ok "NebulaGraph verified"
+    SUPPLIER_COUNT=$(echo "$NEBULA_CHECK" | grep -E '^\| [0-9]+' | head -1 | awk -F'|' '{gsub(/ /,"",$2); print $2}')
+    echo "  NebulaGraph Supplier count: $SUPPLIER_COUNT"
+    [ "$SUPPLIER_COUNT" -gt 0 ] 2>/dev/null && ok "NebulaGraph verified" || fail "NebulaGraph has 0 suppliers"
 fi
 
 # ── 7. Run integration tests ────────────────────────────────────────────────
