@@ -105,14 +105,21 @@ class TestChatFunctionality:
         page.wait_for_selector(MSG_ASSISTANT, timeout=120000)
         expect(page.locator(MSG_ASSISTANT).last).to_be_visible()
 
-    def test_tc105_query_results_table(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+    @pytest.mark.timeout(600)
+    def test_tc105_query_results_table(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-105: Query results displayed in data table with actual rows."""
         page = admin_logged_in
         wait_for_chat_ready()
 
         result = send_query_and_get_response("查询前5个采购订单", timeout=150000)
 
-        assert result["has_data_table"], "Response should have data table collapse"
+        # Diagnostic: log what the Manager actually returned
+        print(f"[TC-105] trace_id={result.get('trace_id')}, has_cypher={result.get('has_cypher')}, "
+              f"has_data_table={result.get('has_data_table')}, data_rows={result.get('data_row_count')}")
+        print(f"[TC-105] response_text (first 300 chars): {result.get('text', '')[:300]}")
+
+        assert result["has_data_table"], \
+            f"Response should have data table collapse. trace_id={result.get('trace_id')}, text={result.get('text', '')[:200]}"
         assert result["data_row_count"] > 0, f"Data table should have rows, got {result['data_row_count']}"
 
     def test_tc106_ngql_display(self, admin_logged_in, wait_for_chat_ready, send_chat_query, expand_cypher_block):
