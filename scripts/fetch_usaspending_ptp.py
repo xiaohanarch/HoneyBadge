@@ -28,6 +28,7 @@ Usage:
 
 import argparse
 import csv
+import http.client
 import json
 import random
 import time
@@ -134,9 +135,9 @@ FIELD_MAP = {
 # ── Constants ───────────────────────────────────────────────────────────────
 API_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
 API_PAGE_SIZE = 100  # API max per page
-API_DELAY_SEC = 0.15  # be respectful to the API
+API_DELAY_SEC = 0.2  # be respectful to the API
 API_MAX_PAGES = 100  # USAspending API hard limit: 100 pages × 100 = 10,000 per time_period
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 
 random.seed(42)
 
@@ -208,7 +209,7 @@ def _fetch_page(year: int, page: int) -> dict:
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:
         return json.loads(resp.read())
 
 
@@ -227,7 +228,7 @@ def fetch_usaspending_pos(year: int, limit: int) -> list[dict]:
             try:
                 data = _fetch_page(year, page)
                 break
-            except (urllib.error.URLError, TimeoutError) as exc:
+            except (urllib.error.URLError, TimeoutError, http.client.RemoteDisconnected, ConnectionError, OSError) as exc:
                 if attempt == MAX_RETRIES - 1:
                     print(f"  ERROR: API request failed after {MAX_RETRIES} retries: {exc}")
                     return results

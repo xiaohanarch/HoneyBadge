@@ -257,6 +257,14 @@ EDGE_PROP_TYPES: dict[str, dict[str, str]] = {
         "org_id": "INT64",
         "dept_id": "INT64",
     },
+    "ORDERED_BY": {
+        "org_id": "INT64",
+        "dept_id": "INT64",
+    },
+    "RECEIVED_AT": {
+        "org_id": "INT64",
+        "dept_id": "INT64",
+    },
     "PARENT_ORG": {
         "org_id": "INT64",
         "dept_id": "INT64",
@@ -290,6 +298,8 @@ PTP_EDGES = {
     "HAS_INVOICE",
     "HAS_INVOICE_LINE",
     "INVOICED_BY",
+    "ORDERED_BY",
+    "RECEIVED_AT",
     "PARENT_ORG",
     "BELONGS_TO_ORG",
 }

@@ -1274,8 +1274,8 @@ class GraphTransformer:
                             row_dict = dict(row)
                             vid = self._generate_vid(mapping["vid_template"], row_dict)
                             values = [vid] + [
-                                self._format_value(row_dict.get(prop))
-                                for prop in mapping["properties"].values()
+                                self._format_value(row_dict.get(alias))
+                                for alias in mapping["properties"].keys()
                             ]
                             writer.writerow(values)
                             records_written += 1
@@ -1364,8 +1364,8 @@ class GraphTransformer:
                             src_vid = self._generate_vid(mapping["src_vid"], row_dict)
                             dst_vid = self._generate_vid(mapping["dst_vid"], row_dict)
                             values = [src_vid, dst_vid] + [
-                                self._format_value(row_dict.get(prop))
-                                for prop in mapping["properties"].values()
+                                self._format_value(row_dict.get(alias))
+                                for alias in mapping["properties"].keys()
                             ]
                             writer.writerow(values)
                             records_written += 1

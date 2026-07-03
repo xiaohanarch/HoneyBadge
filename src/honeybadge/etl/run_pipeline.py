@@ -512,26 +512,11 @@ class ETLPipelineRunner:
                 await self._transformer.disconnect()
 
     async def _run_import(self) -> None:
-        """Import data into NebulaGraph using nebula-importer."""
+        """Import data into NebulaGraph using nebula-importer or Python fallback."""
         stage_start = datetime.utcnow()
         logger.info("import_starting", batch_id=self.config.batch_id)
 
         try:
-            # Check if nebula-importer binary is available — skip gracefully if not
-            import shutil
-
-            if not shutil.which(self.config.importer_binary):
-                logger.warning(
-                    "importer_binary_not_found",
-                    binary=self.config.importer_binary,
-                    batch_id=self.config.batch_id,
-                )
-                self.state.warnings.append({
-                    "stage": "import",
-                    "warning": f"nebula-importer binary '{self.config.importer_binary}' not found; "
-                    "CSV files generated, manual import required.",
-                })
-                return
             # Check if there are files to import
             total_files = len(self.state.import_files.get("vertices", [])) + len(
                 self.state.import_files.get("edges", [])
@@ -541,63 +526,85 @@ class ETLPipelineRunner:
                 logger.warning("no_import_files", batch_id=self.config.batch_id)
                 return
 
-            # Generate importer config for this batch
-            import_config_path = Path(self.config.output_dir) / self.config.batch_id / "importer.yaml"
-            await self._generate_import_config(import_config_path)
+            # Try nebula-importer binary first
+            import shutil
 
-            # Build nebula-importer command
-            cmd = [
-                self.config.importer_binary,
-                "--config", str(import_config_path),
-            ]
+            binary_found = shutil.which(self.config.importer_binary)
+            if binary_found:
+                # Generate importer config for this batch
+                import_config_path = Path(self.config.output_dir) / self.config.batch_id / "importer.yaml"
+                await self._generate_import_config(import_config_path)
 
-            # Set environment variables
-            env = os.environ.copy()
-            env["NEBULA_GRAPHD_HOST"] = self.config.nebula_host
-            env["NEBULA_GRAPHD_PORT"] = str(self.config.nebula_port)
-            env["NEBULA_USER"] = self.config.nebula_user
-            env["NEBULA_PASSWORD"] = self.config.nebula_password
-            env["NEBULA_SPACE"] = self.config.nebula_space
-            env["BATCH_ID"] = self.config.batch_id
+                cmd = [
+                    self.config.importer_binary,
+                    "--config", str(import_config_path),
+                ]
 
-            # Run nebula-importer
-            logger.info(
-                "running_nebula_importer",
-                batch_id=self.config.batch_id,
-                command=" ".join(cmd),
-            )
+                env = os.environ.copy()
+                env["NEBULA_GRAPHD_HOST"] = self.config.nebula_host
+                env["NEBULA_GRAPHD_PORT"] = str(self.config.nebula_port)
+                env["NEBULA_USER"] = self.config.nebula_user
+                env["NEBULA_PASSWORD"] = self.config.nebula_password
+                env["NEBULA_SPACE"] = self.config.nebula_space
+                env["BATCH_ID"] = self.config.batch_id
 
-            result = subprocess.run(
-                cmd,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=3600,  # 1 hour timeout
-            )
+                logger.info(
+                    "running_nebula_importer",
+                    batch_id=self.config.batch_id,
+                    command=" ".join(cmd),
+                )
 
-            if result.returncode != 0:
-                logger.error(
-                    "import_failed",
+                result = subprocess.run(
+                    cmd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=3600,
+                )
+
+                if result.returncode == 0:
+                    self.state.import_duration_sec = int(
+                        (datetime.utcnow() - stage_start).total_seconds()
+                    )
+                    logger.info(
+                        "import_completed",
+                        batch_id=self.config.batch_id,
+                        duration_sec=self.state.import_duration_sec,
+                    )
+                    return
+
+                # Binary failed — log and fall through to Python fallback
+                logger.warning(
+                    "importer_binary_failed",
                     batch_id=self.config.batch_id,
                     returncode=result.returncode,
-                    stdout=result.stdout[:1000] if result.stdout else None,
-                    stderr=result.stderr[:1000] if result.stderr else None,
+                    stderr=result.stderr[:500] if result.stderr else None,
                 )
-                self.state.errors.append({
+                self.state.warnings.append({
                     "stage": "import",
-                    "error": f"nebula-importer failed with code {result.returncode}",
-                    "stdout": result.stdout[:1000] if result.stdout else None,
-                    "stderr": result.stderr[:1000] if result.stderr else None,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "warning": f"nebula-importer binary failed (code {result.returncode}), "
+                    "falling back to Python import.",
                 })
-                raise RuntimeError(f"nebula-importer failed with code {result.returncode}")
+            else:
+                logger.warning(
+                    "importer_binary_not_found",
+                    binary=self.config.importer_binary,
+                    batch_id=self.config.batch_id,
+                )
+                self.state.warnings.append({
+                    "stage": "import",
+                    "warning": f"nebula-importer binary '{self.config.importer_binary}' not found; "
+                    "using Python import.",
+                })
+
+            # Fallback: Python-based import via NebulaGraphClient
+            await self._import_via_python()
 
             self.state.import_duration_sec = int(
                 (datetime.utcnow() - stage_start).total_seconds()
             )
-
             logger.info(
-                "import_completed",
+                "import_completed_python",
                 batch_id=self.config.batch_id,
                 duration_sec=self.state.import_duration_sec,
             )
@@ -619,6 +626,179 @@ class ETLPipelineRunner:
                 "timestamp": datetime.utcnow().isoformat(),
             })
             raise
+
+    async def _import_via_python(self) -> None:
+        """Import CSV data into NebulaGraph using Python NebulaGraphClient.
+
+        Fallback method when nebula-importer binary is unavailable or fails.
+        Reads vertex/edge CSV files and executes INSERT statements in batches.
+        """
+        import csv as csv_mod
+
+        from honeybadge.db.nebula import NebulaGraphClient
+        from honeybadge.etl.tag_prop_types import get_edge_prop_type, get_tag_prop_type
+
+        batch_dir = Path(self.config.output_dir) / self.config.batch_id
+        BATCH_SIZE = 50
+        total_v = 0
+        total_e = 0
+
+        client = NebulaGraphClient(
+            host=self.config.nebula_host,
+            port=self.config.nebula_port,
+            user=self.config.nebula_user,
+            password=self.config.nebula_password,
+        )
+        await client.connect()
+
+        # Import vertex files
+        for vfile_path in self.state.import_files.get("vertices", []):
+            csv_path = Path(vfile_path)
+            tag = csv_path.stem.replace("vertex_", "")
+            if not csv_path.exists():
+                continue
+
+            with open(csv_path, encoding="utf-8", newline="") as f:
+                reader = csv_mod.reader(f)
+                header = next(reader)
+                # First column is :VID, rest are props
+                prop_names = header[1:]
+
+                batch: list[str] = []
+                for row in reader:
+                    vid = row[0]
+                    vals = []
+                    for i, val in enumerate(row[1:]):
+                        prop_name = prop_names[i] if i < len(prop_names) else ""
+                        prop_type = get_tag_prop_type(tag, prop_name)
+                        vals.append(self._format_ngql_value(val, prop_type))
+                    values_str = ", ".join(vals)
+                    batch.append(f'"{vid}":({values_str})')
+
+                    if len(batch) >= BATCH_SIZE:
+                        ngql = (
+                            f"INSERT VERTEX {tag}({', '.join(prop_names)}) "
+                            f"VALUES {', '.join(batch)};"
+                        )
+                        r = await client.execute(ngql, space=self.config.nebula_space)
+                        if not r.success:
+                            logger.warning(
+                                "vertex_insert_partial_error",
+                                tag=tag,
+                                error=r.error_message,
+                            )
+                        total_v += len(batch)
+                        batch = []
+
+                if batch:
+                    ngql = (
+                        f"INSERT VERTEX {tag}({', '.join(prop_names)}) "
+                        f"VALUES {', '.join(batch)};"
+                    )
+                    r = await client.execute(ngql, space=self.config.nebula_space)
+                    if not r.success:
+                        logger.warning(
+                            "vertex_insert_error",
+                            tag=tag,
+                            error=r.error_message,
+                        )
+                    total_v += len(batch)
+
+            logger.info("vertex_imported", tag=tag, count=total_v)
+
+        # Import edge files
+        for efile_path in self.state.import_files.get("edges", []):
+            csv_path = Path(efile_path)
+            edge_type = csv_path.stem.replace("edge_", "")
+            if not csv_path.exists():
+                continue
+
+            with open(csv_path, encoding="utf-8", newline="") as f:
+                reader = csv_mod.reader(f)
+                header = next(reader)
+                # First two columns are :SRC_VID, :DST_VID, rest are props
+                prop_names = header[2:]
+
+                batch: list[str] = []
+                for row in reader:
+                    src_vid = row[0]
+                    dst_vid = row[1]
+                    vals = []
+                    for i, val in enumerate(row[2:]):
+                        prop_name = prop_names[i] if i < len(prop_names) else ""
+                        prop_type = get_edge_prop_type(edge_type, prop_name)
+                        vals.append(self._format_ngql_value(val, prop_type))
+                    values_str = ", ".join(vals) if vals else ""
+                    batch.append(f'"{src_vid}"->"{dst_vid}":({values_str})')
+
+                    if len(batch) >= BATCH_SIZE:
+                        prop_clause = f"({', '.join(prop_names)})" if prop_names else ""
+                        ngql = (
+                            f"INSERT EDGE {edge_type}{prop_clause} "
+                            f"VALUES {', '.join(batch)};"
+                        )
+                        r = await client.execute(ngql, space=self.config.nebula_space)
+                        if not r.success:
+                            logger.warning(
+                                "edge_insert_partial_error",
+                                edge_type=edge_type,
+                                error=r.error_message,
+                            )
+                        total_e += len(batch)
+                        batch = []
+
+                if batch:
+                    prop_clause = f"({', '.join(prop_names)})" if prop_names else ""
+                    ngql = (
+                        f"INSERT EDGE {edge_type}{prop_clause} "
+                        f"VALUES {', '.join(batch)};"
+                    )
+                    r = await client.execute(ngql, space=self.config.nebula_space)
+                    if not r.success:
+                        logger.warning(
+                            "edge_insert_error",
+                            edge_type=edge_type,
+                            error=r.error_message,
+                        )
+                    total_e += len(batch)
+
+            logger.info("edge_imported", edge_type=edge_type, count=total_e)
+
+        await client.disconnect()
+        logger.info(
+            "python_import_complete",
+            total_vertices=total_v,
+            total_edges=total_e,
+        )
+
+    @staticmethod
+    def _format_ngql_value(val: str, prop_type: str) -> str:
+        """Format a CSV string value for nGQL INSERT statement."""
+        if val == "" or val is None:
+            return "null"
+        upper_type = prop_type.upper()
+        if upper_type in ("INT", "INT64", "BIGINT", "INTEGER", "INT32"):
+            return str(int(float(val)))
+        if upper_type in ("DOUBLE", "FLOAT", "DECIMAL"):
+            return str(float(val))
+        if upper_type == "BOOL":
+            return "true" if val.lower() in ("true", "1", "yes") else "false"
+        if upper_type == "TIMESTAMP":
+            # NebulaGraph TIMESTAMP stores Unix epoch seconds
+            from datetime import datetime as _dt
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    return str(int(_dt.strptime(val, fmt).timestamp()))
+                except ValueError:
+                    continue
+            # Already a numeric timestamp
+            try:
+                return str(int(float(val)))
+            except ValueError:
+                return "null"
+        # String types: escape backslashes and double quotes
+        escaped = val.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
 
     async def _generate_import_config(self, output_path: Path) -> None:
         """Generate nebula-importer config for this batch."""
@@ -657,7 +837,7 @@ class ETLPipelineRunner:
 
         # Header / client settings
         lines = [
-            "version: v3",
+            "version: v2",
             f"description: HoneyBadge Import - Batch {self.config.batch_id}",
             "",
             "clientSettings:",
@@ -669,8 +849,8 @@ class ETLPipelineRunner:
             f"    user: {self.config.nebula_user}",
             f"    password: {self.config.nebula_password}",
             "",
-            f"logPath: ./logs/import-{self.config.batch_id}.log",
-            f"statsPath: ./stats/import-{self.config.batch_id}.json",
+            f"logPath: {batch_dir.as_posix()}/import.log",
+            f"statsPath: {batch_dir.as_posix()}/import-stats.json",
             "",
             "files:",
         ]
@@ -683,11 +863,10 @@ class ETLPipelineRunner:
             if not vertex_file.exists():
                 continue
             props = mapping["properties"]
-            lines.append(f"  - path: {vertex_file.as_posix()}")
+            lines.append(f"  - path: {vertex_file.name}")
             lines.append("    csv:")
             lines.append("      withHeader: true")
             lines.append('      delimiter: ","')
-            lines.append("      withEnvelope: false")
             lines.append("    tags:")
             lines.append(f"      - name: {tag}")
             lines.append("        id:")
@@ -707,7 +886,7 @@ class ETLPipelineRunner:
             if not edge_file.exists():
                 continue
             props = mapping["properties"]
-            lines.append(f"  - path: {edge_file.as_posix()}")
+            lines.append(f"  - path: {edge_file.name}")
             lines.append("    csv:")
             lines.append("      withHeader: true")
             lines.append('      delimiter: ","')
