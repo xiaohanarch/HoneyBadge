@@ -56,27 +56,36 @@ async def load_csv_to_table(
 ) -> int:
     """Load a single CSV file into its ODS table via COPY.
 
+    Uses PostgreSQL's native COPY command (server-side type conversion):
+    empty strings become NULL (matching generate_ptp_csv.py output),
+    and BIGINT/NUMERIC/TIMESTAMP columns are parsed by the server.
+
     Returns the number of rows inserted.
     """
     with open(csv_path, encoding="utf-8", newline="") as f:
         reader = csv.reader(f)
         header = next(reader)
-        rows = [tuple(row) for row in reader]
+        row_count = sum(1 for _ in reader)
 
-    if not rows:
+    if row_count == 0:
         print(f"  {table}: 0 rows (empty CSV)")
         return 0
 
-    # asyncpg copy_records_to_table expects column names without quotes
-    # and records as a list of tuples.
+    # copy_to_table streams the raw CSV to PostgreSQL; the server handles
+    # all type conversion (string -> BIGINT/NUMERIC/TIMESTAMP/BOOL/JSONB).
+    # null="" ensures empty strings become NULL, not invalid-type errors.
     async with pool.acquire() as conn:
-        await conn.copy_records_to_table(
-            table_name=table,
-            records=rows,
-            columns=header,
-        )
-    print(f"  {table}: {len(rows)} rows loaded")
-    return len(rows)
+        with open(csv_path, "rb") as f:
+            await conn.copy_to_table(
+                table_name=table,
+                source=f,
+                columns=header,
+                format="csv",
+                header=True,
+                null="",
+            )
+    print(f"  {table}: {row_count} rows loaded")
+    return row_count
 
 
 async def verify_row_counts(pool: asyncpg.Pool, batch_id: str) -> dict[str, int]:

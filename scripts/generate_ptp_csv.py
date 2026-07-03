@@ -13,7 +13,7 @@ status mix) but extends to row-level data (PO lines, receipt lines, invoice
 lines) that the seed does not cover, enabling three-way-match verification.
 
 Intentional data quality issues (to exercise quality.py):
-    - 5 purchase orders with NULL po_number
+    - 5 purchase orders with malformed po_number
     - 3 AP invoices with negative total_amount
     - 2 suppliers with invalid status
 
@@ -217,9 +217,10 @@ def gen_item(batch_id: str, count: int = 100) -> list[dict]:
 
 def gen_purchase_order(batch_id: str, count: int = 500) -> list[dict]:
     """500 POs. org_id rotates. status 70% APPROVED / 20% PENDING / 10% CLOSED.
-    5 POs have NULL po_number (intentional DQ issue)."""
+    5 POs have malformed po_number (intentional DQ issue — NOT NULL column,
+    so we use a format violation rather than empty string)."""
     rows = []
-    null_po_number_indices = {50, 150, 250, 350, 450}  # 5 POs with NULL po_number
+    bad_po_number_indices = {50, 150, 250, 350, 450}  # 5 POs with malformed po_number
     for i in range(1, count + 1):
         org_id = ORGS[i % len(ORGS)]
         amount = ((i * 7 + org_id) % 950 + 1) * 1000 + ((i * 3) % 999)
@@ -228,7 +229,7 @@ def gen_purchase_order(batch_id: str, count: int = 500) -> list[dict]:
         order_day = (i * 3) % 350
         approve_day = order_day + 2
         sup_idx = (i % 50) + 1
-        po_number = "" if i in null_po_number_indices else f"PO{org_id}{i:05d}"
+        po_number = f"BAD-PO-{i}" if i in bad_po_number_indices else f"PO{org_id}{i:05d}"
         row = {
             "po_header_id": i,
             "po_number": po_number,
@@ -558,7 +559,7 @@ def generate_all(output_dir: Path, batch_id: str, org_count: int, po_count: int)
     print(f"  ods_organization:        {len(orgs)}")
     print(f"  ods_supplier:            {len(suppliers)} (2 with invalid status)")
     print(f"  ods_item:                {len(items)}")
-    print(f"  ods_purchase_order:      {len(pos)} (5 with NULL po_number)")
+    print(f"  ods_purchase_order:      {len(pos)} (5 with malformed po_number)")
     print(f"  ods_purchase_order_line: {len(po_lines)}")
     print(f"  ods_receipt:             {len(receipts)}")
     print(f"  ods_receipt_line:        {len(receipt_lines)}")
