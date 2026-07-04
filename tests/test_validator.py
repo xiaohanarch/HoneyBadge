@@ -8,6 +8,7 @@ from honeybadge.protocols.validator import (
     SchemaProperty,
     SchemaTag,
     ValidationResult,
+    rewrite_vertex_property_access,
 )
 
 
@@ -88,6 +89,18 @@ class TestNgqlValidatorL1Syntax:
         result = validator.validate_syntax("INSERT VERTEX Supplier(name) VALUES 'test':('name')")
         assert len(result.warnings) > 0
         assert any("INSERT" in w.message for w in result.warnings)
+
+    def test_two_part_property_access_emits_w004(self, validator):
+        """Two-part var.prop on a vertex variable should emit W004 warning."""
+        result = validator.validate_syntax("MATCH (po:PurchaseOrder) RETURN po.po_number")
+        assert result.valid is True  # warning, not error
+        assert any(w.code == "W004" for w in result.warnings)
+
+    def test_three_part_property_access_no_w004(self, validator):
+        """Three-part var.Tag.prop should not emit W004."""
+        result = validator.validate_syntax("MATCH (po:PurchaseOrder) RETURN po.PurchaseOrder.po_number")
+        assert result.valid is True
+        assert not any(w.code == "W004" for w in result.warnings)
 
 
 class TestNgqlValidatorL2Schema:
@@ -221,3 +234,73 @@ class TestNgqlValidatorFullPipeline:
         result = validator.validate("")
         assert result.valid is False
         assert any(e.code.startswith("E0") for e in result.errors)
+
+
+class TestRewriteVertexPropertyAccess:
+    """Tests for rewrite_vertex_property_access() — NebulaGraph v3.8 defense.
+
+    NebulaGraph v3.8.0 has a bug where two-part ``var.prop`` in MATCH returns
+    wrong results (0 rows in WHERE, __NULL__ in RETURN). Three-part
+    ``var.Tag.prop`` works. These tests verify the auto-rewrite layer.
+    """
+
+    def test_rewrite_two_part_vertex_property(self):
+        """Two-part var.prop should be rewritten to var.Tag.prop."""
+        ngql = "MATCH (po:PurchaseOrder) RETURN po.po_number"
+        expected = "MATCH (po:PurchaseOrder) RETURN po.PurchaseOrder.po_number"
+        assert rewrite_vertex_property_access(ngql) == expected
+
+    def test_rewrite_preserves_three_part(self):
+        """Three-part var.Tag.prop should not be modified."""
+        ngql = "MATCH (po:PurchaseOrder) RETURN po.PurchaseOrder.po_number"
+        assert rewrite_vertex_property_access(ngql) == ngql
+
+    def test_rewrite_preserves_edge_property(self):
+        """Edge variable property access should not be modified."""
+        ngql = "MATCH (s:Supplier)-[e:HAS_INVOICE]->(i:Invoice) RETURN e.match_status"
+        assert rewrite_vertex_property_access(ngql) == ngql
+
+    def test_rewrite_mixed_query(self):
+        """Vertex var rewritten, edge var preserved in the same query."""
+        ngql = (
+            "MATCH (s:Supplier)-[e:HAS_INVOICE]->(i:Invoice) "
+            "RETURN s.supplier_name, e.match_status"
+        )
+        expected = (
+            "MATCH (s:Supplier)-[e:HAS_INVOICE]->(i:Invoice) "
+            "RETURN s.Supplier.supplier_name, e.match_status"
+        )
+        assert rewrite_vertex_property_access(ngql) == expected
+
+    def test_rewrite_string_literal_not_touched(self):
+        """Two-part access inside a string literal should not be rewritten."""
+        ngql = (
+            'MATCH (s:Supplier) '
+            'WHERE s.name == "po.po_number" '
+            'RETURN s.Supplier.name'
+        )
+        expected = (
+            'MATCH (s:Supplier) '
+            'WHERE s.Supplier.name == "po.po_number" '
+            'RETURN s.Supplier.name'
+        )
+        assert rewrite_vertex_property_access(ngql) == expected
+
+    def test_rewrite_multiple_match(self):
+        """Variables from multiple MATCH clauses should all be rewritten."""
+        ngql = (
+            "MATCH (po:PurchaseOrder) WITH po "
+            "MATCH (s:Supplier) "
+            "RETURN po.po_number, s.supplier_name"
+        )
+        expected = (
+            "MATCH (po:PurchaseOrder) WITH po "
+            "MATCH (s:Supplier) "
+            "RETURN po.PurchaseOrder.po_number, s.Supplier.supplier_name"
+        )
+        assert rewrite_vertex_property_access(ngql) == expected
+
+    def test_rewrite_anonymous_node(self):
+        """Anonymous node (:Tag) with no variable should not be rewritten."""
+        ngql = "MATCH (:PurchaseOrder) RETURN count(*)"
+        assert rewrite_vertex_property_access(ngql) == ngql

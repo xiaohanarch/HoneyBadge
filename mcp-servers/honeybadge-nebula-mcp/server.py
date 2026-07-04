@@ -29,7 +29,7 @@ from honeybadge.llm.adapter import (
     summarize_results as llm_summarize_results,
 )
 from honeybadge.ontology import OntologyLoader
-from honeybadge.protocols.validator import NgqlValidator
+from honeybadge.protocols.validator import NgqlValidator, rewrite_vertex_property_access
 
 # Add mcp-servers/honeybadge-nebula-mcp to path for permission_enforcer
 _nebula_mcp_path = os.path.dirname(os.path.abspath(__file__))
@@ -437,6 +437,11 @@ async def validate_and_execute_impl(
             ],
             "trace_id": trace_id,
         }
+
+    # --- Defense: rewrite two-part var.prop → var.Tag.prop --------------
+    # NebulaGraph v3.8 MATCH bug: two-part var.prop returns wrong results.
+    # The LLM prompt asks for three-part, but this silently fixes drift.
+    ngql = rewrite_vertex_property_access(ngql)
 
     # --- L2: Schema compliance ------------------------------------------
     l2 = validator.validate_schema(ngql)
