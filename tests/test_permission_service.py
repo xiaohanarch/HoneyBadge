@@ -128,3 +128,60 @@ class TestPermissionServiceAPI:
         for username in ["admin", "procurement_lead", "subsidiary_lead", "analyst", "auditor"]:
             r = client.get(f"/permissions/{username}")
             assert r.status_code == 200, f"Failed for {username}"
+
+
+class TestResolvePermissionContext:
+    """Tests for _resolve_permission_context (L3 fail-closed fix).
+
+    Validates that L3 permission enforcement resolves a PermissionContext for
+    every authenticated user, closing the cross-tenant bypass where non-demo
+    users (Google SSO, future real users) silently skipped L3.
+    """
+
+    def test_resolve_demo_user_uses_config(self):
+        """admin demo user → returns PERMISSION_CONFIG['admin'] (ALL scope)."""
+        from honeybadge.server.websocket import _resolve_permission_context
+
+        ctx = _resolve_permission_context("admin", org_id=999, roles=[])
+        assert ctx is not None
+        assert ctx.user_id == "admin"
+        assert ctx.data_scope == "ALL"
+        assert ctx.org_ids is None
+        # Demo config takes precedence over JWT org_id
+        assert "PTP" in ctx.allowed_processes
+        assert "OTC" in ctx.allowed_processes
+
+    def test_resolve_non_demo_user_with_org_id(self):
+        """google_user, org_id=1021, roles=['analyst'] → ORG scope, org_ids=[1021]."""
+        from honeybadge.server.websocket import _resolve_permission_context
+
+        ctx = _resolve_permission_context("google_user", org_id=1021, roles=["analyst"])
+        assert ctx is not None
+        assert ctx.user_id == "google_user"
+        assert ctx.org_ids == [1021]
+        assert ctx.data_scope == "ORG"
+        assert ctx.allowed_processes == ["PTP", "OTC"]
+
+    def test_resolve_non_demo_admin_role(self):
+        """google_admin, org_id=1000, roles=['admin'] → ALL scope, org_ids=None."""
+        from honeybadge.server.websocket import _resolve_permission_context
+
+        ctx = _resolve_permission_context("google_admin", org_id=1000, roles=["admin"])
+        assert ctx is not None
+        assert ctx.user_id == "google_admin"
+        assert ctx.org_ids is None
+        assert ctx.data_scope == "ALL"
+
+    def test_resolve_no_org_id_returns_none(self):
+        """unknown, org_id=None → None (fail-closed)."""
+        from honeybadge.server.websocket import _resolve_permission_context
+
+        ctx = _resolve_permission_context("unknown", org_id=None, roles=[])
+        assert ctx is None
+
+    def test_resolve_anonymous_returns_none(self):
+        """anonymous, org_id=None → None (fail-closed)."""
+        from honeybadge.server.websocket import _resolve_permission_context
+
+        ctx = _resolve_permission_context("anonymous", org_id=None, roles=None)
+        assert ctx is None
