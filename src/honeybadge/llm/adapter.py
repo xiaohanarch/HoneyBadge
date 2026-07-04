@@ -701,6 +701,7 @@ async def generate_ngql(
     ontology_info: str,
     user_context: dict[str, Any] | None = None,
     trace_id: str | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> LLMResponse:
     """
     Generate nGQL query from natural language question.
@@ -712,6 +713,10 @@ async def generate_ngql(
         ontology_info: Ontology/property mappings for context.
         user_context: Optional user context for permission-aware generation.
         trace_id: Optional trace ID for logging.
+        conversation_history: Optional list of prior Q&A turns (newest last),
+            each a {"role": "user"|"assistant", "content": str}. Used for
+            multi-turn anaphora resolution ("这些订单" → prior PurchaseOrder
+            query). When None or empty, behaves as single-turn (unchanged).
 
     Returns:
         LLMResponse with generated nGQL query.
@@ -885,12 +890,14 @@ LIMIT 5
         + f"\n\n# Schema 信息\n\n{schema_info}\n\n# 本体信息\n\n{ontology_info}\n"
     )
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": question},
-    ]
+    messages = [{"role": "system", "content": system_prompt}]
+    if conversation_history:
+        messages.extend(conversation_history)
+    messages.append({"role": "user", "content": question})
 
-    # Inject user context for permission-aware generation
+    # Inject user context for permission-aware generation.
+    # Modifies the last message (always the current question) so context is
+    # attached to the question regardless of whether history was injected.
     if user_context:
         context_str = f"\n\n# 用户权限上下文\nuser_id: {user_context.get('user_id', 'unknown')}\n"
         if user_context.get("org_ids"):
@@ -899,7 +906,7 @@ LIMIT 5
             context_str += f"dept_ids: {', '.join(str(d) for d in user_context['dept_ids'])}\n"
         if user_context.get("data_scope"):
             context_str += f"data_scope: {user_context['data_scope']}\n"
-        messages[1]["content"] = context_str + "\n\n" + question
+        messages[-1]["content"] = context_str + "\n\n" + question
 
     request = LLMRequest(
         messages=messages,
@@ -908,6 +915,14 @@ LIMIT 5
         trace_id=trace_id,
         user_id=user_context.get("user_id") if user_context else None,
     )
+
+    if conversation_history:
+        logger.info(
+            "ngql_conversation_history",
+            trace_id=trace_id,
+            history_turns=len(conversation_history) // 2,
+            history_chars=sum(len(m["content"]) for m in conversation_history),
+        )
 
     try:
         response = await adapter.chat(request)
