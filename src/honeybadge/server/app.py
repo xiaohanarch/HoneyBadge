@@ -185,10 +185,14 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         # Extract token from query params
         token = websocket.query_params.get("token", "")
         user_id = "anonymous"
+        org_id: int | None = None
+        roles: list[str] = []
         if token:
             payload = decode_token(token, config.jwt_secret)
             if payload:
                 user_id = payload.get("username", payload.get("sub", "anonymous"))
+                org_id = payload.get("org_id")
+                roles = payload.get("roles", [])
 
         await websocket.accept()
 
@@ -236,6 +240,8 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                         pg=pg,
                         llm_adapter=llm,
                         user_id=user_id,
+                        org_id=org_id,
+                        roles=roles,
                     )
 
                     # Send response

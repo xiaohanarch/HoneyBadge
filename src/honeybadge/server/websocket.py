@@ -18,6 +18,7 @@ from honeybadge.llm.adapter import OpenAICompatibleAdapter
 from honeybadge.llm.adapter import generate_ngql as llm_generate_ngql
 from honeybadge.llm.adapter import summarize_results as llm_summarize_results
 from honeybadge.permission_service.config import PERMISSION_CONFIG
+from honeybadge.permission_service.models import PermissionContext
 from honeybadge.permission_service.permission_enforcer import PermissionEnforcer
 from honeybadge.protocols.validator import rewrite_vertex_property_access
 
@@ -400,6 +401,36 @@ async def get_schema_str(nebula: NebulaGraphClient, space: str = "honeybadge") -
     return schema_str
 
 
+def _resolve_permission_context(
+    user_id: str,
+    org_id: int | None,
+    roles: list[str] | None,
+) -> PermissionContext | None:
+    """Resolve a PermissionContext for any authenticated user.
+
+    1. Demo users: use PERMISSION_CONFIG (preserves explicit configuration).
+    2. Non-demo users: build from JWT claims (org_id, roles).
+    3. Cannot determine org_id: return None (fail-closed, query is refused).
+    """
+    # Demo users have explicit configuration
+    ctx = PERMISSION_CONFIG.get(user_id)
+    if ctx is not None:
+        return ctx
+
+    # Non-demo users: require JWT org_id
+    if org_id is None:
+        return None
+
+    is_admin = "admin" in (roles or [])
+    return PermissionContext(
+        user_id=user_id,
+        allowed_processes=["PTP", "OTC"],
+        org_ids=None if is_admin else [org_id],
+        dept_ids=None,
+        data_scope="ALL" if is_admin else "ORG",
+    )
+
+
 async def process_query(
     question: str,
     session_id: str,
@@ -408,6 +439,8 @@ async def process_query(
     llm_adapter: OpenAICompatibleAdapter,
     space: str = "honeybadge",
     user_id: str = "anonymous",
+    org_id: int | None = None,
+    roles: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Process a natural language query and return a result dict.
@@ -443,11 +476,16 @@ async def process_query(
         logger.info("ws_ngql_generated", trace_id=trace_id, ngql=ngql[:100])
 
         # Step 2b: L3 Permission enforcement (process ACL + org_id injection)
-        if user_id in PERMISSION_CONFIG:
-            perm_ctx = PERMISSION_CONFIG[user_id]
-            ngql, perm_warnings = _permission_enforcer.enforce(ngql, perm_ctx)
-            for w in perm_warnings:
-                logger.info("ws_permission_filter", trace_id=trace_id, warning=w)
+        # Mandatory for ALL authenticated users; fail-closed when context unresolved.
+        perm_ctx = _resolve_permission_context(user_id, org_id, roles)
+        if perm_ctx is None:
+            raise Exception(
+                f"L3 permission context unresolved for user={user_id}, "
+                f"org_id={org_id} — refusing query (fail-closed)"
+            )
+        ngql, perm_warnings = _permission_enforcer.enforce(ngql, perm_ctx)
+        for w in perm_warnings:
+            logger.info("ws_permission_filter", trace_id=trace_id, warning=w)
 
         # Step 3: Execute with retry on syntax/semantic errors
         max_retries = 2
