@@ -117,6 +117,14 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # --- Prometheus /metrics endpoint ---
+    # Exposes all honeybadge_* metrics collected by collectors.py. Scraped by
+    # Prometheus on the :8090 port. Mounted before auth routes so it needs no
+    # authentication (Prometheus scrapers use network-level ACLs, not JWTs).
+    from prometheus_client import make_asgi_app
+
+    app.mount("/metrics", make_asgi_app())
+
     # --- Auth routes (inline) ---
 
     class LoginRequest(BaseModel):

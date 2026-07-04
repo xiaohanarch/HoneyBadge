@@ -25,6 +25,7 @@ from honeybadge.core.exceptions import (
 )
 from honeybadge.llm.numeric_fidelity import check_and_log_fidelity
 from honeybadge.llm.prompt_loader import load_prompt
+from honeybadge.metrics.collectors import LLM_METRICS
 
 logger = structlog.get_logger()
 
@@ -197,6 +198,9 @@ class OpenAICompatibleAdapter(LLMAdapter):
         self.default_model_name = config["model"]
         self.timeout = config.get("timeout", 60)
         self.rate_limit = config.get("rate_limit", {})
+        # Provider label for Prometheus metrics. Derived from config if
+        # available, else falls back to "openai-compat".
+        self.provider = config.get("provider", "openai-compat")
 
         self._redis_client = redis_client
         self._client: httpx.AsyncClient | None = None
@@ -335,10 +339,12 @@ class OpenAICompatibleAdapter(LLMAdapter):
             )
 
             if response.status_code in (429, 529):
+                LLM_METRICS.record_rate_limit(self.provider)
                 raise RateLimitExceeded("LLM provider rate limit exceeded")
 
             if response.status_code == 401:
                 logger.error("llm_auth_error", status_code=401, trace_id=request.trace_id)
+                LLM_METRICS.record_error(self.provider, "AUTH_ERROR")
                 raise LLMError("LLM API authentication failed", "AUTH_ERROR")
 
             if response.status_code >= 500:
@@ -347,6 +353,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                     status_code=response.status_code,
                     trace_id=request.trace_id,
                 )
+                LLM_METRICS.record_error(self.provider, "SERVER_ERROR")
                 raise LLMError(
                     f"LLM server error: {response.status_code}",
                     "SERVER_ERROR",
@@ -362,6 +369,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 latency_ms=latency_ms,
                 trace_id=request.trace_id,
             )
+            LLM_METRICS.record_error(self.provider, "TIMEOUT")
             raise LLMTimeoutError(f"LLM request timed out after {self.timeout}s") from None
 
         except httpx.HTTPError as e:
@@ -372,6 +380,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 latency_ms=latency_ms,
                 trace_id=request.trace_id,
             )
+            LLM_METRICS.record_error(self.provider, "HTTP_ERROR")
             raise LLMError(f"LLM HTTP error: {e}") from e
 
         data = response.json()
@@ -399,6 +408,16 @@ class OpenAICompatibleAdapter(LLMAdapter):
             total_tokens=total_tokens,
             latency_ms=latency_ms,
             trace_id=request.trace_id,
+        )
+
+        # Emit Prometheus metrics for the completed LLM request.
+        LLM_METRICS.record_request(
+            provider=self.provider,
+            model=model,
+            operation="chat",
+            duration_seconds=latency_ms / 1000.0,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )
 
         return LLMResponse(

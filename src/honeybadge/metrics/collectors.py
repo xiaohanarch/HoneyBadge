@@ -32,7 +32,7 @@ class LLMMetricsCollector:
             "honeybadge_llm_requests_total",
             "Total number of LLM requests",
             ["provider", "model", "operation"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Token consumption
@@ -40,7 +40,7 @@ class LLMMetricsCollector:
             "honeybadge_llm_tokens_total",
             "Total tokens consumed",
             ["model", "token_type"],  # token_type: prompt | completion | total
-            registry=registry,
+            registry=self._registry,
         )
 
         # Request duration
@@ -49,7 +49,7 @@ class LLMMetricsCollector:
             "LLM request duration in seconds",
             ["provider", "model", "operation"],
             buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
-            registry=registry,
+            registry=self._registry,
         )
 
         # Error counter
@@ -57,7 +57,7 @@ class LLMMetricsCollector:
             "honeybadge_llm_errors_total",
             "Total LLM errors",
             ["provider", "error_type"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Provider health status (1 = healthy, 0 = unhealthy)
@@ -65,7 +65,7 @@ class LLMMetricsCollector:
             "honeybadge_llm_provider_health",
             "LLM provider health status (1=healthy, 0=unhealthy)",
             ["provider"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Rate limit hits
@@ -73,7 +73,7 @@ class LLMMetricsCollector:
             "honeybadge_llm_rate_limit_hits_total",
             "Total rate limit exceeded events",
             ["provider"],
-            registry=registry,
+            registry=self._registry,
         )
 
     def record_request(
@@ -155,7 +155,7 @@ class NebulaMetricsCollector:
             "NebulaGraph query duration in seconds",
             ["space", "operation"],
             buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
-            registry=registry,
+            registry=self._registry,
         )
 
         # Query counter
@@ -163,7 +163,7 @@ class NebulaMetricsCollector:
             "honeybadge_nebula_query_total",
             "Total NebulaGraph queries",
             ["space", "operation", "status"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Connection pool
@@ -171,14 +171,14 @@ class NebulaMetricsCollector:
             "honeybadge_nebula_connection_pool_size",
             "NebulaGraph connection pool size",
             ["host", "port"],
-            registry=registry,
+            registry=self._registry,
         )
 
         self.connection_pool_available = Gauge(
             "honeybadge_nebula_connection_pool_available",
             "Available NebulaGraph connections",
             ["host", "port"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Query errors
@@ -186,7 +186,7 @@ class NebulaMetricsCollector:
             "honeybadge_nebula_query_errors_total",
             "Total NebulaGraph query errors",
             ["space", "error_type"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Session metrics
@@ -195,7 +195,7 @@ class NebulaMetricsCollector:
             "NebulaGraph session lifetime in seconds",
             ["space"],
             buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0, 1800.0),
-            registry=registry,
+            registry=self._registry,
         )
 
         # Active sessions
@@ -203,7 +203,7 @@ class NebulaMetricsCollector:
             "honeybadge_nebula_active_sessions",
             "Number of active NebulaGraph sessions",
             ["space"],
-            registry=registry,
+            registry=self._registry,
         )
 
     def record_query(
@@ -274,14 +274,14 @@ class HiClawMetricsCollector:
             "honeybadge_hiclaw_workers_total",
             "Total number of HiClaw workers",
             ["group"],
-            registry=registry,
+            registry=self._registry,
         )
 
         self.workers_active = Gauge(
             "honeybadge_hiclaw_workers_active",
             "Number of active HiClaw workers",
             ["group"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Task queue
@@ -289,7 +289,7 @@ class HiClawMetricsCollector:
             "honeybadge_hiclaw_task_queue_size",
             "HiClaw task queue depth",
             ["group", "priority"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Task duration
@@ -298,7 +298,7 @@ class HiClawMetricsCollector:
             "HiClaw task duration in seconds",
             ["group", "task_type"],
             buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
-            registry=registry,
+            registry=self._registry,
         )
 
         # Task counter
@@ -306,7 +306,7 @@ class HiClawMetricsCollector:
             "honeybadge_hiclaw_task_total",
             "Total HiClaw tasks processed",
             ["group", "task_type", "status"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Task errors
@@ -314,7 +314,7 @@ class HiClawMetricsCollector:
             "honeybadge_hiclaw_task_errors_total",
             "Total HiClaw task errors",
             ["group", "task_type", "error_type"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Message throughput
@@ -322,7 +322,7 @@ class HiClawMetricsCollector:
             "honeybadge_hiclaw_messages_total",
             "Total HiClaw messages processed",
             ["group", "message_type"],
-            registry=registry,
+            registry=self._registry,
         )
 
     def record_task(
@@ -400,7 +400,7 @@ class ValidationMetricsCollector:
             "honeybadge_validation_total",
             "Total validation checks",
             ["level", "result"],  # level: L1|L2|L3, result: pass|fail
-            registry=registry,
+            registry=self._registry,
         )
 
         # Validation errors
@@ -408,7 +408,7 @@ class ValidationMetricsCollector:
             "honeybadge_validation_errors_total",
             "Total validation errors",
             ["level", "error_code"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # Validation duration
@@ -417,7 +417,7 @@ class ValidationMetricsCollector:
             "Validation duration in seconds",
             ["level"],
             buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
-            registry=registry,
+            registry=self._registry,
         )
 
         # Regeneration counter (when LLM retry happens)
@@ -425,7 +425,7 @@ class ValidationMetricsCollector:
             "honeybadge_validation_regeneration_total",
             "Total nGQL regenerations due to validation failure",
             ["level"],
-            registry=registry,
+            registry=self._registry,
         )
 
     def record_validation(
@@ -475,7 +475,7 @@ class QueryMetricsCollector:
             "honeybadge_query_total",
             "Total queries processed",
             ["query_type", "status"],
-            registry=registry,
+            registry=self._registry,
         )
 
         # End-to-end duration
@@ -484,7 +484,7 @@ class QueryMetricsCollector:
             "End-to-end query duration in seconds",
             ["query_type"],
             buckets=(0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
-            registry=registry,
+            registry=self._registry,
         )
 
         # Phase durations
@@ -493,7 +493,7 @@ class QueryMetricsCollector:
             "Query phase duration in seconds",
             ["phase"],  # phases: llm_generation, validation, execution, summarization
             buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
-            registry=registry,
+            registry=self._registry,
         )
 
         # Result row count
@@ -502,14 +502,14 @@ class QueryMetricsCollector:
             "Number of rows returned per query",
             ["query_type"],
             buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000),
-            registry=registry,
+            registry=self._registry,
         )
 
         # Concurrent queries
         self.concurrent_queries = Gauge(
             "honeybadge_concurrent_queries",
             "Number of currently processing queries",
-            registry=registry,
+            registry=self._registry,
         )
 
     def record_query(

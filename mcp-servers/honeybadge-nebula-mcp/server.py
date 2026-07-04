@@ -11,6 +11,7 @@ import asyncio
 import os
 import re
 import sys
+import time
 
 # Add src/ to path so we can import honeybadge modules
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -28,6 +29,7 @@ from honeybadge.llm.adapter import (
     generate_ngql as llm_generate_ngql,
     summarize_results as llm_summarize_results,
 )
+from honeybadge.metrics.collectors import NEBULA_METRICS, VALIDATION_METRICS
 from honeybadge.ontology import OntologyLoader
 from honeybadge.protocols.validator import NgqlValidator, rewrite_vertex_property_access
 
@@ -473,11 +475,19 @@ async def validate_and_execute_impl(
         logger.info("l3_permissions_fetched", user_id=user_id, trace_id=trace_id)
 
     if user_context and user_context.get("permissions"):
+        _l3_start = time.monotonic()
         try:
             perm_dict = user_context["permissions"]
             ctx = PermissionContext(**perm_dict)
             ngql, perm_warnings = _get_enforcer().enforce(ngql, ctx)
+            VALIDATION_METRICS.record_validation(
+                level="L3", passed=True, duration_seconds=time.monotonic() - _l3_start,
+            )
         except PermissionViolationError as exc:
+            VALIDATION_METRICS.record_validation(
+                level="L3", passed=False, duration_seconds=time.monotonic() - _l3_start,
+            )
+            VALIDATION_METRICS.record_error("L3", "E300")
             return {
                 "success": False,
                 "error": "L3_PERMISSION",
@@ -491,9 +501,18 @@ async def validate_and_execute_impl(
 
     # --- Execute --------------------------------------------------------
     logger.info("ngql_executing", trace_id=trace_id, ngql=ngql[:500])
+    _exec_start = time.monotonic()
     result: NebulaQueryResult = await nebula.execute(ngql, space=target_space)
+    _exec_duration = time.monotonic() - _exec_start
+    NEBULA_METRICS.record_query(
+        space=target_space,
+        operation="execute",
+        duration_seconds=_exec_duration,
+        success=result.success,
+    )
     if not result.success:
         logger.warning("ngql_execution_failed", trace_id=trace_id, error=result.error_message, ngql=ngql[:500])
+        NEBULA_METRICS.record_error(target_space, "EXECUTION_ERROR")
         return {
             "success": False,
             "error": "EXECUTION_ERROR",

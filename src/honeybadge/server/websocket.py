@@ -17,6 +17,7 @@ from honeybadge.db.postgres import PostgreSQLClient
 from honeybadge.llm.adapter import OpenAICompatibleAdapter
 from honeybadge.llm.adapter import generate_ngql as llm_generate_ngql
 from honeybadge.llm.adapter import summarize_results as llm_summarize_results
+from honeybadge.metrics.collectors import QUERY_METRICS
 from honeybadge.permission_service.config import PERMISSION_CONFIG
 from honeybadge.permission_service.models import PermissionContext
 from honeybadge.permission_service.permission_enforcer import PermissionEnforcer
@@ -452,6 +453,7 @@ async def process_query(
 
     logger.info("ws_query_start", trace_id=trace_id, question=question[:50])
 
+    QUERY_METRICS.increment_concurrent()
     try:
         # Step 1: Extract keywords from question and get filtered schema + ontology
         keywords = _extract_keywords(question)
@@ -493,6 +495,7 @@ async def process_query(
             )
 
         # Step 2: Generate nGQL (raises LLMGenerationError on failure)
+        _phase_start = time.time()
         ngql_response = await llm_generate_ngql(
             adapter=llm_adapter,
             question=question,
@@ -500,6 +503,7 @@ async def process_query(
             ontology_info=ontology_str,
             conversation_history=conversation_history,
         )
+        QUERY_METRICS.record_phase("llm_generation", time.time() - _phase_start)
 
         # Strip markdown code fences (e.g. ```ngql ... ```)
         ngql = _strip_markdown_fence(ngql_response.content)
@@ -518,6 +522,7 @@ async def process_query(
             logger.info("ws_permission_filter", trace_id=trace_id, warning=w)
 
         # Step 3: Execute with retry on syntax/semantic errors
+        _exec_phase_start = time.time()
         max_retries = 2
         last_error = None
         for attempt in range(max_retries + 1):
@@ -569,7 +574,10 @@ async def process_query(
         else:
             raise Exception(f"Query execution failed: {last_error}")
 
+        QUERY_METRICS.record_phase("execution", time.time() - _exec_phase_start)
+
         # Step 4: Summarize (raises LLMSummarizationError on failure)
+        _phase_start = time.time()
         summary_response = await llm_summarize_results(
             adapter=llm_adapter,
             question=question,
@@ -577,6 +585,7 @@ async def process_query(
             columns=query_result.columns,
             trace_id=trace_id,
         )
+        QUERY_METRICS.record_phase("summarization", time.time() - _phase_start)
         summary = re.sub(r"<think>.*?</think>", "", summary_response.content, flags=re.DOTALL).strip()
 
         # Step 5: Write audit log
@@ -605,6 +614,13 @@ async def process_query(
             row_count=query_result.row_count,
         )
 
+        QUERY_METRICS.record_query(
+            query_type="ws",
+            status="success",
+            duration_seconds=execution_time_ms / 1000.0,
+            row_count=query_result.row_count,
+        )
+
         return {
             "summary": summary,
             "raw_data": query_result.rows,
@@ -618,6 +634,13 @@ async def process_query(
     except Exception as e:
         execution_time_ms = int((time.time() - start_time) * 1000)
         logger.error("ws_query_error", trace_id=trace_id, error=str(e))
+
+        QUERY_METRICS.record_query(
+            query_type="ws",
+            status="error",
+            duration_seconds=execution_time_ms / 1000.0,
+            row_count=0,
+        )
 
         # Try to write error audit
         try:
@@ -649,6 +672,8 @@ async def process_query(
             "row_count": 0,
             "error": str(e),
         }
+    finally:
+        QUERY_METRICS.decrement_concurrent()
 
 
 def build_query_response(result: dict[str, Any]) -> dict[str, Any]:

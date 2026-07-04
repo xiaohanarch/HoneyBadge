@@ -1,11 +1,13 @@
 """L1-L3 validators for nGQL Anti-Hallucination Framework."""
 
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
 
+from honeybadge.metrics.collectors import VALIDATION_METRICS
 from honeybadge.permission_service.permission_enforcer import (
     _STRING_LITERAL_RE,
     _TAG_VAR_RE,
@@ -201,11 +203,17 @@ class NgqlValidator:
         Returns:
             ValidationResult with errors and warnings
         """
+        _start = time.monotonic()
         result = ValidationResult(valid=True)
         ngql_stripped = ngql.strip()
 
         if not ngql_stripped:
             result.add_error("E001", "Empty query statement")
+            VALIDATION_METRICS.record_validation(
+                level="L1",
+                passed=False,
+                duration_seconds=time.monotonic() - _start,
+            )
             return result
 
         # Check for balanced parentheses
@@ -290,6 +298,11 @@ class NgqlValidator:
                 "auto-rewritten to three-part (var.Tag.prop) for NebulaGraph v3.8",
             )
 
+        VALIDATION_METRICS.record_validation(
+            level="L1",
+            passed=result.valid,
+            duration_seconds=time.monotonic() - _start,
+        )
         return result
 
     # =========================================================================
@@ -308,10 +321,16 @@ class NgqlValidator:
         Returns:
             ValidationResult with errors and warnings
         """
+        _start = time.monotonic()
         result = ValidationResult(valid=True)
 
         if not self._schema_tags:
             result.add_warning("W003", "No schema loaded, skipping L2 validation")
+            VALIDATION_METRICS.record_validation(
+                level="L2",
+                passed=True,
+                duration_seconds=time.monotonic() - _start,
+            )
             return result
 
         # Extract potential tag references
@@ -395,6 +414,11 @@ class NgqlValidator:
                         position=match.start(),
                     )
 
+        VALIDATION_METRICS.record_validation(
+            level="L2",
+            passed=result.valid,
+            duration_seconds=time.monotonic() - _start,
+        )
         return result
 
     # =========================================================================
