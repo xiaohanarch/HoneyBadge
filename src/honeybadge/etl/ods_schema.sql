@@ -1272,3 +1272,67 @@ CREATE INDEX IF NOT EXISTS idx_ods_contract_number ON ods_contract(contract_numb
 CREATE INDEX IF NOT EXISTS idx_ods_contract_party ON ods_contract(party_type, party_id);
 CREATE INDEX IF NOT EXISTS idx_ods_contract_dq ON ods_contract(dq_status);
 CREATE INDEX IF NOT EXISTS idx_ods_contract_org ON ods_contract(org_id);
+
+-- ============================================================================
+-- ETL Per-Table Sync Status (P3: incremental loading)
+-- ============================================================================
+-- Tracks the extraction progress of each ODS table independently, so a
+-- failed batch can be resumed per-table (e.g. supplier succeeded but
+-- purchase_order failed). Replaces reliance on etl_sync_status.tables[]
+-- which only records batch-level completion.
+--
+-- The (batch_id, table_name) UNIQUE constraint makes loads idempotent:
+-- the incremental loader skips a table when a 'success' row already
+-- exists for the same batch.
+
+CREATE TABLE IF NOT EXISTS etl_table_sync_status (
+    id                  BIGSERIAL PRIMARY KEY,
+    batch_id            VARCHAR(64) NOT NULL,
+    table_name          VARCHAR(64) NOT NULL,
+    source_system       VARCHAR(30) NOT NULL,
+    watermark_start     TIMESTAMP,              -- since value used for extraction
+    extraction_cutoff   TIMESTAMP,              -- Oracle SYSTIMESTAMP at extract start (next watermark)
+    rows_extracted      BIGINT DEFAULT 0,
+    rows_loaded         BIGINT DEFAULT 0,
+    status              VARCHAR(20) NOT NULL,   -- extracting/loading/success/failed/skipped
+    error_message       TEXT,
+    started_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMP,
+    UNIQUE(batch_id, table_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_table_sync_status_table ON etl_table_sync_status(table_name, status);
+CREATE INDEX IF NOT EXISTS idx_table_sync_status_batch ON etl_table_sync_status(batch_id);
+CREATE INDEX IF NOT EXISTS idx_table_sync_status_started ON etl_table_sync_status(started_at DESC);
+
+-- ============================================================================
+-- ETL Per-Table Sync Status (P3: incremental loading)
+-- ============================================================================
+-- Tracks the extraction progress of each ODS table independently, so a
+-- failed batch can be resumed per-table (e.g. supplier succeeded but
+-- purchase_order failed). Replaces reliance on etl_sync_status.tables[]
+-- which only records batch-level completion.
+--
+-- The (batch_id, table_name) UNIQUE constraint makes loads idempotent:
+-- the incremental loader skips a table when a 'success' row already
+-- exists for the same batch.
+
+CREATE TABLE IF NOT EXISTS etl_table_sync_status (
+    id                  BIGSERIAL PRIMARY KEY,
+    batch_id            VARCHAR(64) NOT NULL,
+    table_name          VARCHAR(64) NOT NULL,
+    source_system       VARCHAR(30) NOT NULL,
+    watermark_start     TIMESTAMP,              -- since value used for extraction
+    extraction_cutoff   TIMESTAMP,              -- Oracle SYSTIMESTAMP at extract start (next watermark)
+    rows_extracted      BIGINT DEFAULT 0,
+    rows_loaded         BIGINT DEFAULT 0,
+    status              VARCHAR(20) NOT NULL,   -- extracting/loading/success/failed/skipped
+    error_message       TEXT,
+    started_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMP,
+    UNIQUE(batch_id, table_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_table_sync_status_table ON etl_table_sync_status(table_name, status);
+CREATE INDEX IF NOT EXISTS idx_table_sync_status_batch ON etl_table_sync_status(batch_id);
+CREATE INDEX IF NOT EXISTS idx_table_sync_status_started ON etl_table_sync_status(started_at DESC);
