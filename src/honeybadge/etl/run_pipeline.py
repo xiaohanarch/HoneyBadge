@@ -517,6 +517,21 @@ class ETLPipelineRunner:
         logger.info("import_starting", batch_id=self.config.batch_id)
 
         try:
+            # Check if nebula-importer binary is available — skip gracefully if not
+            import shutil
+
+            if not shutil.which(self.config.importer_binary):
+                logger.warning(
+                    "importer_binary_not_found",
+                    binary=self.config.importer_binary,
+                    batch_id=self.config.batch_id,
+                )
+                self.state.warnings.append({
+                    "stage": "import",
+                    "warning": f"nebula-importer binary '{self.config.importer_binary}' not found; "
+                    "CSV files generated, manual import required.",
+                })
+                return
             # Check if there are files to import
             total_files = len(self.state.import_files.get("vertices", [])) + len(
                 self.state.import_files.get("edges", [])

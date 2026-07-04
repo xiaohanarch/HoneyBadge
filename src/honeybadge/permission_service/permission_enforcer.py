@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 
-from honeybadge.permission_service.config import PROCESS_TAGS
+from honeybadge.permission_service.config import ORG_SCOPED_MASTER_TAGS, PROCESS_TAGS
 from honeybadge.permission_service.models import PermissionContext
 
 
@@ -83,6 +83,21 @@ def _get_tag_category(tag: str) -> str | None:
     return None
 
 
+def _is_org_scoped(tag: str) -> bool:
+    """Return True if this tag requires org_id filtering for non-admin users.
+
+    PTP/OTC tags are always org-scoped.  MASTER tags are org-scoped only if
+    they appear in ORG_SCOPED_MASTER_TAGS (business entities like Supplier,
+    Customer, Item); global reference data (Currency, UOM) returns False.
+    """
+    category = _get_tag_category(tag)
+    if category is None:
+        return False
+    if category != "MASTER":
+        return True  # PTP/OTC tags are always org-scoped
+    return tag in ORG_SCOPED_MASTER_TAGS
+
+
 def _has_org_filter(ngql: str, var: str, search_start: int = 0) -> bool:
     """Return True if ngql already contains an org_id filter for the given variable.
 
@@ -119,7 +134,8 @@ def _name_anonymous_nodes(ngql: str) -> str:
     This rewrites ``(:PurchaseOrder)`` to ``(_gen0:PurchaseOrder)`` so the
     enforcer can inject ``_gen0.PurchaseOrder.org_id IN [...]``.
 
-    Only PTP/OTC tags are rewritten (MASTER tags do not need org_id filtering).
+    Only org-scoped tags (PTP/OTC + org-scoped MASTER tags like Supplier) are
+    rewritten; global MASTER tags (Currency, UOM) do not need org_id filtering.
     Variable name collisions with existing variables are avoided.
     """
     existing_vars: set[str] = {
@@ -132,9 +148,8 @@ def _name_anonymous_nodes(ngql: str) -> str:
         var, tag = match.group(1), match.group(2)
         if var:
             return match.group(0)  # already named
-        category = _get_tag_category(tag)
-        if category is None or category == "MASTER":
-            return match.group(0)  # master/unknown: no org_id needed
+        if not _is_org_scoped(tag):
+            return match.group(0)  # global master/unknown: no org_id needed
         while f"_gen{counter}" in existing_vars:
             counter += 1
         new_var = f"_gen{counter}"
@@ -321,9 +336,8 @@ class PermissionEnforcer:
 
         # 2a. Inject for MATCH (var:Tag) patterns
         for var, tag in tag_vars:
-            category = _get_tag_category(tag)
-            if category is None or category == "MASTER":
-                continue  # master data: no org filter required
+            if not _is_org_scoped(tag):
+                continue  # global master/unknown: no org filter required
             scope_start = _find_var_scope(ngql, var, tag)
             if not _has_org_filter(ngql, var, scope_start):
                 ngql = _inject_org_filter(ngql, var, tag, ctx.org_ids)
@@ -335,9 +349,8 @@ class PermissionEnforcer:
 
         # 2b. Inject for LOOKUP ON Tag patterns
         for tag in lookup_tags:
-            category = _get_tag_category(tag)
-            if category is None or category == "MASTER":
-                continue  # master data: no org filter required
+            if not _is_org_scoped(tag):
+                continue  # global master/unknown: no org filter required
             if not _has_org_filter(ngql, tag):
                 ngql = _inject_org_filter_lookup(ngql, tag, ctx.org_ids)
                 ids_str = ", ".join(str(i) for i in ctx.org_ids)

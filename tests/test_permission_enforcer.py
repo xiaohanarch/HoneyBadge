@@ -110,10 +110,10 @@ class TestOrgFilterInjection:
         assert warnings == []
 
     def test_master_tag_not_filtered_by_org(self, enforcer):
-        ngql = "MATCH (s:Supplier) RETURN s.supplier_name"
+        ngql = "MATCH (c:Currency) RETURN c.currency_code"
         ctx = _ctx(org_ids=[2])
         result_ngql, warnings = enforcer.enforce(ngql, ctx)
-        # Supplier is MASTER — no org_id injection
+        # Currency is a global MASTER — no org_id injection
         assert "org_id" not in result_ngql
         assert warnings == []
 
@@ -214,8 +214,8 @@ class TestLookupOnOrgFilterInjection:
         assert warnings == []
 
     def test_lookup_master_tag_not_filtered_by_org(self, enforcer):
-        """LOOKUP ON Supplier (MASTER) should not get org_id injection."""
-        ngql = "LOOKUP ON Supplier YIELD id(vertex) AS sup_id"
+        """LOOKUP ON Currency (global MASTER) should not get org_id injection."""
+        ngql = "LOOKUP ON Currency YIELD id(vertex) AS cur_id"
         ctx = _ctx(org_ids=[1021])
         result_ngql, warnings = enforcer.enforce(ngql, ctx)
         assert "org_id" not in result_ngql
@@ -321,8 +321,8 @@ class TestAnonymousNodeHandling:
         assert len(warnings) == 1
 
     def test_anonymous_master_node_not_renamed(self, enforcer):
-        """``(:Supplier)`` (MASTER) should NOT be renamed — no org_id needed."""
-        ngql = "MATCH (:Supplier) RETURN count(*)"
+        """``(:Currency)`` (global MASTER) should NOT be renamed — no org_id needed."""
+        ngql = "MATCH (:Currency) RETURN count(*)"
         ctx = _ctx(org_ids=[1021])
         result_ngql, warnings = enforcer.enforce(ngql, ctx)
         assert "_gen" not in result_ngql
@@ -375,15 +375,15 @@ class TestMultiHopTraversal:
     """
 
     def test_master_to_ptp_hop_injects_on_ptp_only(self, enforcer):
-        """Supplier (MASTER) → PurchaseOrder (PTP): only PO gets org_id."""
+        """Currency (global MASTER) → PurchaseOrder (PTP): only PO gets org_id."""
         ngql = (
-            "MATCH (s:Supplier)-[:SUPPLIED_TO]->(po:PurchaseOrder) "
-            "RETURN s.supplier_name, po.po_number"
+            "MATCH (c:Currency)-[:PRICED_IN]->(po:PurchaseOrder) "
+            "RETURN c.currency_code, po.po_number"
         )
         ctx = _ctx(org_ids=[1021])
         result_ngql, warnings = enforcer.enforce(ngql, ctx)
         assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
-        assert "s.org_id" not in result_ngql  # MASTER: no filter
+        assert "c.org_id" not in result_ngql  # global MASTER: no filter
         assert len(warnings) == 1
 
     def test_ptp_to_ptp_hop_injects_on_both(self, enforcer):
@@ -399,23 +399,23 @@ class TestMultiHopTraversal:
         assert len(warnings) == 2
 
     def test_three_hop_master_ptp_ptp(self, enforcer):
-        """Supplier → PO → Invoice: both PTP nodes get org_id."""
+        """Currency → PO → Invoice: both PTP nodes get org_id."""
         ngql = (
-            "MATCH (s:Supplier)-[:SUPPLIED_TO]->(po:PurchaseOrder)"
+            "MATCH (c:Currency)-[:PRICED_IN]->(po:PurchaseOrder)"
             "-[:INVOICED_BY]->(i:Invoice) "
-            "RETURN s.supplier_name, po.po_number, i.invoice_number"
+            "RETURN c.currency_code, po.po_number, i.invoice_number"
         )
         ctx = _ctx(org_ids=[1021])
         result_ngql, warnings = enforcer.enforce(ngql, ctx)
         assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
         assert "i.Invoice.org_id IN [1021]" in result_ngql
-        assert "s.org_id" not in result_ngql
+        assert "c.org_id" not in result_ngql
         assert len(warnings) == 2
 
     def test_anonymous_node_in_multi_hop(self, enforcer):
         """Anonymous PTP node in a multi-hop path gets named + filtered."""
         ngql = (
-            "MATCH (s:Supplier)-[:SUPPLIED_TO]->(:PurchaseOrder)"
+            "MATCH (c:Currency)-[:PRICED_IN]->(:PurchaseOrder)"
             "-[:INVOICED_BY]->(i:Invoice) "
             "RETURN count(*)"
         )
@@ -426,8 +426,8 @@ class TestMultiHopTraversal:
         assert "_gen0.PurchaseOrder.org_id IN [1021]" in result_ngql
         # Named Invoice also filtered
         assert "i.Invoice.org_id IN [1021]" in result_ngql
-        # MASTER Supplier not filtered
-        assert "s.org_id" not in result_ngql
+        # Global MASTER Currency not filtered
+        assert "c.org_id" not in result_ngql
         assert len(warnings) == 2
 
     def test_multi_hop_with_existing_org_filter_on_one_node(self, enforcer):
@@ -479,12 +479,12 @@ class TestMultiHopTraversal:
     def test_two_anonymous_ptp_nodes_with_existing_var_collision(self, enforcer):
         """Generated var names must not collide with existing variables."""
         ngql = (
-            "MATCH (_gen0:Supplier)-[:SUPPLIED_TO]->(:PurchaseOrder) "
+            "MATCH (_gen0:Currency)-[:PRICED_IN]->(:PurchaseOrder) "
             "RETURN count(*)"
         )
         ctx = _ctx(org_ids=[1021])
         result_ngql, warnings = enforcer.enforce(ngql, ctx)
-        # _gen0 is taken by Supplier, so the anonymous PO should get _gen1
+        # _gen0 is taken by Currency, so the anonymous PO should get _gen1
         assert "_gen1:PurchaseOrder" in result_ngql
         assert "_gen1.PurchaseOrder.org_id IN [1021]" in result_ngql
         assert len(warnings) == 1
@@ -658,4 +658,87 @@ class TestMultiWithScope:
         assert i_org > first_with
         assert i_org < second_with
 
+        assert len(warnings) == 2
+
+
+class TestOrgScopedMasterTags:
+    """Org-scoped MASTER tags (Supplier, Customer, Item, etc.) must get
+    org_id injection for non-admin users.
+
+    These are business entities that are org-scoped in ERP (each org has its
+    own suppliers, customers, items), unlike global reference data (Currency,
+    UOM) which is not org-filtered.
+    """
+
+    def test_supplier_gets_org_id_for_non_admin(self, enforcer):
+        """Supplier (org-scoped MASTER) must get org_id injected for analyst."""
+        ngql = "MATCH (s:Supplier) RETURN s.Supplier.supplier_name"
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "s.Supplier.org_id IN [1000]" in result_ngql
+        assert len(warnings) == 1
+
+    def test_supplier_no_injection_for_admin(self, enforcer):
+        """Supplier with org_ids=None (admin) should not get org_id injected."""
+        ngql = "MATCH (s:Supplier) RETURN s.Supplier.supplier_name"
+        ctx = _ctx(org_ids=None)
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert result_ngql == ngql
+        assert warnings == []
+
+    def test_currency_not_filtered_for_non_admin(self, enforcer):
+        """Currency (global MASTER) should NOT get org_id injection."""
+        ngql = "MATCH (c:Currency) RETURN c.Currency.currency_code"
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "org_id" not in result_ngql
+        assert warnings == []
+
+    def test_anonymous_supplier_gets_named_and_filtered(self, enforcer):
+        """Anonymous ``(:Supplier)`` should be renamed and get org_id injected."""
+        ngql = "MATCH (:Supplier) RETURN count(*)"
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "_gen0:Supplier" in result_ngql
+        assert "_gen0.Supplier.org_id IN [1000]" in result_ngql
+        assert len(warnings) == 1
+
+    def test_customer_gets_org_id_for_non_admin(self, enforcer):
+        """Customer (org-scoped MASTER) must get org_id injected for analyst."""
+        ngql = "MATCH (c:Customer) RETURN c.Customer.customer_name"
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "c.Customer.org_id IN [1000]" in result_ngql
+        assert len(warnings) == 1
+
+    def test_lookup_on_supplier_gets_org_id(self, enforcer):
+        """LOOKUP ON Supplier should get org_id injected for non-admin."""
+        ngql = "LOOKUP ON Supplier YIELD id(vertex) AS sup_id"
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "Supplier.org_id IN [1000]" in result_ngql
+        assert len(warnings) == 1
+
+    def test_supplier_with_existing_org_filter_not_double_injected(self, enforcer):
+        """Supplier with existing org_id filter should not be double-injected."""
+        ngql = (
+            "MATCH (s:Supplier) "
+            "WHERE s.Supplier.org_id IN [1000] "
+            "RETURN s.Supplier.supplier_name"
+        )
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert result_ngql.count("s.Supplier.org_id IN") == 1
+        assert warnings == []
+
+    def test_supplier_and_purchase_order_both_filtered(self, enforcer):
+        """Multi-hop Supplier → PO: both get org_id (both are org-scoped)."""
+        ngql = (
+            "MATCH (s:Supplier)-[:SUPPLIED_TO]->(po:PurchaseOrder) "
+            "RETURN s.Supplier.supplier_name, po.PurchaseOrder.po_number"
+        )
+        ctx = _ctx(org_ids=[1021])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "s.Supplier.org_id IN [1021]" in result_ngql
+        assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
         assert len(warnings) == 2

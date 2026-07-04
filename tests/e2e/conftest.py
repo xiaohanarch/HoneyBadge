@@ -107,6 +107,12 @@ def _wait_for_manager_ready(max_init_wait=90, retry_restarts=2):
         if attempt > 0:
             print(f"[manager_ready] Attempt {attempt + 1}/{retry_restarts + 1}: "
                   f"restarting Manager (previous attempt did not complete init)...")
+            # Truncate init log before restart so we wait for a fresh marker
+            subprocess.run(
+                ["docker", "exec", MANAGER_CONTAINER, "truncate", "-s", "0",
+                 "/var/log/hiclaw/honeybadge-init.log"],
+                capture_output=True, timeout=10,
+            )
             subprocess.run(
                 ["docker", "restart", MANAGER_CONTAINER],
                 capture_output=True, timeout=60,
@@ -226,6 +232,15 @@ def reset_manager_sessions():
     )
 
     # 2. Reset Manager session (transcripts + sessions.json + restart + wait).
+    #    Truncate the init log BEFORE restart so _wait_for_manager_ready()
+    #    waits for a FRESH "auto-init complete" marker, not the stale one
+    #    from a previous boot. Without this, the readiness check sees the
+    #    old marker immediately and proceeds before the new init runs.
+    subprocess.run(
+        ["docker", "exec", MANAGER_CONTAINER, "truncate", "-s", "0",
+         "/var/log/hiclaw/honeybadge-init.log"],
+        capture_output=True, timeout=10,
+    )
     _reset_openclaw_sessions(MANAGER_CONTAINER, MANAGER_SESSION_DIR)
 
     # 3. Worker session cleanup (graph + analytics).
