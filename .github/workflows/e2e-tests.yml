@@ -485,6 +485,20 @@ jobs:
           timeout 10 docker exec honeybadge-hiclaw-graph-worker cat /root/hiclaw-fs/agents/graph-worker/openclaw.json 2>/dev/null || echo "(openclaw.json not available)"
           echo "=== Manager state.json ==="
           timeout 10 docker exec honeybadge-hiclaw-manager cat /root/hiclaw-fs/agents/manager/state.json 2>/dev/null || echo "(state.json not available)"
+          echo "=== Hermes errors.log (Manager, last 100 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-manager tail -100 /root/.hermes/logs/errors.log 2>/dev/null || echo "(hermes errors.log not available on manager)"
+          echo "=== Hermes agent.log (Manager, last 100 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-manager tail -100 /root/.hermes/logs/agent.log 2>/dev/null || echo "(hermes agent.log not available on manager)"
+          echo "=== Hermes errors.log (graph-worker, last 100 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-graph-worker tail -100 /root/.hermes/logs/errors.log 2>/dev/null || echo "(hermes errors.log not available on graph-worker)"
+          echo "=== Hermes errors.log (analytics-worker, last 100 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-analytics-worker tail -100 /root/.hermes/logs/errors.log 2>/dev/null || echo "(hermes errors.log not available on analytics-worker)"
+          echo "=== Openclaw logs (Manager, last 100 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-manager bash -c 'tail -100 /tmp/openclaw/openclaw-*.log 2>/dev/null' || echo "(openclaw logs not available on manager)"
+          echo "=== Openclaw logs (graph-worker, last 100 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-graph-worker bash -c 'tail -100 /tmp/openclaw/openclaw-*.log 2>/dev/null' || echo "(openclaw logs not available on graph-worker)"
+          echo "=== Openclaw logs (analytics-worker, last 100 lines) ==="
+          timeout 10 docker exec honeybadge-hiclaw-analytics-worker bash -c 'tail -100 /tmp/openclaw/openclaw-*.log 2>/dev/null' || echo "(openclaw logs not available on analytics-worker)"
         timeout-minutes: 10
 
   # ===========================================================================
