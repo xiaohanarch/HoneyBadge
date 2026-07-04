@@ -201,6 +201,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./init-ods-db.sh:/docker-entrypoint-initdb.d/02-init-ods-db.sh:ro
+      - ../../src/honeybadge/etl/ods_schema.sql:/docker-entrypoint-initdb.d/ods_schema.sql:ro
     networks:
       - honeybadge-net
     healthcheck:

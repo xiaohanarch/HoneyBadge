@@ -11,11 +11,13 @@ Quality check results:
     - quarantined: Record moved to quarantine table
 """
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
+import asyncpg
 import structlog
 
 from honeybadge.core.exceptions import HoneyBadgeError
@@ -452,13 +454,13 @@ class ReferentialIntegrityCheck:
             postgres_dsn: PostgreSQL connection string for ODS database
         """
         self.postgres_dsn = postgres_dsn
-        self._pool = None
+        self._pool: asyncpg.Pool | None = None
 
     async def connect(self) -> None:
         """Connect to the ODS PostgreSQL database."""
-        # TODO: Implement actual PostgreSQL connection
-        # import asyncpg
-        # self._pool = await asyncpg.create_pool(self.postgres_dsn, min_size=2, max_size=10)
+        self._pool = await asyncpg.create_pool(
+            self.postgres_dsn, min_size=2, max_size=10
+        )
         logger.info("ref_integrity_checker_connected")
 
     async def disconnect(self) -> None:
@@ -540,11 +542,9 @@ class ReferentialIntegrityCheck:
             """
 
             # TODO: Implement actual query execution
-            # async with self._pool.acquire() as conn:
-            #     orphans = await conn.fetch(query, batch_id)
-
-            # Placeholder - assume passed
-            orphans: list[Any] = []
+            assert self._pool is not None
+            async with self._pool.acquire() as conn:
+                orphans = await conn.fetch(query, batch_id)
 
             if orphans:
                 orphan_count = sum(r["cnt"] for r in orphans)
@@ -603,14 +603,14 @@ class DataQualityChecker:
         """
         self.postgres_dsn = postgres_dsn
         self.quarantine_threshold = quarantine_threshold
-        self._pool = None
+        self._pool: asyncpg.Pool | None = None
         self._ref_checker: ReferentialIntegrityCheck | None = None
 
     async def connect(self) -> None:
         """Connect to the ODS PostgreSQL database."""
-        # TODO: Implement actual PostgreSQL connection
-        # import asyncpg
-        # self._pool = await asyncpg.create_pool(self.postgres_dsn, min_size=2, max_size=10)
+        self._pool = await asyncpg.create_pool(
+            self.postgres_dsn, min_size=2, max_size=10
+        )
 
         # Create referential integrity checker with same connection
         self._ref_checker = ReferentialIntegrityCheck(self.postgres_dsn)
@@ -654,13 +654,29 @@ class DataQualityChecker:
 
         if not rules:
             logger.warning("no_validation_rules", table=table_name)
+            # No rules to validate — mark all records as passed so transform includes them.
+            assert self._pool is not None
+            async with self._pool.acquire() as conn:
+                summary.total_records = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM {table_name} WHERE etl_batch_id = $1",
+                    batch_id,
+                )
+                summary.passed = summary.total_records
+                await conn.execute(
+                    f"UPDATE {table_name} "
+                    "SET dq_status = 'passed' "
+                    "WHERE etl_batch_id = $1 AND dq_status = 'pending'",
+                    batch_id,
+                )
             return summary
 
         # Get total record count
-        # TODO: Implement actual count
-        # async with self._pool.acquire() as conn:
-        #     total = await conn.fetchval(f"SELECT COUNT(*) FROM {table_name} WHERE etl_batch_id = $1", batch_id)
-        summary.total_records = 0
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            summary.total_records = await conn.fetchval(
+                f"SELECT COUNT(*) FROM {table_name} WHERE etl_batch_id = $1",
+                batch_id,
+            )
 
         # Run validation rules
         for rule in rules:
@@ -799,11 +815,11 @@ class DataQualityChecker:
             LIMIT 100
         """
 
-        # TODO: Implement actual query
-        # async with self._pool.acquire() as conn:
-        #     rows = await conn.fetch(query, batch_id)
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, batch_id)
 
-        failed_values: list[Any] = []  # TODO: rows from actual query
+        failed_values: list[Any] = [r["val"] for r in rows]
 
         return ValidationResult(
             rule_name=rule.name,
@@ -821,32 +837,43 @@ class DataQualityChecker:
         """Check business rule constraints."""
         failed_values: list[Any] = []
 
-        # Check value set constraint
-        if rule.value_set is not None:
-            values_str = ", ".join(f"'{v}'" for v in rule.value_set)
-            query = f"""
-                SELECT {rule.column} as val
-                FROM {table_name}
-                WHERE etl_batch_id = $1
-                  AND {rule.column} IS NOT NULL
-                  AND {rule.column} NOT IN ({values_str})
-                LIMIT 100
-            """
-            # TODO: Implement actual query
-            # failed_values = await conn.fetch(query, batch_id)
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            # Check value set constraint
+            if rule.value_set is not None:
+                values_str = ", ".join(f"'{v}'" for v in rule.value_set)
+                query = f"""
+                    SELECT {rule.column} as val
+                    FROM {table_name}
+                    WHERE etl_batch_id = $1
+                      AND {rule.column} IS NOT NULL
+                      AND {rule.column} NOT IN ({values_str})
+                    LIMIT 100
+                """
+                rows = await conn.fetch(query, batch_id)
+                failed_values.extend(r["val"] for r in rows)
 
-        # Check min/max constraint
-        if rule.min_value is not None:
-            op = ">=" if rule.or_equal else ">"
-            query = f"""
-                SELECT {rule.column} as val
-                FROM {table_name}
-                WHERE etl_batch_id = $1
-                  AND {rule.column} IS NOT NULL
-                  AND {rule.column} {op} {rule.min_value}
-                LIMIT 100
-            """
-            # TODO: Implement actual query
+            # Check min/max constraint (min_value may live on rule or in params)
+            min_value = rule.min_value
+            if min_value is None:
+                min_value = rule.params.get("min_value")
+            if min_value is not None:
+                op = ">=" if rule.or_equal else ">"
+                # BUG FIX: original query `AND {col} {op} {min}` returned rows
+                # that SATISFY the rule. We want VIOLATIONS, so negate.
+                query = f"""
+                    SELECT {rule.column} as val
+                    FROM {table_name}
+                    WHERE etl_batch_id = $1
+                      AND {rule.column} IS NOT NULL
+                      AND NOT ({rule.column} {op} {min_value})
+                    LIMIT 100
+                """
+                rows = await conn.fetch(query, batch_id)
+                failed_values.extend(r["val"] for r in rows)
+
+            # NOTE: column_a/column_b pair comparison (e.g. approved_date_after_order)
+            # is not implemented yet — the rule passes silently. See plan Phase B4.
 
         return ValidationResult(
             rule_name=rule.name,
@@ -879,8 +906,14 @@ class DataQualityChecker:
             LIMIT 1000
         """
 
-        # TODO: Implement actual query and regex check
-        failed_values: list[Any] = []
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, batch_id)
+
+        pattern = re.compile(rule.regex_pattern)
+        failed_values: list[Any] = [
+            r["val"] for r in rows if not pattern.match(str(r["val"]))
+        ]
 
         return ValidationResult(
             rule_name=rule.name,
@@ -890,33 +923,111 @@ class DataQualityChecker:
         )
 
     async def _update_dq_status(self, summary: DQCheckSummary) -> None:
-        """Update dq_status in ODS table based on check results."""
-        # TODO: Implement actual update
-        # For quarantined records:
-        # UPDATE {summary.table_name}
-        # SET dq_status = 'quarantined', dq_errors = $2
-        # WHERE etl_batch_id = $1
-        #   AND source_id IN (quarantined_ids)
+        """Update dq_status in ODS table based on check results.
 
-        # For passed with warnings:
-        # UPDATE {summary.table_name}
-        # SET dq_status = 'passed_with_warnings'
-        # WHERE etl_batch_id = $1
-        #   AND dq_status = 'pending'
+        Three-tier update:
+            1. quarantined — rows matching failed column values (critical failures)
+            2. passed_with_warnings — remaining pending rows if warnings exist
+            3. passed — all remaining pending rows
+        """
+        import json
 
-        # For passed:
-        # UPDATE {summary.table_name}
-        # SET dq_status = 'passed'
-        # WHERE etl_batch_id = $1
-        #   AND dq_status = 'pending'
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            # 1. Quarantined — flag rows whose failing column matches a failed value.
+            #    Group by column (from error_detail) to issue one UPDATE per column.
+            if summary.quarantined_records:
+                col_values: dict[str, set[str]] = {}
+                col_errors: dict[str, list[dict[str, Any]]] = {}
+                for rec in summary.quarantined_records:
+                    col = rec.error_detail.get("column", "id")
+                    col_values.setdefault(col, set()).add(rec.source_id)
+                    col_errors.setdefault(col, []).append(
+                        {
+                            "rule": rec.rule_name,
+                            "error_type": rec.error_type.value
+                            if hasattr(rec.error_type, "value")
+                            else str(rec.error_type),
+                        }
+                    )
+                for col, values in col_values.items():
+                    # Null-check failures have source_id="None" — handle via IS NULL
+                    if "None" in values and len(values) == 1:
+                        await conn.execute(
+                            f"UPDATE {summary.table_name} "
+                            "SET dq_status = 'quarantined', "
+                            f"dq_errors = $2 "
+                            f"WHERE etl_batch_id = $1 AND {col} IS NULL",
+                            summary.batch_id,
+                            json.dumps(col_errors[col]),
+                        )
+                    else:
+                        # Match rows where the failing column equals any failed value.
+                        # Exclude "None" sentinel from the value list.
+                        real_values = [v for v in values if v != "None"]
+                        if real_values:
+                            placeholders = ", ".join(
+                                f"${i + 3}" for i in range(len(real_values))
+                            )
+                            await conn.execute(
+                                f"UPDATE {summary.table_name} "
+                                "SET dq_status = 'quarantined', "
+                                f"dq_errors = $2 "
+                                f"WHERE etl_batch_id = $1 AND {col} IN ({placeholders})",
+                                summary.batch_id,
+                                json.dumps(col_errors[col]),
+                                *real_values,
+                            )
+
+            # 2. Passed-with-warnings (records still pending and not quarantined)
+            if summary.passed_with_warnings > 0:
+                await conn.execute(
+                    f"UPDATE {summary.table_name} "
+                    "SET dq_status = 'passed_with_warnings' "
+                    "WHERE etl_batch_id = $1 AND dq_status = 'pending'",
+                    summary.batch_id,
+                )
+
+            # 3. Passed (remaining pending records)
+            await conn.execute(
+                f"UPDATE {summary.table_name} "
+                "SET dq_status = 'passed' "
+                "WHERE etl_batch_id = $1 AND dq_status = 'pending'",
+                summary.batch_id,
+            )
 
         logger.info("dq_status_updated", table=summary.table_name, batch_id=summary.batch_id)
 
     async def _insert_quarantine(self, records: list[QuarantineRecord]) -> None:
-        """Insert quarantine records into the quarantine table."""
-        # TODO: Implement actual insert
-        # INSERT INTO etl_quarantine (batch_id, source_table, source_id, error_type, error_detail, severity, created_at)
-        # VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        """Insert quarantine records into the etl_quarantine table."""
+        import json
+
+        if not records:
+            return
+
+        rows = [
+            (
+                rec.batch_id,
+                rec.source_table,
+                rec.source_id,
+                rec.error_type.value if hasattr(rec.error_type, "value") else str(rec.error_type),
+                json.dumps(rec.error_detail),
+                rec.severity.value if hasattr(rec.severity, "value") else str(rec.severity),
+            )
+            for rec in records
+        ]
+
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            await conn.executemany(
+                """
+                INSERT INTO etl_quarantine
+                    (batch_id, source_table, source_id, error_type,
+                     error_detail, severity, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                """,
+                rows,
+            )
 
         logger.info(
             "quarantine_records_inserted",

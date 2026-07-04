@@ -40,7 +40,14 @@ from typing import Any
 import structlog
 
 from honeybadge.core.constants import VERSION
+from honeybadge.db.nebula import NebulaGraphClient
 from honeybadge.etl.quality import DataQualityChecker
+from honeybadge.etl.tag_prop_types import (
+    PTP_EDGES,
+    PTP_TAGS,
+    get_edge_prop_type,
+    get_tag_prop_type,
+)
 from honeybadge.etl.transform import EDGE_MAPPINGS, VERTEX_MAPPINGS, GraphTransformer
 
 logger = structlog.get_logger()
@@ -73,7 +80,7 @@ class PipelineConfig:
     """Configuration for ETL pipeline execution."""
 
     # PostgreSQL ODS connection
-    postgres_dsn: str = "postgresql://honeybadge:honeybadge@localhost:5432/honeybadge_ods"
+    postgres_dsn: str = "postgresql://honeybadge:honeybadge123@localhost:5432/honeybadge_ods"
 
     # NebulaGraph connection
     nebula_host: str = "localhost"
@@ -95,6 +102,11 @@ class PipelineConfig:
     # Paths
     importer_config_template: str = "src/honeybadge/etl/importer.yaml"
     importer_binary: str = "nebula-importer"
+
+    # Trigger detection
+    skip_trigger: bool = False  # Skip sync trigger wait (CSV mode, local dev)
+    trigger_poll_interval_sec: int = 5
+    trigger_timeout_sec: int = 600
 
     @property
     def incremental(self) -> bool:
@@ -290,19 +302,39 @@ class ETLPipelineRunner:
         Wait for source system sync to complete.
 
         Supports two modes:
-        - Polling: Check etl_sync_status table
-        - Kafka: Consume from etl-trigger topic (TODO)
+        - Polling: Check etl_sync_status table for status='completed'
+        - Skip: When config.skip_trigger is True (CSV mode, local dev)
 
-        For now, uses polling mode with immediate return if batch already synced.
+        Kafka trigger consumption is a Phase 2 concern.
         """
+        if self.config.skip_trigger:
+            logger.info("sync_trigger_skipped", batch_id=self.config.batch_id)
+            return
+
         logger.info("waiting_for_sync_trigger", batch_id=self.config.batch_id)
 
-        # TODO: Implement actual trigger detection
-        # Option A: Poll etl_sync_status table
-        # Option B: Consume Kafka message from etl-trigger topic
+        import asyncpg
 
-        # For now, assume trigger is already received
-        logger.info("sync_trigger_received", batch_id=self.config.batch_id)
+        pool = await asyncpg.create_pool(self.config.postgres_dsn, min_size=1, max_size=2)
+        try:
+            elapsed = 0
+            while elapsed < self.config.trigger_timeout_sec:
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT status FROM etl_sync_status WHERE batch_id = $1",
+                        self.config.batch_id,
+                    )
+                if row and row["status"] == "completed":
+                    logger.info("sync_trigger_received", batch_id=self.config.batch_id)
+                    return
+                await asyncio.sleep(self.config.trigger_poll_interval_sec)
+                elapsed += self.config.trigger_poll_interval_sec
+            raise TimeoutError(
+                f"Sync trigger not received within {self.config.trigger_timeout_sec}s "
+                f"for batch {self.config.batch_id}"
+            )
+        finally:
+            await pool.close()
 
     async def _run_quality_checks(self) -> None:
         """Run data quality checks on ODS tables."""
@@ -485,6 +517,21 @@ class ETLPipelineRunner:
         logger.info("import_starting", batch_id=self.config.batch_id)
 
         try:
+            # Check if nebula-importer binary is available — skip gracefully if not
+            import shutil
+
+            if not shutil.which(self.config.importer_binary):
+                logger.warning(
+                    "importer_binary_not_found",
+                    binary=self.config.importer_binary,
+                    batch_id=self.config.batch_id,
+                )
+                self.state.warnings.append({
+                    "stage": "import",
+                    "warning": f"nebula-importer binary '{self.config.importer_binary}' not found; "
+                    "CSV files generated, manual import required.",
+                })
+                return
             # Check if there are files to import
             total_files = len(self.state.import_files.get("vertices", [])) + len(
                 self.state.import_files.get("edges", [])
@@ -600,44 +647,173 @@ class ETLPipelineRunner:
         logger.info("import_config_generated", path=str(output_path))
 
     def _generate_minimal_config(self) -> str:
-        """Generate a minimal nebula-importer config."""
-        # Build file list from import files
-        vertex_files = []
-        edge_files = []
+        """Generate a complete nebula-importer config dynamically.
 
+        Iterates VERTEX_MAPPINGS and EDGE_MAPPINGS to build the `files`
+        section, using tag_prop_types for property type information.
+        Only PTP tags/edges are included (controlled by PTP_TAGS / PTP_EDGES).
+        """
         batch_dir = Path(self.config.output_dir) / self.config.batch_id
-        if batch_dir.exists():
-            for f in batch_dir.glob("vertex_*.csv"):
-                vertex_files.append(str(f))
-            for f in batch_dir.glob("edge_*.csv"):
-                edge_files.append(str(f))
 
-        # Generate YAML
-        # This is a simplified version - in production, would generate complete config
-        config = f"""version: v3
-description: HoneyBadge Import - Batch {self.config.batch_id}
+        # Header / client settings
+        lines = [
+            "version: v3",
+            f"description: HoneyBadge Import - Batch {self.config.batch_id}",
+            "",
+            "clientSettings:",
+            "  retry: 3",
+            f"  concurrency: {self.config.import_concurrency}",
+            f"  space: {self.config.nebula_space}",
+            "  connection:",
+            f'    address: "{self.config.nebula_host}:{self.config.nebula_port}"',
+            f"    user: {self.config.nebula_user}",
+            f"    password: {self.config.nebula_password}",
+            "",
+            f"logPath: ./logs/import-{self.config.batch_id}.log",
+            f"statsPath: ./stats/import-{self.config.batch_id}.json",
+            "",
+            "files:",
+        ]
 
-clientSettings:
-  retry: 3
-  concurrency: {self.config.import_concurrency}
-  space: {self.config.nebula_space}
-  connection:
-    address: "{self.config.nebula_host}:{self.config.nebula_port}"
-    user: {self.config.nebula_user}
-    password: {self.config.nebula_password}
-"""
-        return config
+        # Vertex files — only for PTP tags
+        for tag, mapping in VERTEX_MAPPINGS.items():
+            if tag not in PTP_TAGS:
+                continue
+            vertex_file = batch_dir / f"vertex_{tag}.csv"
+            if not vertex_file.exists():
+                continue
+            props = mapping["properties"]
+            lines.append(f"  - path: {vertex_file.as_posix()}")
+            lines.append("    csv:")
+            lines.append("      withHeader: true")
+            lines.append('      delimiter: ","')
+            lines.append("      withEnvelope: false")
+            lines.append("    tags:")
+            lines.append(f"      - name: {tag}")
+            lines.append("        id:")
+            lines.append("          type: STRING")
+            lines.append("        props:")
+            for prop_alias in props.keys():
+                nebula_type = get_tag_prop_type(tag, prop_alias)
+                lines.append(f"          - name: {prop_alias}")
+                lines.append(f"            type: {nebula_type}")
+            lines.append("")
+
+        # Edge files — only for PTP edges
+        for edge_type, mapping in EDGE_MAPPINGS.items():
+            if edge_type not in PTP_EDGES:
+                continue
+            edge_file = batch_dir / f"edge_{edge_type}.csv"
+            if not edge_file.exists():
+                continue
+            props = mapping["properties"]
+            lines.append(f"  - path: {edge_file.as_posix()}")
+            lines.append("    csv:")
+            lines.append("      withHeader: true")
+            lines.append('      delimiter: ","')
+            lines.append("    edges:")
+            lines.append(f"      - name: {edge_type}")
+            lines.append("        src:")
+            lines.append("          type: STRING")
+            lines.append("        dst:")
+            lines.append("          type: STRING")
+            if props:
+                lines.append("        props:")
+                for prop_alias in props.keys():
+                    nebula_type = get_edge_prop_type(edge_type, prop_alias)
+                    lines.append(f"          - name: {prop_alias}")
+                    lines.append(f"            type: {nebula_type}")
+            lines.append("")
+
+        return "\n".join(lines)
 
     async def _verify_graph_integrity(self) -> None:
-        """Verify graph integrity after import."""
+        """Verify graph integrity after import.
+
+        Compares vertex counts in NebulaGraph against the number of vertices
+        written during the transform stage. If the difference exceeds 5%,
+        the pipeline status is downgraded to PARTIAL.
+        """
         logger.info("graph_integrity_verification_starting", batch_id=self.config.batch_id)
 
-        # TODO: Implement actual graph integrity verification
-        # - Check node counts match expected
-        # - Check edge counts match expected
-        # - Verify sample lookups work
+        try:
+            client = NebulaGraphClient(
+                host=self.config.nebula_host,
+                port=self.config.nebula_port,
+                user=self.config.nebula_user,
+                password=self.config.nebula_password,
+            )
+            await client.connect()
 
-        logger.info("graph_integrity_verification_completed", batch_id=self.config.batch_id)
+            # Submit stats job then read stats
+            await client.execute("SUBMIT JOB STATS;", space=self.config.nebula_space)
+            # Stats job is async; give it a moment to settle
+            await asyncio.sleep(2)
+            stats_result = await client.execute("SHOW STATS;", space=self.config.nebula_space)
+
+            if not stats_result.success:
+                logger.warning(
+                    "graph_stats_unavailable",
+                    error=stats_result.error_message,
+                )
+                return
+
+            # SHOW STATS returns rows: Type | Name | Count
+            # Type is "Tag" / "Edge" / "Space"
+            tag_counts: dict[str, int] = {}
+            edge_counts: dict[str, int] = {}
+            for row in stats_result.rows:
+                stat_type = str(row.get("Type", ""))
+                name = str(row.get("Name", ""))
+                count = row.get("Count", 0)
+                if stat_type == "Tag":
+                    tag_counts[name] = int(count) if count else 0
+                elif stat_type == "Edge":
+                    edge_counts[name] = int(count) if count else 0
+
+            logger.info(
+                "graph_stats",
+                tag_counts=tag_counts,
+                edge_counts=edge_counts,
+            )
+
+            # Compare against expected (from state.vertices_written)
+            # We don't have per-tag breakdown in state, so check aggregate.
+            total_graph_vertices = sum(tag_counts.values())
+            expected = self.state.vertices_written if self.state else 0
+
+            if expected > 0 and total_graph_vertices > 0:
+                diff_pct = abs(total_graph_vertices - expected) / expected
+                if diff_pct > 0.05:
+                    logger.warning(
+                        "graph_integrity_partial",
+                        expected=expected,
+                        actual=total_graph_vertices,
+                        diff_pct=f"{diff_pct:.1%}",
+                    )
+                    if self.state:
+                        self.state.status = PipelineStatus.PARTIAL
+                        self.state.warnings.append({
+                            "stage": "graph_integrity",
+                            "expected": expected,
+                            "actual": total_graph_vertices,
+                            "diff_pct": f"{diff_pct:.1%}",
+                        })
+
+            logger.info("graph_integrity_verification_completed", batch_id=self.config.batch_id)
+
+        except Exception as e:
+            # Graph integrity verification is non-fatal — log and continue
+            logger.warning(
+                "graph_integrity_verification_failed",
+                batch_id=self.config.batch_id,
+                error=str(e),
+            )
+            if self.state:
+                self.state.warnings.append({
+                    "stage": "graph_integrity",
+                    "error": str(e),
+                })
 
     def get_status(self) -> dict[str, Any]:
         """Get current pipeline status."""
@@ -761,7 +937,7 @@ Examples:
     parser.add_argument(
         "--postgres-dsn",
         type=str,
-        default=os.environ.get("POSTGRES_DSN", "postgresql://honeybadge:honeybadge@localhost:5432/honeybadge_ods"),
+        default=os.environ.get("POSTGRES_DSN", "postgresql://honeybadge:honeybadge123@localhost:5432/honeybadge_ods"),
         help="PostgreSQL connection string for ODS database.",
     )
     parser.add_argument(
@@ -813,6 +989,12 @@ Examples:
         help="Quarantine threshold for alerts.",
     )
     parser.add_argument(
+        "--skip-trigger",
+        action="store_true",
+        default=False,
+        help="Skip sync trigger wait (CSV mode, local dev).",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"HoneyBadge ETL Pipeline v{VERSION}",
@@ -841,6 +1023,7 @@ Examples:
         output_dir=args.output_dir,
         importer_binary=args.importer_binary,
         quarantine_threshold=args.quarantine_threshold,
+        skip_trigger=args.skip_trigger,
     )
 
 

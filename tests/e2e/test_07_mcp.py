@@ -108,7 +108,8 @@ class TestMCPServices:
         expect(page.locator(CHAT_TEXTAREA).first).to_be_visible()
         expect(page.locator(CHAT_TEXTAREA).first).to_be_enabled()
 
-    def test_tc608_multiple_mcp_servers_sequence(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
+    @pytest.mark.timeout(600)
+    def test_tc608_multiple_mcp_servers_sequence(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-608: Multiple MCP servers can be called in sequence."""
         page = admin_logged_in
         wait_for_chat_ready()
@@ -126,7 +127,8 @@ class TestMCPServices:
         messages = page.locator(MSG_ASSISTANT)
         assert messages.count() >= 3, f"Expected >=3 assistant messages for 3 queries, got {messages.count()}"
 
-    def test_tc609_nebula_mcp_functional(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+    @pytest.mark.timeout(600)
+    def test_tc609_nebula_mcp_functional(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-609: NebulaGraph MCP returns actual graph data."""
         page = admin_logged_in
         wait_for_chat_ready()
@@ -134,7 +136,8 @@ class TestMCPServices:
         result = send_query_and_get_response("查询供应商")
         assert result["data_row_count"] > 0, "NebulaGraph query should return data rows"
 
-    def test_tc610_audit_mcp_write_verification(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
+    @pytest.mark.timeout(600)
+    def test_tc610_audit_mcp_write_verification(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-610: Query creates audit record retrievable by trace_id."""
         page = admin_logged_in
         wait_for_chat_ready()

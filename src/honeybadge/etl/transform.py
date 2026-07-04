@@ -9,11 +9,13 @@ Key concepts:
     - GraphTransformer: Transforms ODS data into CSV files for nebula-importer
 """
 
+import csv
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import asyncpg
 import structlog
 
 from honeybadge.core.constants import (
@@ -1043,7 +1045,7 @@ EDGE_MAPPINGS: dict[str, dict[str, Any]] = {
     "RECEIVED_AT": {
         "source_table": "ods_receipt",
         "src_vid": f"{VID_PREFIX_RECEIPT}:{{shipment_header_id}}",
-        "dst_vid": f"{VID_PREFIX_WAREHOUSE}:{{warehouse_id}}",  # Would need warehouse_id lookup
+        "dst_vid": f"{VID_PREFIX_WAREHOUSE}:{{warehouse_code}}",
         "properties": {
             "org_id": "org_id",
             "dept_id": "NULL",
@@ -1130,15 +1132,17 @@ EDGE_MAPPINGS: dict[str, dict[str, Any]] = {
             "dept_id": "NULL",
         },
     },
-    "UNDER_CONTRACT": {
-        "source_table": "ods_purchase_order",
-        "src_vid": f"{VID_PREFIX_PO}:{{po_header_id}}",
-        "dst_vid": f"{VID_PREFIX_CONTRACT}:{{contract_id}}",  # Would need contract_id on PO
-        "properties": {
-            "org_id": "org_id",
-            "dept_id": "NULL",
-        },
-    },
+    # UNDER_CONTRACT disabled: ods_purchase_order has no contract_id column.
+    # Re-enable when contract data is available in ODS.
+    # "UNDER_CONTRACT": {
+    #     "source_table": "ods_purchase_order",
+    #     "src_vid": f"{VID_PREFIX_PO}:{{po_header_id}}",
+    #     "dst_vid": f"{VID_PREFIX_CONTRACT}:{{contract_id}}",
+    #     "properties": {
+    #         "org_id": "org_id",
+    #         "dept_id": "NULL",
+    #     },
+    # },
 }
 
 
@@ -1196,13 +1200,13 @@ class GraphTransformer:
         """
         self.postgres_dsn = postgres_dsn
         self.output_dir = Path(output_dir)
-        self._pool = None
+        self._pool: asyncpg.Pool | None = None
 
     async def connect(self) -> None:
         """Connect to the ODS PostgreSQL database."""
-        # TODO: Implement actual PostgreSQL connection
-        # import asyncpg
-        # self._pool = await asyncpg.create_pool(self.postgres_dsn, min_size=2, max_size=10)
+        self._pool = await asyncpg.create_pool(
+            self.postgres_dsn, min_size=2, max_size=10
+        )
         logger.info("etl_transformer_connected", dsn=self.postgres_dsn)
 
     async def disconnect(self) -> None:
@@ -1258,20 +1262,23 @@ class GraphTransformer:
             records_processed = 0
             records_written = 0
 
-            # TODO: Implement actual query execution
-            # async with self._pool.acquire() as conn:
-            #     async with conn.transaction():
-            #         async for row in conn.cursor(select_sql):
-            #             records_processed += 1
-            #             vid = self._generate_vid(mapping["vid_template"], row)
-            #             values = [vid] + [self._format_value(row.get(prop)) for prop in mapping["properties"].values()]
-            #             # Write to CSV
-            #             records_written += 1
-
-            # For now, create a placeholder file
             headers = [":VID"] + list(mapping["properties"].keys())
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(",".join(headers) + "\n")
+            with open(output_path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                assert self._pool is not None
+                async with self._pool.acquire() as conn:
+                    async with conn.transaction():
+                        async for row in conn.cursor(select_sql, batch_id):
+                            records_processed += 1
+                            row_dict = dict(row)
+                            vid = self._generate_vid(mapping["vid_template"], row_dict)
+                            values = [vid] + [
+                                self._format_value(row_dict.get(prop))
+                                for prop in mapping["properties"].values()
+                            ]
+                            writer.writerow(values)
+                            records_written += 1
 
             logger.info(
                 "transform_vertices_complete",
@@ -1344,21 +1351,24 @@ class GraphTransformer:
             records_processed = 0
             records_written = 0
 
-            # TODO: Implement actual query execution
-            # async with self._pool.acquire() as conn:
-            #     async with conn.transaction():
-            #         async for row in conn.cursor(select_sql):
-            #             records_processed += 1
-            #             src_vid = self._generate_vid(mapping["src_vid"], row)
-            #             dst_vid = self._generate_vid(mapping["dst_vid"], row)
-            #             values = [src_vid, dst_vid] + [self._format_value(row.get(prop)) for prop in mapping["properties"].values()]
-            #             # Write to CSV
-            #             records_written += 1
-
-            # For now, create a placeholder file
             headers = [":SRC_VID", ":DST_VID"] + list(mapping["properties"].keys())
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(",".join(headers) + "\n")
+            with open(output_path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                assert self._pool is not None
+                async with self._pool.acquire() as conn:
+                    async with conn.transaction():
+                        async for row in conn.cursor(select_sql, batch_id):
+                            records_processed += 1
+                            row_dict = dict(row)
+                            src_vid = self._generate_vid(mapping["src_vid"], row_dict)
+                            dst_vid = self._generate_vid(mapping["dst_vid"], row_dict)
+                            values = [src_vid, dst_vid] + [
+                                self._format_value(row_dict.get(prop))
+                                for prop in mapping["properties"].values()
+                            ]
+                            writer.writerow(values)
+                            records_written += 1
 
             logger.info(
                 "transform_edges_complete",
@@ -1435,14 +1445,24 @@ class GraphTransformer:
             else:
                 prop_list.append(col_or_expr + " as " + alias)
 
+        # Add columns referenced in vid_template to SELECT (needed for VID generation).
+        import re as _re
+
+        vid_cols = _re.findall(r"\{(\w+)\}", mapping.get("vid_template", ""))
+        existing_cols = {p.split(" as ")[-1] for p in prop_list}
+        for col in vid_cols:
+            if col not in existing_cols:
+                prop_list.append(f"{col} as {col}")
+                existing_cols.add(col)
+
         sql = f"""
             SELECT {', '.join(prop_list)}
             FROM {source_table}
-            WHERE etl_batch_id = '{batch_id}'
+            WHERE etl_batch_id = $1
         """
 
         if incremental:
-            sql += " AND dq_status = 'passed'"
+            sql += " AND dq_status IN ('passed', 'passed_with_warnings')"
 
         return sql
 
@@ -1466,14 +1486,26 @@ class GraphTransformer:
             else:
                 prop_list.append(col_or_expr + " as " + alias)
 
+        # Add columns referenced in src_vid/dst_vid templates to SELECT.
+        import re as _re2
+
+        vid_cols_e: list[str] = []
+        for vid_key in ("src_vid", "dst_vid"):
+            vid_cols_e.extend(_re2.findall(r"\{(\w+)\}", mapping.get(vid_key, "")))
+        existing_cols_e = {p.split(" as ")[-1] for p in prop_list}
+        for col in vid_cols_e:
+            if col not in existing_cols_e:
+                prop_list.append(f"{col} as {col}")
+                existing_cols_e.add(col)
+
         sql = f"""
             SELECT {', '.join(prop_list)}
             FROM {source_table}
-            WHERE etl_batch_id = '{batch_id}'
+            WHERE etl_batch_id = $1
         """
 
         if incremental:
-            sql += " AND dq_status = 'passed'"
+            sql += " AND dq_status IN ('passed', 'passed_with_warnings')"
 
         return sql
 
