@@ -19,6 +19,7 @@ from honeybadge.llm.adapter import generate_ngql as llm_generate_ngql
 from honeybadge.llm.adapter import summarize_results as llm_summarize_results
 from honeybadge.permission_service.config import PERMISSION_CONFIG
 from honeybadge.permission_service.permission_enforcer import PermissionEnforcer
+from honeybadge.protocols.validator import rewrite_vertex_property_access
 
 _permission_enforcer = PermissionEnforcer()
 
@@ -452,6 +453,9 @@ async def process_query(
         max_retries = 2
         last_error = None
         for attempt in range(max_retries + 1):
+            # Defense: rewrite two-part var.prop → var.Tag.prop (NebulaGraph v3.8 bug).
+            # Applied inside the retry loop so regenerated nGQL on retry is also fixed.
+            ngql = rewrite_vertex_property_access(ngql)
             query_result = await nebula.execute(ngql, space=space)
             execution_time_ms = int((time.time() - start_time) * 1000)
 

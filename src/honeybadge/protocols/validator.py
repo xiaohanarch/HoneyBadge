@@ -1,9 +1,15 @@
 """L1-L3 validators for nGQL Anti-Hallucination Framework."""
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
+
+from honeybadge.permission_service.permission_enforcer import (
+    _STRING_LITERAL_RE,
+    _TAG_VAR_RE,
+)
 
 logger = structlog.get_logger()
 
@@ -57,6 +63,96 @@ class SchemaEdge:
 
     name: str
     properties: list[SchemaProperty]
+
+
+# ---------------------------------------------------------------------------
+# NebulaGraph v3.8 two-part property access defense
+# ---------------------------------------------------------------------------
+
+# Matches two-part var.prop access. Negative lookbehind/lookahead exclude the
+# middle and start segments of three-part var.Tag.prop (e.g. for
+# ``po.PurchaseOrder.po_number`` the regex matches neither ``po.PurchaseOrder``
+# nor ``PurchaseOrder.po_number`` because each is adjacent to a dot on one side).
+_TWO_PART_PROP_RE = re.compile(r"(?<!\.)\b(\w+)\.(\w+)\b(?!\.)")
+
+
+def rewrite_vertex_property_access(ngql: str) -> str:
+    """Rewrite two-part ``var.prop`` to three-part ``var.Tag.prop``.
+
+    NebulaGraph v3.8.0 has a bug where two-part ``var.prop`` property access in
+    MATCH statements returns wrong results (0 rows in WHERE, ``__NULL__`` in
+    RETURN).  Three-part ``var.Tag.prop`` works correctly.  The LLM prompt
+    instructs three-part usage, but this function is a defensive layer that
+    auto-rewrites any two-part access that slips through.
+
+    Algorithm:
+      1. Extract vertex variable bindings from MATCH clauses:
+         ``(var:Tag)`` → ``{var: tag}``
+      2. Compute string-literal ranges so matches inside string values are
+         skipped (e.g. ``WHERE s.name == "po.po_number"``).
+      3. Find two-part ``var.prop`` matches via :data:`_TWO_PART_PROP_RE`
+         (negative lookarounds exclude three-part ``var.Tag.prop``).
+      4. If ``var`` is a bound vertex variable → rewrite to ``var.Tag.prop``.
+         If ``var`` is an edge variable, tag name, or function name → leave
+         unchanged.
+      5. Apply rewrites right-to-left to preserve character positions.
+
+    Boundary cases:
+      * Edge variables ``-[e:EdgeType]->``: ``e`` is not captured by
+        :data:`_TAG_VAR_RE` (which matches ``(var:Tag)``), so not rewritten.
+      * Three-part ``po.PurchaseOrder.po_number``: excluded by the negative
+        lookarounds in :data:`_TWO_PART_PROP_RE`.
+      * String literals ``WHERE s.name == "po.po_number"``: the ``po.po_number``
+        inside the string is skipped via string-range tracking.
+      * LOOKUP ``LOOKUP ON PurchaseOrder YIELD PurchaseOrder.prop``:
+        ``PurchaseOrder`` is not a vertex *variable*, so not rewritten.
+      * Multiple MATCH clauses: every bound vertex variable is rewritten.
+      * Anonymous nodes ``(:PurchaseOrder)``: no variable name, nothing to
+        rewrite.
+
+    Args:
+        ngql: nGQL statement that may contain two-part vertex property access.
+
+    Returns:
+        nGQL with two-part vertex property access rewritten to three-part.
+        String literals are preserved unchanged.
+    """
+    # 1. Extract vertex variable bindings (var:Tag) from MATCH clauses.
+    #    \w* (not \w+) so anonymous (:Tag) is matched but skipped (empty var).
+    tag_vars: dict[str, str] = {}
+    for var, tag in _TAG_VAR_RE.findall(ngql):
+        if var:
+            tag_vars[var] = tag
+
+    if not tag_vars:
+        return ngql  # no vertex variables bound, nothing to rewrite
+
+    # 2. Compute string-literal ranges to skip matches inside string values.
+    string_ranges = [(m.start(), m.end()) for m in _STRING_LITERAL_RE.finditer(ngql)]
+
+    def _in_string(pos: int) -> bool:
+        return any(s <= pos < e for s, e in string_ranges)
+
+    # 3. Find two-part var.prop matches and collect rewrites.
+    rewrites: list[tuple[int, int, str]] = []
+    for match in _TWO_PART_PROP_RE.finditer(ngql):
+        if _in_string(match.start()):
+            continue  # inside string literal, preserve
+        var = match.group(1)
+        prop = match.group(2)
+        if var in tag_vars:
+            tag = tag_vars[var]
+            rewrites.append((match.start(), match.end(), f"{var}.{tag}.{prop}"))
+
+    if not rewrites:
+        return ngql
+
+    # 4. Apply rewrites right-to-left to preserve character positions.
+    result = ngql
+    for start, end, replacement in sorted(rewrites, key=lambda r: r[0], reverse=True):
+        result = result[:start] + replacement + result[end:]
+
+    return result
 
 
 class NgqlValidator:
@@ -182,16 +278,17 @@ class NgqlValidator:
             if upper_ngql.startswith(keyword):
                 result.add_warning("W002", message)
 
-        # Validate property access uses tag prefix
-        # Pattern: n.property_name without tag prefix is suspicious
-        import re
-
-        # Check for unqualified property access in MATCH/WHERE
-        unqualified_pattern = r"(?<!\.)\b(\w+)\.(\w+)\b(?!\.)"
-        matches = re.finditer(unqualified_pattern, ngql_stripped)
-        # NOTE: unqualified property access check is a stub — the pattern is
-        # detected but not yet wired to result.add_warning. Future work.
-        _ = matches  # placeholder until sophisticated check is implemented
+        # Validate property access uses tag prefix (NebulaGraph v3.8 defense).
+        # Two-part var.prop is auto-rewritten to three-part var.Tag.prop by
+        # rewrite_vertex_property_access() at the execution call sites. Emit
+        # W004 here for audit/logging so operators can spot LLM drift toward
+        # two-part access even when the rewrite silently fixes it.
+        if rewrite_vertex_property_access(ngql_stripped) != ngql_stripped:
+            result.add_warning(
+                "W004",
+                "Two-part vertex property access (var.prop) detected; "
+                "auto-rewritten to three-part (var.Tag.prop) for NebulaGraph v3.8",
+            )
 
         return result
 
