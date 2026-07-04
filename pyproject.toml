@@ -47,6 +47,8 @@ dependencies = [
     # FastAPI server
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    # API rate limiting
+    "slowapi>=0.1.9",
     # JWT auth
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
@@ -57,6 +59,10 @@ dependencies = [
     "mcp>=1.0.0",
     # FastMCP framework (MCP servers use this)
     "fastmcp>=2.0.0",
+    # Oracle EBS connector (thin mode, pure Python, no Instant Client needed)
+    "oracledb>=1.4.0",
+    # ETL scheduler (cron-based, in-process)
+    "apscheduler>=3.10.0",
 ]
 
 [project.optional-dependencies]

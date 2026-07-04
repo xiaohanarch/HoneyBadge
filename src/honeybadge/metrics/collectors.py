@@ -543,6 +543,100 @@ class QueryMetricsCollector:
 
 
 # =============================================================================
+# ETL Metrics
+# =============================================================================
+
+class ETLMetricsCollector:
+    """
+    ETL pipeline Prometheus metrics.
+
+    Metrics:
+    - etl_runs_total: Total pipeline runs (counter, labels: status, load_mode)
+    - etl_records_extracted_total: Rows extracted from source (counter, labels: table, source_system)
+    - etl_pipeline_duration_seconds: End-to-end pipeline duration histogram
+    - etl_watermark_lag_seconds: Data freshness lag (gauge, labels: table)
+    - etl_extraction_errors_total: Extraction failures (counter, labels: table, error_type)
+    """
+
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
+        """Initialize ETL metrics collectors."""
+        self._registry = registry or REGISTRY
+
+        # Pipeline run counter
+        self.runs_total = Counter(
+            "honeybadge_etl_runs_total",
+            "Total ETL pipeline runs",
+            ["status", "load_mode"],
+            registry=self._registry,
+        )
+
+        # Records extracted from source
+        self.records_extracted_total = Counter(
+            "honeybadge_etl_records_extracted_total",
+            "Total records extracted from source system",
+            ["table", "source_system"],
+            registry=self._registry,
+        )
+
+        # Pipeline duration
+        self.pipeline_duration_seconds = Histogram(
+            "honeybadge_etl_pipeline_duration_seconds",
+            "ETL pipeline end-to-end duration in seconds",
+            ["load_mode"],
+            buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0, 1800.0, 3600.0),
+            registry=self._registry,
+        )
+
+        # Watermark lag (now - MAX(source_update_time)) — data freshness
+        self.watermark_lag_seconds = Gauge(
+            "honeybadge_etl_watermark_lag_seconds",
+            "ETL data freshness lag (now - latest source_update_time) in seconds",
+            ["table"],
+            registry=self._registry,
+        )
+
+        # Extraction errors
+        self.extraction_errors_total = Counter(
+            "honeybadge_etl_extraction_errors_total",
+            "Total ETL extraction errors",
+            ["table", "error_type"],
+            registry=self._registry,
+        )
+
+        # Last successful run timestamp (Unix epoch seconds)
+        # Used by the ETLStale alert rule. Updated only on successful runs.
+        self.last_success_timestamp = Gauge(
+            "honeybadge_etl_last_success_timestamp",
+            "Unix timestamp of the last successful ETL pipeline run",
+            registry=self._registry,
+        )
+
+    def record_run(self, status: str, load_mode: str, duration_seconds: float) -> None:
+        """Record a completed pipeline run."""
+        self.runs_total.labels(status=status, load_mode=load_mode).inc()
+        self.pipeline_duration_seconds.labels(load_mode=load_mode).observe(duration_seconds)
+        if status == "success":
+            import time
+
+            self.last_success_timestamp.set(time.time())
+
+    def record_extraction(self, table: str, source_system: str, rows: int) -> None:
+        """Record rows extracted from the source system."""
+        if rows > 0:
+            self.records_extracted_total.labels(
+                table=table, source_system=source_system
+            ).inc(rows)
+
+    def record_extraction_error(self, table: str, error_type: str) -> None:
+        """Record an extraction failure."""
+        self.extraction_errors_total.labels(table=table, error_type=error_type).inc()
+
+    def set_watermark_lag(self, table: str, lag_seconds: float) -> None:
+        """Set the freshness lag for a table."""
+        self.watermark_lag_seconds.labels(table=table).set(lag_seconds)
+
+
+# =============================================================================
 # Global Metrics Instances
 # =============================================================================
 
@@ -551,3 +645,4 @@ NEBULA_METRICS = NebulaMetricsCollector()
 HICLAW_METRICS = HiClawMetricsCollector()
 VALIDATION_METRICS = ValidationMetricsCollector()
 QUERY_METRICS = QueryMetricsCollector()
+ETL_METRICS = ETLMetricsCollector()

@@ -1,0 +1,33 @@
+# HoneyBadge ETL configuration
+#
+# Used by the scheduler (python -m honeybadge.etl) and by the pipeline
+# runner when connector_config_path points here. ${VAR} tokens are
+# expanded from the process environment so secrets never land in git.
+
+connector:
+  # csv  — read pre-staged CSVs from connector.csv.dir (dev / tests)
+  # oracle_ebs — connect to a real Oracle EBS instance
+  type: csv
+
+  oracle:
+    host: ${ORACLE_HOST}
+    port: 1521
+    service_name: ${ORACLE_SERVICE}
+    user: ${ORACLE_USER}
+    password: ${ORACLE_PASSWORD}
+
+  csv:
+    dir: deploy/test-data/ptp_csv/
+
+pipeline:
+  load_mode: incremental          # full | incremental
+  tables: null                     # null = ENABLED_TABLES_P3 (9 PTP tables)
+  postgres_dsn: ${POSTGRES_DSN}
+  nebula_host: localhost
+  nebula_port: 9669
+
+scheduler:
+  cron: "0 2 * * *"                # daily at 02:00
+  timezone: Asia/Shanghai
+  skip_if_running: true
+  stale_timeout_sec: 7200          # 2h — crash-recovery window

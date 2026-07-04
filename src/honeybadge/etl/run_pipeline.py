@@ -108,6 +108,12 @@ class PipelineConfig:
     trigger_poll_interval_sec: int = 5
     trigger_timeout_sec: int = 600
 
+    # Source connector (P3: real ERP extraction)
+    connector_type: str = "csv"  # csv | oracle_ebs
+    connector_config_path: str | None = None  # path to ETL YAML config
+    oracle_dsn: str | None = None  # set when connector_type=oracle_ebs
+    csv_dir: str | None = None  # set when connector_type=csv
+
     @property
     def incremental(self) -> bool:
         return self.load_mode == LoadMode.INCREMENTAL
@@ -252,6 +258,9 @@ class ETLPipelineRunner:
         )
 
         try:
+            # Stage 0: Extract from source ERP into ODS (P3)
+            await self._run_extract_stage()
+
             # Stage 1: Wait for sync trigger
             await self._wait_for_sync_trigger()
 
@@ -296,6 +305,104 @@ class ETLPipelineRunner:
                 })
 
         return self.state
+
+    async def _run_extract_stage(self) -> None:
+        """Stage 0: Extract rows from the source ERP into ODS tables.
+
+        Behaviour by ``connector_type``:
+
+        * ``csv`` with ``skip_trigger=True``: no-op. ODS is assumed to
+          already contain data (e.g. loaded by ``load_csv_to_ods.py``).
+          This preserves backward compatibility with the CSV dev path.
+        * ``oracle_ebs`` (or ``csv`` with explicit ``csv_dir``):
+          instantiate :class:`IncrementalLoader` and run
+          ``load_all()`` to populate ODS + ``etl_table_sync_status``.
+
+        Failures in this stage are recorded but do NOT abort the
+        pipeline — subsequent stages will operate on whatever ODS data
+        is available, which is the append-only design's self-healing
+        behaviour.
+        """
+        if self.config.connector_type == "csv" and self.config.skip_trigger and not self.config.csv_dir:
+            logger.info(
+                "extract_stage_skipped",
+                batch_id=self.config.batch_id,
+                connector_type=self.config.connector_type,
+            )
+            return
+
+        # Import lazily so the core pipeline runner stays importable
+        # without the new connector/loader deps installed.
+        from honeybadge.etl.config import ETLConfig
+        from honeybadge.etl.connectors.factory import create_connector
+        from honeybadge.etl.incremental_loader import IncrementalLoader
+
+        if self.config.connector_config_path:
+            etl_config = ETLConfig.from_yaml(self.config.connector_config_path)
+        else:
+            # Build a minimal config from PipelineConfig fields.
+            etl_config = ETLConfig(
+                connector_type=self.config.connector_type,
+                csv_dir=self.config.csv_dir or "deploy/test-data/ptp_csv/",
+            )
+
+        connector = create_connector(etl_config)
+        source_system = "EBS" if self.config.connector_type == "oracle_ebs" else "CSV"
+        loader = IncrementalLoader(
+            connector=connector,
+            postgres_dsn=self.config.postgres_dsn,
+            source_system=source_system,
+        )
+
+        logger.info(
+            "extract_stage_starting",
+            batch_id=self.config.batch_id,
+            connector_type=self.config.connector_type,
+            load_mode=self.config.load_mode.value,
+        )
+
+        try:
+            await loader.connect()
+            results = await loader.load_all(
+                batch_id=self.config.batch_id,
+                load_mode=self.config.load_mode,
+                tables=self.config.tables,
+            )
+
+            total_extracted = sum(r.rows_extracted for r in results.values())
+            total_loaded = sum(r.rows_loaded for r in results.values())
+            failed_tables = [t for t, r in results.items() if r.status == "failed"]
+
+            logger.info(
+                "extract_stage_completed",
+                batch_id=self.config.batch_id,
+                tables=len(results),
+                rows_extracted=total_extracted,
+                rows_loaded=total_loaded,
+                failed_tables=failed_tables,
+            )
+
+            if failed_tables:
+                self.state.warnings.append({
+                    "stage": "extract",
+                    "failed_tables": failed_tables,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+        except Exception as e:
+            logger.error(
+                "extract_stage_failed",
+                batch_id=self.config.batch_id,
+                error=str(e),
+            )
+            self.state.errors.append({
+                "stage": "extract",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+            # Do not re-raise: downstream stages proceed with whatever
+            # ODS data is available (append-only self-healing).
+        finally:
+            await loader.disconnect()
 
     async def _wait_for_sync_trigger(self) -> None:
         """
