@@ -148,6 +148,19 @@ SPECEOF
         mc cp "$TASK_META_DIR/spec.md" \
             "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/spec.md" 2>/dev/null \
             || echo "SPEC_MINIO_SYNC_FAILED (continuing)" >&2
+
+        # Write conversation history for multi-turn context (worker-dispatch path).
+        # The Worker reads history.json and passes it as conversation_history to
+        # generate_query. Graceful degradation: [] on any error.
+        FETCH_HIST="/opt/honeybadge/config/manager/agent/skills/fast-query/fetch-conversation-history.py"
+        if [ -f "$FETCH_HIST" ]; then
+            python3 "$FETCH_HIST" --user-id "$USER_ID" --max-rounds 3 \
+                > "$TASK_META_DIR/history.json" 2>/dev/null \
+                || echo '[]' > "$TASK_META_DIR/history.json"
+            mc cp "$TASK_META_DIR/history.json" \
+                "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/history.json" 2>/dev/null \
+                || echo "HISTORY_MINIO_SYNC_FAILED (continuing)" >&2
+        fi
     fi
 fi
 

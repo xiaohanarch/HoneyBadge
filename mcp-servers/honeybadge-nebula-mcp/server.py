@@ -358,11 +358,18 @@ async def generate_ngql_impl(
     nebula: NebulaGraphClient,
     question: str,
     schema_info: str = "",
+    conversation_history: list[dict] | None = None,
 ) -> dict:
     """Call LLM to generate nGQL from a natural-language question.
 
     If *schema_info* is empty, auto-loads the schema first.
     Strips markdown code blocks (```ngql ... ```) from the LLM response.
+
+    *conversation_history* is an optional list of prior Q&A turns (newest
+    last), each ``{"role": "user"|"assistant", "content": str}``. When
+    provided, the nGQL LLM receives them between the system prompt and the
+    current question for multi-turn anaphora resolution. When None/empty,
+    behaves as single-turn (unchanged).
     """
     trace_id = generate_trace_id()
 
@@ -377,6 +384,7 @@ async def generate_ngql_impl(
         schema_info=schema_info,
         ontology_info=ontology_info,
         trace_id=trace_id,
+        conversation_history=conversation_history,
     )
 
     ngql = response.content.strip()
@@ -623,7 +631,12 @@ async def get_schema(space: str = "") -> str:
 
 
 @mcp.tool()
-async def generate_query(question: str, schema_info: str = "", user_context: dict | None = None) -> dict:
+async def generate_query(
+    question: str,
+    schema_info: str = "",
+    user_context: dict | None = None,
+    conversation_history: list[dict] | None = None,
+) -> dict:
     """Generate nGQL query from a natural-language question.
 
     Calls the LLM to translate a user question into an nGQL (NebulaGraph
@@ -635,9 +648,17 @@ async def generate_query(question: str, schema_info: str = "", user_context: dic
         schema_info: Optional pre-loaded schema text. Auto-loaded if empty.
         user_context: Optional dict with shape {"user_id": str, "permissions": {...}}.
                       Accepted for compatibility but not used during query generation.
+        conversation_history: Optional list of prior Q&A turns (newest last) for
+                      multi-turn anaphora resolution. Each item is
+                      {"role": "user"|"assistant", "content": str}. When omitted
+                      or empty, behaves as single-turn.
     """
     return await generate_ngql_impl(
-        _get_llm(), _get_nebula(), question, schema_info=schema_info
+        _get_llm(),
+        _get_nebula(),
+        question,
+        schema_info=schema_info,
+        conversation_history=conversation_history,
     )
 
 

@@ -41,7 +41,15 @@ fi
 [[ -z "$QUESTION" ]] && { echo '{"error":"--question is required"}'; exit 1; }
 
 # Step 1: 生成 nGQL
-NGQL_ARGS=$(python3 -c "import json,sys; print(json.dumps({'question': sys.argv[1]}))" "$QUESTION") \
+# Fetch recent Q&A history from Matrix DM for multi-turn anaphora resolution
+# ("这些订单" → prior PurchaseOrder query). Graceful degradation: empty [] on
+# any error, so single-turn behavior is preserved.
+HISTORY=$(python3 "$(dirname "$0")/fetch-conversation-history.py" \
+    --user-id "$USER_ID" --max-rounds 3 2>/dev/null || echo '[]')
+NGQL_ARGS=$(python3 -c "
+import json, sys
+print(json.dumps({'question': sys.argv[1], 'conversation_history': json.loads(sys.argv[2])}))
+" "$QUESTION" "$HISTORY") \
   || { echo '{"error":"nGQL generation failed"}'; exit 2; }
 
 NGQL_RESP=$(mcporter --config "$MCPORTER_CFG" call honeybadge-nebula.generate_query \
@@ -114,7 +122,10 @@ if [[ "$_SUCCESS" == "fail" ]]; then
 # 上一次生成的 nGQL 执行失败，错误信息：${_ERR}
 # 请修正 nGQL 语法错误重新生成。特别注意：ORDER BY 只能使用 RETURN 中的 AS 别名，不能使用 var.Tag.property 属性路径。"
 
-  _RETRY_ARGS=$(python3 -c "import json,sys; print(json.dumps({'question': sys.argv[1]}))" "$_RETRY_Q") \
+  _RETRY_ARGS=$(python3 -c "
+import json, sys
+print(json.dumps({'question': sys.argv[1], 'conversation_history': json.loads(sys.argv[2])}))
+" "$_RETRY_Q" "$HISTORY") \
     || { echo '{"error":"nGQL retry generation failed"}'; exit 2; }
   _RETRY_RESP=$(mcporter --config "$MCPORTER_CFG" call honeybadge-nebula.generate_query \
     --args "$_RETRY_ARGS") \

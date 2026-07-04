@@ -38,9 +38,22 @@ class MCPClient:
             )
         return json.loads(result.stdout)
 
-    def generate_query(self, question: str) -> dict[str, Any]:
-        """Generate nGQL from a natural language question."""
-        return self.call("generate_query", {"question": question})
+    def generate_query(
+        self,
+        question: str,
+        conversation_history: list[dict] | None = None,
+    ) -> dict[str, Any]:
+        """Generate nGQL from a natural language question.
+
+        *conversation_history* is an optional list of prior Q&A turns
+        (newest last) for multi-turn anaphora resolution. Each item is
+        {"role": "user"|"assistant", "content": str}. When None or empty,
+        the parameter is omitted so older MCP servers still work.
+        """
+        args: dict[str, Any] = {"question": question}
+        if conversation_history:
+            args["conversation_history"] = conversation_history
+        return self.call("generate_query", args)
 
     def validate_and_execute(
         self, ngql: str, user_id: str | None = None

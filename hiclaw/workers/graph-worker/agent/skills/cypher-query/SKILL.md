@@ -13,7 +13,7 @@ You call MCP tools via the `exec` tool using the `mcporter` CLI. **All MCP tools
 
 **nebula-mcp** (honeybadge-nebula):
 ```
-mcporter call honeybadge-nebula.generate_query --args '{"question":"..."}'
+mcporter call honeybadge-nebula.generate_query --args '{"question":"...","conversation_history":[...]}'
 mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"...","user_context":{"user_id":"..."}}'
 mcporter call honeybadge-nebula.get_schema --args '{"space":"honeybadge"}'
 mcporter call honeybadge-nebula.explain_ngql --args '{"ngql":"..."}'
@@ -34,7 +34,21 @@ mcporter call honeybadge-cache.cache_result --args '{"key":"...","value":{...},"
 ## Execution Flow
 
 ### Step 1: Generate nGQL
-Call `mcporter call honeybadge-nebula.generate_query --args '{"question":"<user_question>"}'`
+Call `mcporter call honeybadge-nebula.generate_query --args '{"question":"<user_question>","conversation_history":[...]}'`
+
+**Multi-turn context (conversation_history):** Before generating nGQL, check if
+the task directory contains `history.json` (written by dispatch-to-worker.sh).
+If present and non-empty, read it and pass it as `conversation_history` so the
+nGQL LLM can resolve anaphora like "这些订单" / "他" / "上面提到的" against prior
+turns. If `history.json` is missing or `[]`, omit the `conversation_history`
+field entirely (single-turn).
+
+```bash
+# Example: read history.json from task dir and inline into --args
+HISTORY=$(cat /root/hiclaw-fs/shared/tasks/$TASK_ID/history.json 2>/dev/null || echo '[]')
+mcporter call honeybadge-nebula.generate_query --args \
+  "$(python3 -c "import json,sys; print(json.dumps({'question':sys.argv[1],'conversation_history':json.loads(sys.argv[2])}))" "$QUESTION" "$HISTORY")"
+```
 
 ### Step 2: Validate and Execute
 Call `mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"<generated_ngql>"}'`

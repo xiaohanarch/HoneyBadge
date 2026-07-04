@@ -463,12 +463,42 @@ async def process_query(
         logger.info("ws_prompt_sizes", trace_id=trace_id,
                      schema_len=len(schema_str), ontology_len=len(ontology_str))
 
+        # Step 1b: Fetch conversation history for multi-turn anaphora resolution.
+        # Pulls the last 3 Q&A turns from audit_logs by session_id. Each audit
+        # log has question + cypher + summary → reconstruct user/assistant pairs.
+        # Graceful degradation: None on any error → single-turn (unchanged).
+        conversation_history: list[dict[str, str]] | None = None
+        try:
+            if session_id:
+                audit_logs = await pg.get_session_audit_logs(session_id)
+                recent = audit_logs[-3:]  # ASC order, last 3 = most recent
+                if recent:
+                    conversation_history = []
+                    for log in recent:
+                        conversation_history.append(
+                            {"role": "user", "content": log.get("question", "")}
+                        )
+                        conversation_history.append({
+                            "role": "assistant",
+                            "content": (
+                                f"上一轮 nGQL: {log.get('cypher', '')}\n"
+                                f"结果摘要: {log.get('summary', '')}"
+                            ),
+                        })
+        except Exception as hist_err:
+            logger.warning(
+                "ws_history_fetch_failed",
+                trace_id=trace_id,
+                error=str(hist_err),
+            )
+
         # Step 2: Generate nGQL (raises LLMGenerationError on failure)
         ngql_response = await llm_generate_ngql(
             adapter=llm_adapter,
             question=question,
             schema_info=schema_str,
             ontology_info=ontology_str,
+            conversation_history=conversation_history,
         )
 
         # Strip markdown code fences (e.g. ```ngql ... ```)
@@ -532,6 +562,7 @@ async def process_query(
                     question=enhanced_question,
                     schema_info=schema_str,
                     ontology_info=ontology_str,
+                    conversation_history=conversation_history,
                 )
                 ngql = _strip_markdown_fence(ngql_response.content)
                 logger.info("ws_ngql_retry", trace_id=trace_id, attempt=attempt + 2, ngql=ngql[:100])
