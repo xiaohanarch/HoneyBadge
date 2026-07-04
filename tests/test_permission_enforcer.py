@@ -742,3 +742,147 @@ class TestOrgScopedMasterTags:
         assert "s.Supplier.org_id IN [1021]" in result_ngql
         assert "po.PurchaseOrder.org_id IN [1021]" in result_ngql
         assert len(warnings) == 2
+
+
+class TestAndOrPrecedenceFix:
+    """When the existing WHERE clause has a top-level OR, the enforcer must
+    wrap it in parentheses before appending ``AND org_id``.
+
+    Without wrapping, ``WHERE a OR b AND org_id`` is parsed as
+    ``WHERE a OR (b AND org_id)`` because AND binds tighter than OR in nGQL.
+    This means the ``a`` branch bypasses org_id filtering, causing a
+    cross-org data leak. The fix wraps the existing conditions:
+    ``WHERE (a OR b) AND org_id``.
+
+    Discovered by the LLM-as-judge during offline eval of NGQL-SUP-001:
+    the judge consistently scored 3/5, noting "org_id限制未能全面生效"
+    (org_id filter not fully effective) due to AND/OR precedence.
+    """
+
+    def test_or_in_where_wraps_parentheses(self, enforcer):
+        """Top-level OR in WHERE must be wrapped before AND org_id."""
+        ngql = (
+            "MATCH (s:Supplier) "
+            "WHERE s.Supplier.credit_rating IN [\"C\",\"D\"] "
+            "OR s.Supplier.status == \"BLOCKED\" "
+            "RETURN s.Supplier.supplier_name"
+        )
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        # The OR group must be wrapped in parentheses
+        assert "(s.Supplier.credit_rating" in result_ngql, (
+            f"OR group should be wrapped in parentheses. Got: {result_ngql}"
+        )
+        assert ") AND s.Supplier.org_id IN [1000]" in result_ngql, (
+            f"org_id should be ANDed after closing paren. Got: {result_ngql}"
+        )
+
+    def test_or_in_where_preserves_both_branches(self, enforcer):
+        """Both OR branches must be inside the parentheses."""
+        ngql = (
+            "MATCH (s:Supplier) "
+            "WHERE s.Supplier.credit_rating IN [\"C\",\"D\"] "
+            "OR s.Supplier.status == \"BLOCKED\" "
+            "RETURN s.Supplier.supplier_name"
+        )
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, _ = enforcer.enforce(ngql, ctx)
+        # Extract the parenthesized group — search after WHERE, not MATCH
+        where_idx = result_ngql.find("WHERE")
+        open_paren = result_ngql.find("(", where_idx)
+        close_paren = result_ngql.find(")", open_paren)
+        paren_group = result_ngql[open_paren:close_paren + 1]
+        assert "credit_rating" in paren_group, "credit_rating must be inside parens"
+        assert "BLOCKED" in paren_group, "status==BLOCKED must be inside parens"
+        assert "org_id" not in paren_group, "org_id must be outside parens"
+
+    def test_no_or_in_where_no_wrapping(self, enforcer):
+        """WHERE with only AND (no OR) should not be wrapped."""
+        ngql = (
+            "MATCH (po:PurchaseOrder) "
+            "WHERE po.PurchaseOrder.status == 'APPROVED' "
+            "AND po.PurchaseOrder.total_amount > 10000 "
+            "RETURN po.PurchaseOrder.po_number"
+        )
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, _ = enforcer.enforce(ngql, ctx)
+        # No extra parentheses should be added
+        assert "(po.PurchaseOrder.status" not in result_ngql, (
+            f"No wrapping needed for AND-only WHERE. Got: {result_ngql}"
+        )
+
+    def test_or_inside_parens_not_wrapped_again(self, enforcer):
+        """If OR is already inside parentheses, don't wrap again."""
+        ngql = (
+            "MATCH (s:Supplier) "
+            "WHERE (s.Supplier.credit_rating IN [\"C\",\"D\"] "
+            "OR s.Supplier.status == \"BLOCKED\") "
+            "RETURN s.Supplier.supplier_name"
+        )
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, _ = enforcer.enforce(ngql, ctx)
+        # Should NOT add another layer of parentheses — no "((" pattern
+        # in the WHERE clause. The existing parens are preserved as-is.
+        where_idx = result_ngql.find("WHERE")
+        where_section = result_ngql[where_idx:]
+        assert "((" not in where_section, (
+            f"Should not double-wrap. Got: {result_ngql}"
+        )
+        # org_id should be ANDed after the existing parenthesized group
+        assert "AND s.Supplier.org_id IN [1000]" in result_ngql
+
+    def test_or_in_string_literal_not_wrapped(self, enforcer):
+        """OR inside a string value should not trigger wrapping."""
+        ngql = (
+            "MATCH (po:PurchaseOrder) "
+            "WHERE po.PurchaseOrder.note == 'OR' "
+            "RETURN po.PurchaseOrder.po_number"
+        )
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, _ = enforcer.enforce(ngql, ctx)
+        assert "(po.PurchaseOrder.note" not in result_ngql, (
+            f"OR in string literal should not trigger wrapping. Got: {result_ngql}"
+        )
+
+    def test_lookup_or_in_where_wraps_parentheses(self, enforcer):
+        """LOOKUP ON with top-level OR in WHERE must also be wrapped."""
+        ngql = (
+            "LOOKUP ON Supplier "
+            "WHERE Supplier.credit_rating IN [\"C\",\"D\"] "
+            "OR Supplier.status == \"BLOCKED\" "
+            "YIELD id(vertex) AS sup_id"
+        )
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, warnings = enforcer.enforce(ngql, ctx)
+        assert "(Supplier.credit_rating" in result_ngql, (
+            f"OR group should be wrapped in parentheses. Got: {result_ngql}"
+        )
+        assert ") AND Supplier.org_id IN [1000]" in result_ngql, (
+            f"org_id should be ANDed after closing paren. Got: {result_ngql}"
+        )
+
+    def test_supplier_risk_query_matches_golden_pattern(self, enforcer):
+        """The NGQL-SUP-001 scenario: LLM generates OR, L3 wraps correctly.
+
+        This reproduces the exact eval failure: the LLM generates a
+        high-risk supplier query with OR, L3 injects org_id. The result
+        must have org_id applying to both OR branches.
+        """
+        # Simulate what the LLM generates (no org_id, has OR)
+        llm_output = (
+            'MATCH (s:Supplier) '
+            'WHERE s.Supplier.credit_rating IN ["C","D"] '
+            'OR s.Supplier.status == "BLOCKED" '
+            'RETURN s.Supplier.supplier_name AS supplier_name, '
+            's.Supplier.credit_rating AS credit_rating, '
+            's.Supplier.status AS status '
+            'LIMIT 100'
+        )
+        ctx = _ctx(org_ids=[1000])
+        result_ngql, warnings = enforcer.enforce(llm_output, ctx)
+
+        # org_id must apply to both branches (wrapping is correct)
+        assert "(s.Supplier.credit_rating" in result_ngql
+        assert ") AND s.Supplier.org_id IN [1000]" in result_ngql
+        assert "LIMIT 100" in result_ngql
+        assert len(warnings) == 1

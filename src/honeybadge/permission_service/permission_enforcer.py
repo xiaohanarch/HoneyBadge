@@ -98,6 +98,34 @@ def _is_org_scoped(tag: str) -> bool:
     return tag in ORG_SCOPED_MASTER_TAGS
 
 
+def _has_top_level_or(text: str) -> bool:
+    """Return True if text contains OR at parenthesis depth 0.
+
+    String literals are stripped first to avoid false positives from data
+    values containing 'OR'.  Used to determine whether the existing WHERE
+    clause needs parentheses wrapping before ``AND org_id`` is appended,
+    to prevent AND/OR precedence bugs (AND binds tighter than OR in nGQL).
+
+    Example::
+
+        _has_top_level_or("a == 1 OR b == 2")          → True
+        _has_top_level_or("a == 1 AND b == 2")         → False
+        _has_top_level_or("(a == 1 OR b == 2) AND c")  → False  (OR is inside parens)
+        _has_top_level_or("name == 'OR'")              → False  (OR is in string)
+    """
+    stripped = _STRING_LITERAL_RE.sub("''", text)
+    depth = 0
+    for m in re.finditer(r'[()]|\bOR\b', stripped, re.IGNORECASE):
+        token = m.group()
+        if token == '(':
+            depth += 1
+        elif token == ')':
+            depth -= 1
+        elif depth == 0 and token.upper() == 'OR':
+            return True
+    return False
+
+
 def _has_org_filter(ngql: str, var: str, search_start: int = 0) -> bool:
     """Return True if ngql already contains an org_id filter for the given variable.
 
@@ -227,7 +255,22 @@ def _inject_org_filter(ngql: str, var: str, tag: str, org_ids: list[int]) -> str
     if boundary_pos is not None:
         insert_pos = boundary_pos
         if where_pos is not None and where_pos < boundary_pos:
-            # WHERE exists in this scope — append AND before boundary
+            # WHERE exists in this scope — append AND before boundary.
+            # If the existing WHERE has a top-level OR, wrap it in
+            # parentheses first to prevent AND/OR precedence bugs:
+            #   WHERE a OR b AND org_id  →  WHERE (a OR b) AND org_id
+            # Without wrapping, AND binds tighter than OR, so org_id
+            # would only filter the 'b' branch, leaking cross-org data.
+            existing_where = ngql[where_pos + 5:insert_pos]  # +5 = len("WHERE")
+            if _has_top_level_or(existing_where):
+                where_end = where_pos + 5
+                wrapped = ngql[where_end:insert_pos].strip()
+                return (
+                    ngql[:where_end]
+                    + f" ({wrapped})"
+                    + f" AND {condition} "
+                    + ngql[insert_pos:]
+                )
             return ngql[:insert_pos] + f" AND {condition} " + ngql[insert_pos:]
         else:
             # No WHERE in this scope — insert WHERE before boundary
@@ -235,6 +278,11 @@ def _inject_org_filter(ngql: str, var: str, tag: str, org_ids: list[int]) -> str
     # Fallback: append at end (only reachable for syntactically incomplete
     # queries that lack WITH/RETURN/YIELD; these should be rejected by L1 first)
     if where_pos is not None:
+        existing_where = ngql[where_pos + 5:]
+        if _has_top_level_or(existing_where):
+            where_end = where_pos + 5
+            wrapped = ngql[where_end:].strip()
+            return ngql[:where_end] + f" ({wrapped}) AND {condition}"
         return ngql + f" AND {condition}"
     return ngql + f" WHERE {condition}"
 
@@ -258,7 +306,19 @@ def _inject_org_filter_lookup(ngql: str, tag: str, org_ids: list[int]) -> str:
     insert_pos = yield_pos if yield_pos is not None else len(ngql)
 
     if where_pos is not None and (yield_pos is None or where_pos < yield_pos):
-        # WHERE already exists before YIELD — append AND
+        # WHERE already exists before YIELD — append AND.
+        # Wrap in parentheses if top-level OR present (same precedence fix
+        # as _inject_org_filter).
+        existing_where = ngql[where_pos + 5:insert_pos]  # +5 = len("WHERE")
+        if _has_top_level_or(existing_where):
+            where_end = where_pos + 5
+            wrapped = ngql[where_end:insert_pos].strip()
+            return (
+                ngql[:where_end]
+                + f" ({wrapped})"
+                + f" AND {condition} "
+                + ngql[insert_pos:]
+            )
         return ngql[:insert_pos] + f" AND {condition} " + ngql[insert_pos:]
     else:
         # No WHERE — insert WHERE before YIELD
