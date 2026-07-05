@@ -425,13 +425,44 @@ async def validate_and_execute_impl(
     or ``user_id`` is empty/``"manager"``/``"anonymous"``, the query is
     rejected with ``L3_NO_USER_CONTEXT``. Set ``HONEYBADGE_L3_FAIL_OPEN=1``
     to restore the legacy fail-open behavior (dev/test only).
+
+    Ordering: L1 (syntax + write guard) runs before the identity check so
+    that obviously malformed or write queries are rejected without leaking
+    schema/permission info. L0 (identity) then gates L2 (schema) and L3
+    (permissions), which do reveal information.
     """
     trace_id = generate_trace_id()
     target_space = space or _default_space()
 
+    # --- L1: Syntax validation ------------------------------------------
+    l1 = validator.validate_syntax(ngql)
+    if not l1.valid:
+        return {
+            "success": False,
+            "error": "L1_SYNTAX",
+            "details": [{"code": e.code, "message": e.message} for e in l1.errors],
+            "trace_id": trace_id,
+        }
+
+    # --- Write-operation guard (part of L1) -----------------------------
+    if _WRITE_OPS.match(ngql):
+        return {
+            "success": False,
+            "error": "L1_WRITE_REJECTED",
+            "details": [
+                {
+                    "code": "E010",
+                    "message": f"Write operations are not allowed: {ngql.split()[0].upper()}",
+                }
+            ],
+            "trace_id": trace_id,
+        }
+
     # --- L0: Fail-closed user context check (hard guard) ---------------
     # SKILL.md says "Never omit user_context" and "Never use USER_ID=manager/anonymous".
     # Enforce this at the tool layer so LLM non-compliance cannot bypass L3.
+    # Runs after L1 (syntax) so malformed/write queries are rejected without
+    # revealing whether the caller is authenticated.
     _fail_open = os.environ.get("HONEYBADGE_L3_FAIL_OPEN", "") == "1"
     _FORBIDDEN_USER_IDS = frozenset({"", "manager", "anonymous", "unknown"})
 
@@ -465,30 +496,6 @@ async def validate_and_execute_impl(
                     }],
                     "trace_id": trace_id,
                 }
-
-    # --- L1: Syntax validation ------------------------------------------
-    l1 = validator.validate_syntax(ngql)
-    if not l1.valid:
-        return {
-            "success": False,
-            "error": "L1_SYNTAX",
-            "details": [{"code": e.code, "message": e.message} for e in l1.errors],
-            "trace_id": trace_id,
-        }
-
-    # --- Write-operation guard (part of L1) -----------------------------
-    if _WRITE_OPS.match(ngql):
-        return {
-            "success": False,
-            "error": "L1_WRITE_REJECTED",
-            "details": [
-                {
-                    "code": "E010",
-                    "message": f"Write operations are not allowed: {ngql.split()[0].upper()}",
-                }
-            ],
-            "trace_id": trace_id,
-        }
 
     # --- Defense: rewrite two-part var.prop → var.Tag.prop --------------
     # NebulaGraph v3.8 MATCH bug: two-part var.prop returns wrong results.

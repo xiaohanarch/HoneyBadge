@@ -12,7 +12,6 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from slowapi.decorators import limit as slowapi_limit
 
 from honeybadge.core.constants import VERSION
 from honeybadge.server.auth import (
@@ -26,6 +25,7 @@ from honeybadge.server.auth import (
 from honeybadge.server.config import ServerConfig
 from honeybadge.server.dependencies import get_current_user
 from honeybadge.server.security import (
+    LOGIN_LIMIT,
     TokenRevocationStore,
     configure_rate_limiter,
     extract_jti,
@@ -119,7 +119,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     app.state.config = config
 
     # --- Rate limiter (slowapi) ---
-    configure_rate_limiter(app)
+    limiter = configure_rate_limiter(app)
 
     app.add_middleware(
         CORSMiddleware,
@@ -147,7 +147,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         refresh_token: str
 
     @app.post("/api/auth/login")
-    @slowapi_limit(LOGIN_LIMIT)
+    @limiter.limit(LOGIN_LIMIT)
     async def login(body: LoginRequest, request: Request) -> dict[str, Any]:
         user = authenticate_user(body.username, body.password)
         if user is None:
