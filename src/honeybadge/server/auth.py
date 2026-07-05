@@ -15,6 +15,7 @@ strong secrets loaded from environment variables via ServerConfig.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -117,6 +118,8 @@ def create_access_token(data: dict[str, Any], secret: str, expire_minutes: int) 
     """
     payload = dict(data)
     payload["type"] = "access"
+    payload["jti"] = str(uuid.uuid4())
+    payload["iat"] = int(datetime.now(tz=timezone.utc).timestamp())
     payload["exp"] = datetime.now(tz=timezone.utc) + timedelta(minutes=expire_minutes)
     return jwt.encode(payload, secret, algorithm=_ALGORITHM)  # type: ignore[no-any-return]
 
@@ -134,6 +137,8 @@ def create_refresh_token(data: dict[str, Any], secret: str, expire_days: int) ->
     """
     payload = dict(data)
     payload["type"] = "refresh"
+    payload["jti"] = str(uuid.uuid4())
+    payload["iat"] = int(datetime.now(tz=timezone.utc).timestamp())
     payload["exp"] = datetime.now(tz=timezone.utc) + timedelta(days=expire_days)
     return jwt.encode(payload, secret, algorithm=_ALGORITHM)  # type: ignore[no-any-return]
 

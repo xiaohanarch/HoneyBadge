@@ -49,11 +49,17 @@ logger = structlog.get_logger()
 
 TUWUNEL_URL: str = os.getenv("TUWUNEL_URL", "http://hiclaw-manager:6167")
 MATRIX_DOMAIN: str = os.getenv("MATRIX_DOMAIN", "matrix-local.hiclaw.io")
-HICLAW_REGISTRATION_TOKEN: str = os.getenv(
-    "HICLAW_REGISTRATION_TOKEN", "honeybadge-reg-token"
-)
-MATRIX_USER_SECRET: str = os.getenv("MATRIX_USER_SECRET", "hb-user-secret-dev")
-JWT_SECRET: str = os.getenv("JWT_SECRET", "change-me-in-production")
+
+# SECURITY: registration token has no default — must be set explicitly.
+# In production, set HICLAW_REGISTRATION_TOKEN in the environment.
+HICLAW_REGISTRATION_TOKEN: str = os.getenv("HICLAW_REGISTRATION_TOKEN", "")
+
+# SECURITY: user secret has no default — must be set explicitly.
+MATRIX_USER_SECRET: str = os.getenv("MATRIX_USER_SECRET", "")
+
+# SECURITY: JWT secret has no default — must be set explicitly.
+# In production, set JWT_SECRET to a random value >= 32 chars.
+JWT_SECRET: str = os.getenv("JWT_SECRET", "")
 JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
 MATRIX_HOMESERVER_PUBLIC: str = os.getenv(
     "MATRIX_HOMESERVER_PUBLIC", "http://localhost:6167"
@@ -61,11 +67,49 @@ MATRIX_HOMESERVER_PUBLIC: str = os.getenv(
 MANAGER_USER_ID: str = os.getenv(
     "MANAGER_USER_ID", "@manager:matrix-local.hiclaw.io"
 )
-MANAGER_MATRIX_PASSWORD: str = os.getenv(
-    "MANAGER_MATRIX_PASSWORD", "hiclaw-manager-password-dev"
-)
+
+# SECURITY: manager password has no default — must be set explicitly.
+MANAGER_MATRIX_PASSWORD: str = os.getenv("MANAGER_MATRIX_PASSWORD", "")
 
 _ALGORITHM = "HS256"
+
+# ---------------------------------------------------------------------------
+# Production-mode secret validation (fail-fast on insecure defaults)
+# ---------------------------------------------------------------------------
+
+_INSECURE_JWT_DEFAULTS = frozenset({
+    "change-me-in-production",
+    "honeybadge-dev-secret-change-in-prod",
+    "",
+})
+
+
+def _validate_production_secrets() -> None:
+    """Abort startup if insecure defaults are present in production.
+
+    Only enforced when ``ENV=production``. In dev/test, missing secrets
+    are permitted so local development remains zero-config.
+    """
+    if os.getenv("ENV") != "production":
+        return
+    import sys
+
+    errors: list[str] = []
+    if JWT_SECRET in _INSECURE_JWT_DEFAULTS or len(JWT_SECRET) < 32:
+        errors.append("JWT_SECRET must be set to a random value >= 32 chars in production.")
+    if not HICLAW_REGISTRATION_TOKEN:
+        errors.append("HICLAW_REGISTRATION_TOKEN must be set in production.")
+    if not MATRIX_USER_SECRET:
+        errors.append("MATRIX_USER_SECRET must be set in production.")
+    if not MANAGER_MATRIX_PASSWORD:
+        errors.append("MANAGER_MATRIX_PASSWORD must be set in production.")
+    if errors:
+        for e in errors:
+            print(f"[security] FATAL: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+_validate_production_secrets()
 
 # Cache the Manager's Matrix access token to avoid creating a new session on
 # every user login.  The token is read-only (only used for m.direct PUT) and

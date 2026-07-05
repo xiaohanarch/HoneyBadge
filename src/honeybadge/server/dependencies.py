@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from honeybadge.server.auth import decode_token
+from honeybadge.server.security import TokenRevocationStore, extract_jti
 
 security = HTTPBearer(auto_error=False)
 
@@ -15,7 +16,12 @@ async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> dict[str, Any]:
-    """Extract and validate JWT from Authorization header."""
+    """Extract and validate JWT from Authorization header.
+
+    Checks the token against the Redis-backed revocation blacklist before
+    accepting it. If Redis is unavailable, the blacklist check is skipped
+    (fail-open) and the token is accepted solely on signature validity.
+    """
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
@@ -28,6 +34,13 @@ async def get_current_user(
     # Accept both server-issued tokens (type="access") and auth-service tokens (iss="honeybadge-auth")
     if payload.get("type") != "access" and payload.get("iss") != "honeybadge-auth":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+
+    # Enforce token revocation (logout). Refresh tokens bypass this check
+    # so that revoking an access token does not also kill the refresh flow.
+    if payload.get("type") == "access":
+        revocation: TokenRevocationStore | None = getattr(request.app.state, "token_revocation", None)
+        if revocation is not None and await revocation.is_revoked(extract_jti(payload)):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
 
     return payload
 

@@ -1,4 +1,9 @@
-"""Audit trail API router."""
+"""Audit trail API router.
+
+Security: Non-admin users can only retrieve their own audit records.
+Admins (role includes "admin") may retrieve any record. This enforces
+L5 audit isolation at the API boundary.
+"""
 
 from typing import Any
 
@@ -8,6 +13,8 @@ from pydantic import BaseModel
 from honeybadge.server.dependencies import get_current_user, get_pg
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
+
+_ADMIN_ROLES = frozenset({"admin", "auditor"})
 
 
 class AuditTrailResponse(BaseModel):
@@ -26,6 +33,21 @@ class AuditTrailResponse(BaseModel):
     columns: list[str] | None = None
 
 
+def _is_privileged(user: dict[str, Any]) -> bool:
+    """Return True if the user has an admin or auditor role."""
+    roles = user.get("roles") or []
+    return any(r in _ADMIN_ROLES for r in roles)
+
+
+def _user_identity(user: dict[str, Any]) -> str:
+    """Extract the canonical identity string for ownership checks.
+
+    Matches the value written to ``audit_logs.user_id`` at query time
+    (see websocket.py: ``payload.get("username", payload.get("sub"))``).
+    """
+    return user.get("username") or user.get("sub") or ""
+
+
 @router.get("/{trace_id}", response_model=AuditTrailResponse)
 async def get_audit_trail(
     trace_id: str,
@@ -35,6 +57,12 @@ async def get_audit_trail(
     """Get audit trail by trace_id.
 
     Returns the full L5 audit chain: question -> nGQL -> raw result -> summary.
+
+    Access control:
+        - Users with ``admin`` or ``auditor`` role may view any record.
+        - Other users may only view records where ``user_id`` matches
+          their own identity. Mismatches return 403.
+
     Requires authentication.
     """
     if pg is None:
@@ -46,7 +74,19 @@ async def get_audit_trail(
         raise HTTPException(status_code=500, detail=f"Failed to query audit log: {e}") from e
 
     if result is None:
+        # Return 404 for non-existent records rather than 403, to avoid
+        # leaking existence information to non-privileged users.
         raise HTTPException(status_code=404, detail=f"Audit log not found for trace_id: {trace_id}")
+
+    # Enforce per-user isolation for non-privileged users
+    if not _is_privileged(user):
+        record_owner = result.get("user_id") or ""
+        requester = _user_identity(user)
+        if record_owner and requester and record_owner != requester:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to view this audit record",
+            )
 
     # Extract rows and columns from raw_result (JSONB)
     raw_result = result.get("raw_result") or {}
