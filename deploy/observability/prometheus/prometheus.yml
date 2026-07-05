@@ -65,3 +65,16 @@ scrape_configs:
     static_configs:
       - targets: ['alertmanager:9093']
     metrics_path: /metrics
+
+  # HoneyBadge API Server (FastAPI :8090)
+  # Exposes honeybadge_* metrics via prometheus_client ASGI app at /metrics
+  - job_name: 'honeybadge-server'
+    static_configs:
+      - targets: ['honeybadge-server:8090']
+    metrics_path: /metrics
+
+  # HoneyBadge Auth Service (FastAPI :8091)
+  - job_name: 'honeybadge-auth'
+    static_configs:
+      - targets: ['honeybadge-auth:8091']
+    metrics_path: /metrics

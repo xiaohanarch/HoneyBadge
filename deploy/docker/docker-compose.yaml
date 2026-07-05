@@ -945,6 +945,33 @@ services:
       timeout: 10s
       retries: 3
 
+  # =============================================================================
+  # Distributed Tracing (Jaeger)
+  # =============================================================================
+  # Grafana datasource already references jaeger:16686; this container makes
+  # the datasource functional. Also receives OTLP traces from honeybadge-server
+  # when OTEL_EXPORTER_OTLP_ENDPOINT is configured.
+  jaeger:
+    image: jaegertracing/all-in-one:1.54.0
+    container_name: honeybadge-jaeger
+    hostname: jaeger
+    restart: unless-stopped
+    profiles:
+      - observability
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - honeybadge-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:16686/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 # =============================================================================
 # Networks & Volumes
 # =============================================================================
