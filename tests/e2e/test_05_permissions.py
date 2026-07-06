@@ -230,9 +230,11 @@ class TestPermissions:
         )
         assert response.status_code == 200, \
             f"Analyst login failed: {response.status_code} {response.text}"
-        data = response.json()
+        body = response.json()
+        # Unwrap unified envelope {success, data, error, trace_id}
+        data = body.get("data", body)
         token = data.get("token") or data.get("access_token") or data.get("roles_jwt")
-        assert token, f"No token in login response: {data}"
+        assert token, f"No token in login response: {body}"
 
         # Try admin-only endpoint — analyst is authenticated but not admin,
         # so require_admin must return 403 (not 401, not 200).
