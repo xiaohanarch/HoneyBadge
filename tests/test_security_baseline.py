@@ -9,8 +9,6 @@ Covers:
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,7 +16,6 @@ import pytest
 
 from honeybadge.server.auth import create_access_token, decode_token
 from honeybadge.server.security import TokenRevocationStore, extract_jti
-
 
 # ---------------------------------------------------------------------------
 # S2: ServerConfig production validation

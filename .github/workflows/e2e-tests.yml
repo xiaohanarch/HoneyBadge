@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           cd deploy/docker
           if [ -z "${LLM_API_KEY:-}" ]; then
-            echo "::warning::secrets.LLM_API_KEY is unset - LLM-dependent tests (TC-102 etc.) will fail."
+            echo "::warning::secrets.LLM_API_KEY is unset - LLM-dependent tests will be skipped."
             LLM_API_KEY="ci-no-llm-key"
           fi
           # Start from the committed template, then override only the values
@@ -263,6 +263,11 @@ jobs:
 
       - name: Run E2E Tests - Auth & Chat
         if: github.event.inputs.test_filter == '' || contains('auth,chat', github.event.inputs.test_filter)
+        env:
+          # Expose the real key to pytest so conftest.py's requires_llm hook
+          # does NOT skip test_02_chat.py (marker removed for this file only).
+          # Other pytest stages omit this env, so their requires_llm tests stay skipped.
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: |
           echo "=== Running Auth & Chat Tests ==="
           pytest tests/e2e/test_01_auth.py tests/e2e/test_02_chat.py \

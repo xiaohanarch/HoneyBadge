@@ -7,13 +7,12 @@ filtering, batch iteration, and type conversion.
 
 from datetime import datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from honeybadge.etl.connectors.base import TableMapping
 from honeybadge.etl.connectors.oracle_ebs import OracleEBSConnector
-
 
 # ── Fakes ────────────────────────────────────────────────────────────────────
 

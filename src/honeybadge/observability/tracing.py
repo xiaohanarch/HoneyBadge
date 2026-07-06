@@ -123,7 +123,7 @@ def inject_trace_context_into_logs() -> None:
     """
     try:
         from opentelemetry import trace
-        from opentelemetry.trace import format_trace_id, format_span_id
+        from opentelemetry.trace import format_span_id, format_trace_id
 
         class _TraceIdProcessor:
             """structlog processor that injects OTel trace context."""
@@ -141,7 +141,7 @@ def inject_trace_context_into_logs() -> None:
         structlog.configure(
             processors=[
                 structlog.stdlib.add_log_level,
-                _TraceIdProcessor(),
+                _TraceIdProcessor(),  # type: ignore[list-item]
                 structlog.processors.TimeStamper(fmt="iso"),
                 structlog.processors.JSONRenderer(),
             ],

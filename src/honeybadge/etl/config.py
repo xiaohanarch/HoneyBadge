@@ -81,7 +81,7 @@ class ETLConfig:
     scheduler: SchedulerSection = field(default_factory=SchedulerSection)
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "ETLConfig":
+    def from_yaml(cls, path: str | Path) -> ETLConfig:
         """Load config from a YAML file with ``${ENV_VAR}`` expansion."""
         path = Path(path)
         if not path.exists():
@@ -93,7 +93,7 @@ class ETLConfig:
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ETLConfig":
+    def from_dict(cls, data: dict[str, Any]) -> ETLConfig:
         """Build :class:`ETLConfig` from a parsed dict."""
         connector = data.get("connector", {}) or {}
         pipeline = data.get("pipeline", {}) or {}

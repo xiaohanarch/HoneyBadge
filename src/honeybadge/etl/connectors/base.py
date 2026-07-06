@@ -19,9 +19,10 @@ Design notes
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import AsyncIterator
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -94,12 +95,12 @@ class ERPConnector(ABC):
         """Release the underlying connection / pool."""
 
     @abstractmethod
-    async def extract(
+    def extract(
         self,
         table: str,
         since: datetime | None = None,
         batch_size: int = 1000,
-    ) -> AsyncIterator[list[dict]]:
+    ) -> AsyncIterator[list[dict[str, Any]]]:
         """Stream rows from the source table in batches.
 
         Parameters

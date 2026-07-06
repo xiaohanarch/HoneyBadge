@@ -1,0 +1,41 @@
+[run]
+source = src/honeybadge
+branch = True
+parallel = True
+
+omit =
+    # Test files and test infrastructure
+    tests/*
+    tests/e2e/*
+    tests/integration/*
+    # ETL prototype (not in runtime request path)
+    src/honeybadge/etl/run_pipeline.py
+    # MCP server entrypoints (thin wrappers, tested via impl functions)
+    mcp-servers/*/server.py
+    # Gateway stubs (matrix-js-sdk bridge, not yet production)
+    src/honeybadge/gateway/*
+    # __init__.py files (trivial)
+    */__init__.py
+
+[report]
+precision = 2
+show_missing = True
+skip_covered = False
+
+exclude_lines =
+    # Standard pragma
+    pragma: no cover
+    # Debug-only code
+    def __repr__
+    # Type checking blocks
+    if TYPE_CHECKING:
+    # Abstract method stubs
+    @(abc\.)?abstractmethod
+    # Protocol stubs
+    \.\.\.
+    # Platform-specific
+    if platform\.system\(\)
+
+[html]
+directory = htmlcov
+title = HoneyBadge Coverage Report

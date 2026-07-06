@@ -24,8 +24,9 @@ Usage
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Any, AsyncIterator
+from typing import Any
 
 import structlog
 
@@ -103,7 +104,7 @@ class OracleEBSConnector(ERPConnector):
         table: str,
         since: datetime | None = None,
         batch_size: int = 1000,
-    ) -> AsyncIterator[list[dict]]:
+    ) -> AsyncIterator[list[dict[str, Any]]]:
         """Stream rows from the source table in batches.
 
         Builds a parameterised ``SELECT`` from the :class:`TableMapping`,
@@ -201,7 +202,7 @@ class OracleEBSConnector(ERPConnector):
           NULL via asyncpg).
         """
         out: dict[str, Any] = {}
-        for col_name, value in zip(columns, row):
+        for col_name, value in zip(columns, row, strict=False):
             if col_name == "is_deleted" and value is not None:
                 out[col_name] = bool(int(value))
             else:

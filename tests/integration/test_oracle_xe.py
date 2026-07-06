@@ -24,7 +24,6 @@ slow the pipeline significantly.
 
 import os
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
@@ -68,8 +67,8 @@ async def test_extract_from_test_table(oracle_connector) -> None:
     """
     # We need a TableMapping registered for the test table. Use a
     # temporary mapping injected into the registry.
-    from honeybadge.etl.connectors.base import TableMapping
     from honeybadge.etl.connectors import table_mappings
+    from honeybadge.etl.connectors.base import TableMapping
 
     test_mapping = TableMapping(
         source_table="TEST_EXTRACT_TBL",
@@ -132,8 +131,8 @@ async def test_extract_from_test_table(oracle_connector) -> None:
 @pytest.mark.asyncio
 async def test_get_source_watermark(oracle_connector) -> None:
     """get_source_watermark returns MAX(UPDATED_AT) from the source."""
-    from honeybadge.etl.connectors.base import TableMapping
     from honeybadge.etl.connectors import table_mappings
+    from honeybadge.etl.connectors.base import TableMapping
 
     test_mapping = TableMapping(
         source_table="TEST_WATERMARK_TBL",

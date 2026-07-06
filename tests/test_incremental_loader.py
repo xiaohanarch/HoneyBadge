@@ -20,7 +20,6 @@ from honeybadge.etl.connectors.base import ERPConnector
 from honeybadge.etl.incremental_loader import IncrementalLoader, TableLoadResult
 from honeybadge.etl.run_pipeline import LoadMode
 
-
 # ── Test fixtures ────────────────────────────────────────────────────────────
 
 class FakeConnector(ERPConnector):
@@ -249,7 +248,7 @@ async def test_records_failure_on_exception(loader: IncrementalLoader, fake_pool
     fake_pool.conn.fetchrow_result = {"id": 99}
 
     # Make the connector raise during extract
-    original_extract = loader._connector.extract
+    _original_extract = loader._connector.extract
 
     async def failing_extract(*args: Any, **kwargs: Any):  # type: ignore[override]
         raise ConnectionError("Oracle gone")

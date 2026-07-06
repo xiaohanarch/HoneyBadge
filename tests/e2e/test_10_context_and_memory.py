@@ -30,6 +30,8 @@ from tests.e2e.selectors import (
 
 BASE_URL = "http://localhost:3000"
 
+pytestmark = pytest.mark.requires_llm
+
 
 class TestContextAndMemory:
     """Test context continuity, memory persistence, and user isolation."""
