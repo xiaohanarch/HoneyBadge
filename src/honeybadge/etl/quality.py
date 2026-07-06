@@ -871,8 +871,25 @@ class DataQualityChecker:
                 rows = await conn.fetch(query, batch_id)
                 failed_values.extend(r["val"] for r in rows)
 
-            # NOTE: column_a/column_b pair comparison (e.g. approved_date_after_order)
-            # is not implemented yet — the rule passes silently. See plan Phase B4.
+            # Check column pair comparison: column_a must be > column_b
+            # (or >= column_b when or_equal). Violation is the negation.
+            column_a = rule.column_a or rule.params.get("column_a")
+            column_b = rule.column_b or rule.params.get("column_b")
+            if column_a is not None and column_b is not None:
+                or_equal = rule.or_equal or rule.params.get("or_equal", False)
+                # Rule requires A > B (or A >= B). Violation: A < B (or A <= B).
+                violation_op = "<" if or_equal else "<="
+                query = f"""
+                    SELECT {column_a} as val
+                    FROM {table_name}
+                    WHERE etl_batch_id = $1
+                      AND {column_a} IS NOT NULL
+                      AND {column_b} IS NOT NULL
+                      AND {column_a} {violation_op} {column_b}
+                    LIMIT 100
+                """
+                rows = await conn.fetch(query, batch_id)
+                failed_values.extend(r["val"] for r in rows)
 
         return ValidationResult(
             rule_name=rule.name,
