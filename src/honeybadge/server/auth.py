@@ -9,16 +9,25 @@ Demo credentials (for development/testing only):
   - procurement_lead  / lead123    (采购部门领导, roles=["analyst"], org_id=1000)
   - subsidiary_lead   / lead123    (子公司领导,  roles=["analyst"], org_id=1021)
 
+DEMO_USERS is loaded from a YAML file when ``HONEYBADGE_USERS_CONFIG``
+points to one (see deploy/config/users.yaml); otherwise the built-in
+defaults below are used. Plaintext passwords in the YAML are hashed with
+bcrypt at load time.
+
 In production, replace DEMO_USERS with a real user-store lookup and use
 strong secrets loaded from environment variables via ServerConfig.
 """
 
 from __future__ import annotations
 
+import os
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
+import yaml  # type: ignore[import-untyped]
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
@@ -29,11 +38,11 @@ from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # ---------------------------------------------------------------------------
-# Demo user store
+# Default demo user store (used when HONEYBADGE_USERS_CONFIG is unset).
 # Passwords are hashed at module load time so the plaintext never persists.
 # ---------------------------------------------------------------------------
 
-DEMO_USERS: dict[str, dict[str, Any]] = {
+_DEFAULT_DEMO_USERS: dict[str, dict[str, Any]] = {
     "admin": {
         "id": "admin",
         "username": "admin",
@@ -75,6 +84,82 @@ DEMO_USERS: dict[str, dict[str, Any]] = {
         "org_id": 1021,
     },
 }
+
+
+def _load_users_from_yaml(path: str | Path) -> dict[str, dict[str, Any]]:
+    """Load demo users from a YAML file, hashing plaintext passwords.
+
+    The YAML schema mirrors deploy/config/users.yaml:
+    ``users: <username>: { id, username, password, display_name, roles, org_id }``.
+
+    The ``password`` field is plaintext in the YAML and hashed with bcrypt
+    here so the returned dict matches the shape of the built-in defaults
+    (``password_hash`` key, no plaintext retained).
+
+    Args:
+        path: Path to the YAML file.
+
+    Returns:
+        A dict mapping username to a user dict with ``password_hash``.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the file is malformed or missing required keys.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Users config file not found: {p}")
+
+    with p.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    if not isinstance(data, dict) or "users" not in data:
+        raise ValueError(f"Invalid users config {p}: missing top-level 'users' key")
+
+    raw = data["users"]
+    if not isinstance(raw, dict):
+        raise ValueError(f"Invalid users config {p}: 'users' must be a mapping")
+
+    result: dict[str, dict[str, Any]] = {}
+    for key, entry in raw.items():
+        if not isinstance(entry, dict):
+            raise ValueError(f"Invalid users config {p}: entry '{key}' must be a mapping")
+        if "password" not in entry:
+            raise ValueError(f"Invalid users config {p}: entry '{key}' missing 'password'")
+        result[key] = {
+            "id": entry.get("id", key),
+            "username": entry.get("username", key),
+            "password_hash": pwd_context.hash(entry["password"]),
+            "display_name": entry.get("display_name", key),
+            "roles": list(entry.get("roles", [])),
+            "org_id": entry.get("org_id"),
+        }
+
+    return result
+
+
+def load_demo_users() -> dict[str, dict[str, Any]]:
+    """Load demo users from env-configured YAML, falling back to defaults.
+
+    Reads ``HONEYBADGE_USERS_CONFIG`` for the YAML path. If unset or the
+    file is missing/malformed, returns the built-in demo defaults.
+
+    Returns:
+        A dict mapping username to user dict (with ``password_hash``).
+    """
+    yaml_path = os.environ.get("HONEYBADGE_USERS_CONFIG")
+    if not yaml_path:
+        return {k: dict(v) for k, v in _DEFAULT_DEMO_USERS.items()}
+    try:
+        return _load_users_from_yaml(yaml_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"[auth] WARNING: failed to load users from {yaml_path}: {exc}", file=sys.stderr)
+        return {k: dict(v) for k, v in _DEFAULT_DEMO_USERS.items()}
+
+
+# Module-level singleton — loaded once at import time. All existing imports
+# (`from honeybadge.server.auth import DEMO_USERS`) continue to work unchanged.
+DEMO_USERS: dict[str, dict[str, Any]] = load_demo_users()
 
 # JWT algorithm
 _ALGORITHM = "HS256"
