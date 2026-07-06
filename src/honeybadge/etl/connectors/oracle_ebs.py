@@ -75,7 +75,7 @@ class OracleEBSConnector(ERPConnector):
         Oracle backend (CSV-only dev setups) can still import the
         package without the dependency being installed.
         """
-        import oracledb  # type: ignore[import-not-found]
+        import oracledb
 
         self._pool = oracledb.create_pool_async(
             user=self._user,

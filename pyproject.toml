@@ -143,7 +143,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # Third-party libraries that ship without type stubs or py.typed marker.
-module = ["jose", "passlib", "passlib.*", "asyncpg", "nebula3.*"]
+module = ["jose", "passlib", "passlib.*", "asyncpg", "nebula3.*", "oracledb", "apscheduler.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

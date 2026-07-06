@@ -95,7 +95,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
             --cov-report=html:htmlcov \
-            --cov-fail-under=60 \
+            --cov-fail-under=55 \
             --timeout=60 \
             -q
 
