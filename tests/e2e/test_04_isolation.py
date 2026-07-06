@@ -24,6 +24,8 @@ import pytest
 from tests.e2e.conftest import send_query_on_page
 from tests.e2e.selectors import MSG_ASSISTANT
 
+pytestmark = pytest.mark.requires_llm
+
 
 class TestUserIsolation:
     """Test user isolation and multi-tenancy."""
