@@ -30,6 +30,8 @@ from tests.e2e.selectors import (
     MSG_ASSISTANT,
 )
 
+pytestmark = pytest.mark.requires_llm
+
 
 class TestPermissions:
     """Test permission system and role-based access control."""

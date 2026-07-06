@@ -21,6 +21,8 @@ from tests.e2e.selectors import (
     TRACE_ID_LINK,
 )
 
+pytestmark = pytest.mark.requires_llm
+
 
 def _get_worker_logs_since(container_name: str, since: datetime) -> str:
     """Fetch Docker container logs since a given UTC timestamp.

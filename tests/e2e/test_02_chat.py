@@ -34,6 +34,8 @@ from tests.e2e.selectors import (
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
+pytestmark = pytest.mark.requires_llm
+
 
 class TestChatFunctionality:
     """Test chat functionality with content verification."""

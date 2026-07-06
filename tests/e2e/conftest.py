@@ -627,6 +627,29 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "observability: observability tests")
     config.addinivalue_line("markers", "slow: slow running tests")
     config.addinivalue_line("markers", "routing: worker routing tests")
+    config.addinivalue_line(
+        "markers", "requires_llm: tests that require a real LLM API key"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip LLM-dependent tests when LLM_API_KEY is not configured.
+
+    CI sets the sentinel "ci-no-llm-key" when secrets.LLM_API_KEY is unset to
+    satisfy docker-compose's ${LLM_API_KEY:?} requirement. Without a real key,
+    every chat-dependent test hangs for 240s per query and fails via Playwright
+    timeout. This hook skips any item marked ``requires_llm`` so CI stays green
+    instead of reporting ~40 false failures per run.
+    """
+    llm_key = os.getenv("LLM_API_KEY", "").strip()
+    if llm_key and llm_key != "ci-no-llm-key":
+        return
+    skip = pytest.mark.skip(
+        reason="LLM_API_KEY not configured - skipping LLM-dependent test"
+    )
+    for item in items:
+        if "requires_llm" in item.keywords:
+            item.add_marker(skip)
 
 
 def _setup_matrix_route(page_obj):
