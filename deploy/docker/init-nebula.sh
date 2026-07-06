@@ -101,11 +101,41 @@ echo "Applying nebula-edges.ngql (edges + edge indexes)..."
 console_file "nebula-edges.ngql"
 
 # ---------------------------------------------------------------------------
-# Step 6: Rebuild indexes (required after CREATE INDEX)
+# Step 6: Ensure indexes are created and rebuild
 # ---------------------------------------------------------------------------
-echo "Rebuilding indexes..."
-sleep 5
-console_exec "USE honeybadge; REBUILD TAG INDEX; REBUILD EDGE INDEX;"
+# NebulaGraph propagates schema changes (CREATE TAG/EDGE) to storaged
+# asynchronously. When tags and tag indexes are applied in the same file,
+# CREATE TAG INDEX may silently fail because the tag definition hasn't
+# reached storaged yet. We wait for propagation, re-apply the schema
+# (idempotent via IF NOT EXISTS) to catch any indexes that failed on the
+# first pass, then rebuild with verification and retry.
+
+echo "Waiting for schema to propagate across cluster..."
+sleep 20
+
+echo "Re-applying schema to catch any indexes that failed on first pass..."
+console_file "nebula-schema.ngql"
+console_file "nebula-edges.ngql"
+
+echo "Waiting for index definitions to propagate..."
+sleep 10
+
+echo "Verifying indexes exist before rebuild..."
+TAG_IDX_COUNT=$(console_exec "USE honeybadge; SHOW TAG INDEXES;" 2>&1 | grep -c "idx_" || true)
+EDGE_IDX_COUNT=$(console_exec "USE honeybadge; SHOW EDGE INDEXES;" 2>&1 | grep -c "idx_" || true)
+echo "Found $TAG_IDX_COUNT tag indexes, $EDGE_IDX_COUNT edge indexes"
+
+echo "Rebuilding indexes (with retry)..."
+for i in {1..5}; do
+    RESULT=$(console_exec "USE honeybadge; REBUILD TAG INDEX; REBUILD EDGE INDEX;" 2>&1 || true)
+    if ! echo "$RESULT" | grep -qE "without indexes|SemanticError"; then
+        echo "Index rebuild successful on attempt $i."
+        break
+    fi
+    echo "Attempt $i/5: index rebuild failed, waiting 10s before retry..."
+    echo "$RESULT" | head -5
+    sleep 10
+done
 
 echo "=========================================="
 echo "Schema initialization complete!"
