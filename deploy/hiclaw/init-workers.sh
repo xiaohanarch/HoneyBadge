@@ -1,28 +1,29 @@
 #!/bin/bash
-# HoneyBadge Worker Initialization Script — MANUAL FALLBACK
+# HoneyBadge Worker Initialization Script
 #
-# NOTE: This script is now OPTIONAL. The Manager container auto-runs
-# manager-init-internal.sh on every startup via entrypoint-wrapper.sh.
-# Use this script only for debugging or if auto-init fails.
+# The Manager container auto-runs manager-init-internal.sh on every startup
+# via entrypoint-wrapper.sh. That script:
+#   - Creates the hiclaw-storage MinIO bucket
+#   - Registers workers on Matrix (generate-worker-config.sh, NOT the
+#     removed create-worker.sh)
+#   - Generates openclaw.json for each worker and uploads to MinIO
+#   - Patches worker LLM baseUrl/model and Manager allowlist
 #
-# What it does:
-#   1. Copies worker SOUL.md files into HiClaw Manager's MinIO-accessible filesystem
-#   2. Calls create-worker.sh for each worker (inside Manager container)
-#      → creates Matrix user accounts in Tuwunel
-#      → creates Higress consumer entries
-#      → generates openclaw.json in MinIO (workers need this to start)
-#   3. (Approach B) Per-user Matrix accounts are provisioned at login via honeybadge-auth
-#   4. Registers HoneyBadge MCP servers in Higress AI Gateway
+# This script waits for the auto-init to complete, then applies fallback
+# patches and MCP registration that the auto-init may not cover:
+#   1. Ensures the MinIO bucket exists (safety net for race conditions)
+#   2. Waits for the "HoneyBadge auto-init complete!" marker
+#   3. Verifies worker openclaw.json exists in MinIO
+#   4. Patches Manager allowlist for @hb-* users (Approach B)
+#   5. Ensures Higress LLM route (Higress mode only; skipped in nginx-bypass)
+#   6. Registers MCP servers in workers + Manager via mcporter
 #
-# Usage (only if auto-init fails):
+# Usage:
 #   cd deploy/docker && docker compose up -d
-#   # Wait ~60s for hiclaw-manager to become healthy
 #   bash ../../deploy/hiclaw/init-workers.sh
 #
-# Check auto-init log first:
+# Check auto-init log:
 #   docker exec honeybadge-hiclaw-manager cat /var/log/hiclaw/honeybadge-init.log
-#
-# Re-run after: docker compose down -v (data volumes wiped)
 
 set -euo pipefail
 
@@ -107,7 +108,64 @@ echo ""
 log "MinIO is ready."
 
 # ---------------------------------------------------------------------------
-# 1b. Inject Manager's custom SOUL.md and AGENTS.md into the Manager container
+# 1a. Ensure hiclaw-storage bucket exists (safety net)
+#     manager-init-internal.sh creates this, but workers may start their
+#     file-sync BEFORE the Manager's background auto-init reaches that step.
+#     Creating it here from the host eliminates the "specified bucket does
+#     not exist" errors that cause workers to start without configs.
+# ---------------------------------------------------------------------------
+log "Ensuring hiclaw-storage bucket exists..."
+docker exec "$EMBEDDED_CONTAINER" bash -c \
+    "mc mb --ignore-existing hiclaw/hiclaw-storage >/dev/null 2>&1 && echo 'bucket ready' || echo 'bucket already exists'" \
+    && log "  → hiclaw-storage bucket ready" \
+    || warn "  Failed to create bucket (Manager auto-init will retry)"
+
+# ---------------------------------------------------------------------------
+# 1b. Wait for Manager auto-init to complete
+#     The Manager's entrypoint-wrapper.sh runs manager-init-internal.sh in
+#     the background on every startup. That script registers workers on
+#     Matrix, generates openclaw.json via generate-worker-config.sh, and
+#     uploads configs to MinIO. We MUST wait for it to finish before
+#     proceeding — otherwise the patch steps below find no openclaw.json
+#     and the "create-worker.sh failed" path silently skips everything.
+# ---------------------------------------------------------------------------
+log "Waiting for Manager auto-init to complete..."
+INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+AUTO_INIT_MARKER="HoneyBadge auto-init complete!"
+AUTO_INIT_WAIT_RETRIES="${AUTO_INIT_WAIT_RETRIES:-30}"  # 30 × 10s = 300s max
+for i in $(seq 1 "$AUTO_INIT_WAIT_RETRIES"); do
+    INIT_CONTENT=$(docker exec "$MANAGER_CONTAINER" cat "$INIT_LOG" 2>/dev/null || echo "")
+    if echo "$INIT_CONTENT" | grep -q "$AUTO_INIT_MARKER"; then
+        log "  → Manager auto-init complete (attempt $i/$AUTO_INIT_WAIT_RETRIES)"
+        break
+    fi
+    if [ "$i" -eq "$AUTO_INIT_WAIT_RETRIES" ]; then
+        warn "  Manager auto-init did not complete within $((AUTO_INIT_WAIT_RETRIES * 10))s"
+        warn "  Worker configs may be missing — check: docker exec $MANAGER_CONTAINER cat $INIT_LOG"
+    fi
+    sleep 10
+done
+
+# ---------------------------------------------------------------------------
+# 1c. Verify worker openclaw.json exists in MinIO
+#     If the auto-init failed to generate configs, workers will start
+#     without proper LLM/MCP settings and silently fail to process messages.
+#     NOTE: We check from the MANAGER container (not EMBEDDED) because the
+#     Manager's mc alias is configured by manager-init-internal.sh to point
+#     at hiclaw-embedded:9000, while the EMBEDDED container's alias may have
+#     a different configuration that doesn't see the same objects.
+# ---------------------------------------------------------------------------
+for worker in graph-worker analytics-worker; do
+    if docker exec "$MANAGER_CONTAINER" mc stat "hiclaw/hiclaw-storage/agents/${worker}/openclaw.json" >/dev/null 2>&1; then
+        log "  → ${worker}/openclaw.json verified in MinIO"
+    else
+        warn "  ${worker}/openclaw.json NOT in MinIO — workers may not function"
+        warn "  Check: docker exec $MANAGER_CONTAINER cat $INIT_LOG"
+    fi
+done
+
+# ---------------------------------------------------------------------------
+# 1d. Inject Manager's custom SOUL.md and AGENTS.md into the Manager container
 #     HiClaw generates default SOUL.md/AGENTS.md with a <!-- hiclaw-builtin-end -->
 #     marker. Our custom routing logic goes AFTER that marker.
 # ---------------------------------------------------------------------------
@@ -223,41 +281,19 @@ for worker in graph-worker analytics-worker; do
 done
 
 # ---------------------------------------------------------------------------
-# 3. Register workers using create-worker.sh (runs inside Manager container)
-#    This creates Matrix users, Higress consumers, and generates openclaw.json
-# ---------------------------------------------------------------------------
-CREATE_WORKER="/opt/hiclaw/agent/skills/worker-management/scripts/create-worker.sh"
-
-log "Registering graph-worker..."
-docker exec "$MANAGER_CONTAINER" bash -c \
-    "$CREATE_WORKER --name graph-worker --skills file-sync,mcporter 2>&1" \
-    && log "  → graph-worker registered" \
-    || warn "  create-worker.sh for graph-worker failed (may already exist)"
-
-log "Registering analytics-worker..."
-docker exec "$MANAGER_CONTAINER" bash -c \
-    "$CREATE_WORKER --name analytics-worker --skills file-sync,mcporter 2>&1" \
-    && log "  → analytics-worker registered" \
-    || warn "  create-worker.sh for analytics-worker failed (may already exist)"
-
-# ---------------------------------------------------------------------------
-# 3b. Fix worker LLM baseUrl: hiclaw-manager:8080 → aigw-local.hiclaw.io:8080
-#     and update model name to qwen3.5-plus
+# 3. Worker registration — handled by manager-init-internal.sh
 #
-#     create-worker.sh generates openclaw.json with baseUrl=http://hiclaw-manager:8080/v1.
-#     Higress requires Host: aigw-local.hiclaw.io to route AI requests.
-#     docker-compose.yaml gives hiclaw-manager a network alias aigw-local.hiclaw.io,
-#     so workers resolve this name to the manager's current IP via Docker DNS —
-#     no hardcoded IPs needed.
+#    HiClaw v1.1.0+ removed create-worker.sh. The Manager's auto-init
+#    (manager-init-internal.sh Step 2) registers workers on Matrix and
+#    generates openclaw.json via generate-worker-config.sh. We verified
+#    those configs exist in Step 1c above.
 #
-#     CRITICAL: baseUrl MUST end with /v1. OpenAI JS SDK v6 appends /chat/completions
-#     directly (no /v1). Without /v1 in baseUrl, path is /chat/completions which
-#     misses the /v1/ route → falls to internal route with no API key → 404.
-#
-#     IRON RULE: Workers NEVER call any LLM directly. ALL LLM calls MUST route
-#     through Higress AI Gateway at http://aigw-local.hiclaw.io:8080/v1. No exceptions.
+#    The patch below is a FALLBACK: if the auto-init's own patch step
+#    (Step 2b) didn't run or produced the wrong LLM baseUrl/model, we
+#    fix it here. This is idempotent — if the config is already correct,
+#    the Python script prints "No changes needed" and exits.
 # ---------------------------------------------------------------------------
-log "Fixing worker LLM baseUrl (→ aigw-local.hiclaw.io:8080/v1) and model (→ ${MANAGER_LLM_MODEL:-glm-5.2})..."
+log "Verifying/patching worker LLM config (→ aigw-local.hiclaw.io:8080/v1, model → ${MANAGER_LLM_MODEL:-glm-5.2})..."
 # baseUrl MUST include /v1: OpenAI JS SDK appends /chat/completions directly
 # Without /v1: path becomes /chat/completions → misses llm-minimax-route → no API key → 404
 for worker in graph-worker analytics-worker; do
