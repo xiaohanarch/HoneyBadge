@@ -541,7 +541,6 @@ class ReferentialIntegrityCheck:
                 LIMIT 10
             """
 
-            # TODO: Implement actual query execution
             assert self._pool is not None
             async with self._pool.acquire() as conn:
                 orphans = await conn.fetch(query, batch_id)
