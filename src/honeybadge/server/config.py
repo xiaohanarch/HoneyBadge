@@ -19,6 +19,23 @@ _INSECURE_JWT_DEFAULTS = frozenset({
 _INSECURE_NEBULA_DEFAULTS = frozenset({"nebula", ""})
 _INSECURE_HICLAW_DEFAULTS = frozenset({"admin1234", "hiclaw-manager-password-dev", ""})
 
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
+
+
+def _parse_cors_origins(raw: str) -> list[str]:
+    """Parse a comma-separated ``HONEYBADGE_CORS_ORIGINS`` env value.
+
+    Returns the dev defaults when the value is empty. Whitespace is trimmed
+    and empty entries are dropped.
+    """
+    if not raw or not raw.strip():
+        return list(_DEFAULT_CORS_ORIGINS)
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    return origins if origins else list(_DEFAULT_CORS_ORIGINS)
+
 
 @dataclass
 class ServerConfig:
@@ -85,6 +102,14 @@ class ServerConfig:
     matrix_url: str = field(default="")
     hiclaw_manager_url: str = field(default="")
 
+    # -------------------------------------------------------------------------
+    # CORS (allowed origins for browser requests)
+    # -------------------------------------------------------------------------
+    cors_origins: list[str] = field(default_factory=lambda: [
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ])
+
     @classmethod
     def from_env(cls) -> "ServerConfig":
         """Create a ServerConfig by reading environment variables.
@@ -132,6 +157,10 @@ class ServerConfig:
             # Reserved URLs
             matrix_url=os.environ.get("MATRIX_URL", ""),
             hiclaw_manager_url=os.environ.get("HICLAW_MANAGER_URL", ""),
+            # CORS
+            cors_origins=_parse_cors_origins(
+                os.environ.get("HONEYBADGE_CORS_ORIGINS", "")
+            ),
         )
 
         if os.environ.get("ENV") == "production":
@@ -168,6 +197,12 @@ class ServerConfig:
 
         if config.llm_api_key == "":
             errors.append("LLM_API_KEY must be set in production.")
+
+        if "*" in config.cors_origins:
+            errors.append(
+                "HONEYBADGE_CORS_ORIGINS must not contain '*' in production "
+                "(specify explicit origins)."
+            )
 
         if errors:
             for e in errors:

@@ -9,7 +9,7 @@ from typing import Any
 
 import structlog
 
-from honeybadge.core.exceptions import LLMError, RateLimitExceeded
+from honeybadge.core.exceptions import AppRateLimitExceeded, LLMError
 from honeybadge.llm.adapter import LLMAdapter, LLMRequest, LLMResponse
 
 logger = structlog.get_logger()
@@ -177,7 +177,7 @@ class LLMProviderManager:
 
         Raises:
             LLMError: If both primary and fallback fail.
-            RateLimitExceeded: If rate limit exceeded (no fallback).
+            AppRateLimitExceeded: If rate limit exceeded (no fallback).
         """
         primary_name = provider_name or self._primary
         primary = self.get_provider(primary_name)
@@ -194,7 +194,7 @@ class LLMProviderManager:
             )
             return await primary.chat(request)
 
-        except RateLimitExceeded:
+        except AppRateLimitExceeded:
             # Rate limit - do not fallback, propagate immediately
             logger.warning(
                 "llm_rate_limit_no_fallback",

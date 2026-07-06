@@ -17,11 +17,11 @@ import httpx
 import structlog
 
 from honeybadge.core.exceptions import (
+    AppRateLimitExceeded,
     LLMError,
     LLMGenerationError,
     LLMSummarizationError,
     LLMTimeoutError,
-    RateLimitExceeded,
 )
 from honeybadge.llm.numeric_fidelity import check_and_log_fidelity
 from honeybadge.llm.prompt_loader import load_prompt
@@ -112,7 +112,7 @@ class LLMAdapter(ABC):
         Raises:
             LLMError: On generation failure.
             LLMTimeoutError: On timeout.
-            RateLimitExceeded: On rate limit.
+            AppRateLimitExceeded: On rate limit.
         """
         ...
 
@@ -130,7 +130,7 @@ class LLMAdapter(ABC):
         Raises:
             LLMError: On generation failure.
             LLMTimeoutError: On timeout.
-            RateLimitExceeded: On rate limit.
+            AppRateLimitExceeded: On rate limit.
         """
         ...
 
@@ -294,14 +294,14 @@ class OpenAICompatibleAdapter(LLMAdapter):
         Raises:
             LLMError: On generation failure.
             LLMTimeoutError: On timeout.
-            RateLimitExceeded: On rate limit (after exhausting retries).
+            AppRateLimitExceeded: On rate limit (after exhausting retries).
         """
         max_retries = 3
         retry_delay = 3.0  # seconds between retries for 429/529
         for attempt in range(max_retries + 1):
             try:
                 return await self._chat_once(request)
-            except RateLimitExceeded:
+            except AppRateLimitExceeded:
                 if attempt >= max_retries:
                     raise
                 logger.warning(
@@ -313,7 +313,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 await asyncio.sleep(retry_delay)
                 retry_delay *= 2  # exponential back-off
 
-        raise RateLimitExceeded("LLM rate limit exceeded after retries")
+        raise AppRateLimitExceeded("LLM rate limit exceeded after retries")
 
     async def _chat_once(self, request: LLMRequest) -> LLMResponse:
         """Single chat attempt — called by chat() with retry wrapper."""
@@ -340,7 +340,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
 
             if response.status_code in (429, 529):
                 LLM_METRICS.record_rate_limit(self.provider)
-                raise RateLimitExceeded("LLM provider rate limit exceeded")
+                raise AppRateLimitExceeded("LLM provider rate limit exceeded")
 
             if response.status_code == 401:
                 logger.error("llm_auth_error", status_code=401, trace_id=request.trace_id)
@@ -443,7 +443,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
         Raises:
             LLMError: On generation failure.
             LLMTimeoutError: On timeout.
-            RateLimitExceeded: On rate limit.
+            AppRateLimitExceeded: On rate limit.
         """
         # Check rate limit before request
         if request.user_id and self._rate_limiter:
@@ -465,7 +465,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 },
             ) as response:
                 if response.status_code == 429:
-                    raise RateLimitExceeded("LLM provider rate limit exceeded")
+                    raise AppRateLimitExceeded("LLM provider rate limit exceeded")
 
                 if response.status_code >= 500:
                     raise LLMError(
@@ -692,7 +692,7 @@ class TokenRateLimiter:
             user_id: User identifier.
 
         Raises:
-            RateLimitExceeded: If user has exceeded their daily limit.
+            AppRateLimitExceeded: If user has exceeded their daily limit.
         """
         if not await self.check_limit(user_id):
             remaining = await self.get_remaining(user_id)
@@ -702,7 +702,7 @@ class TokenRateLimiter:
                 limit=self._daily_limit,
                 remaining=remaining,
             )
-            raise RateLimitExceeded(
+            raise AppRateLimitExceeded(
                 f"Daily token limit exceeded for user {user_id}. "
                 f"Limit: {self._daily_limit}, Remaining: {remaining}"
             )
