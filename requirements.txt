@@ -21,6 +21,10 @@ matrix-nio>=0.21.0
 mcp>=1.0.0
 # FastMCP framework (MCP servers use this)
 fastmcp>=2.0.0
+# Observability (Prometheus metrics)
+prometheus-client>=0.19.0
+# Rate limiting (L3/L4 security hardening)
+slowapi>=0.1.9
 
 # Development dependencies
 pytest>=8.0.0
