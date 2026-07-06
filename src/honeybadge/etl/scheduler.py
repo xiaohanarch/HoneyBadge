@@ -29,7 +29,7 @@ import asyncpg
 import structlog
 
 from honeybadge.etl.config import ETLConfig
-from honeybadge.etl.run_pipeline import LoadMode, PipelineConfig, PipelineStatus
+from honeybadge.etl.run_pipeline import LoadMode, PipelineConfig
 
 logger = structlog.get_logger()
 

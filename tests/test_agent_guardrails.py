@@ -25,7 +25,6 @@ from honeybadge.protocols.guardrails import (
     reset_investigation_counter,
 )
 
-
 # ---------------------------------------------------------------------------
 # A1b: L4 Numeric Fidelity — enforce mode
 # ---------------------------------------------------------------------------

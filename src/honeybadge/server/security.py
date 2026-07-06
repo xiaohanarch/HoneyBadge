@@ -100,7 +100,7 @@ def configure_rate_limiter(app: Any) -> Limiter:
     from fastapi import Request
     from fastapi.responses import JSONResponse
 
-    @app.exception_handler(RateLimitExceeded)
+    @app.exception_handler(RateLimitExceeded)  # type: ignore[untyped-decorator]
     async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
         return JSONResponse(
             status_code=429,

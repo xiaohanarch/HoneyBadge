@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import sys
 
 from honeybadge.etl.scheduler import run_once, run_scheduler
 

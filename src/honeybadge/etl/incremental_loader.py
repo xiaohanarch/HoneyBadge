@@ -238,7 +238,7 @@ class IncrementalLoader:
         NULL, which causes the connector to do a full extract.
         """
         assert self._pool is not None
-        return await self._pool.fetchval(
+        return await self._pool.fetchval(  # type: ignore[no-any-return]
             f'SELECT MAX(source_update_time) FROM "{table_name}"'
         )
 
@@ -356,9 +356,9 @@ class IncrementalLoader:
         placeholders = ", ".join(f"${i + 1}" for i in range(len(columns)))
 
         now = datetime.utcnow()
-        records: list[tuple] = []
+        records: list[tuple[Any, ...]] = []
         for row in rows:
-            record = []
+            record: list[Any] = []
             for col in columns:
                 if col == "etl_batch_id":
                     record.append(batch_id)

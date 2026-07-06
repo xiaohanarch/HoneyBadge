@@ -25,9 +25,10 @@ that emulate ERP updates.
 from __future__ import annotations
 
 import csv
+from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import structlog
 
@@ -66,7 +67,7 @@ class CSVConnector(ERPConnector):
         table: str,
         since: datetime | None = None,
         batch_size: int = 1000,
-    ) -> AsyncIterator[list[dict]]:
+    ) -> AsyncIterator[list[dict[str, Any]]]:
         """Stream rows from ``<csv_dir>/<table>.csv`` in batches.
 
         Rows are filtered client-side by ``source_update_time`` when
@@ -83,8 +84,9 @@ class CSVConnector(ERPConnector):
             reader = csv.DictReader(f)
             for row in reader:
                 parsed = self._parse_row(row, table)
-                if since is not None and self._row_watermark(parsed) is not None:
-                    if self._row_watermark(parsed) <= since:
+                if since is not None:
+                    wm = self._row_watermark(parsed)
+                    if wm is not None and wm <= since:
                         continue
                 batch.append(parsed)
                 if len(batch) >= batch_size:
