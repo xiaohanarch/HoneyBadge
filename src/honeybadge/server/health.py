@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from honeybadge.core.constants import VERSION
+from honeybadge.resilience.breakers import get_breaker_states, sync_breaker_metrics
 
 router = APIRouter(prefix="/api", tags=["system"])
 
@@ -46,9 +47,27 @@ async def health_check(request: Request) -> dict[str, Any]:
     except Exception as e:
         services["nebula"] = {"status": "down", "error": str(e)}
 
+    # Sync and report circuit breaker states
+    sync_breaker_metrics()
+    breaker_states = get_breaker_states()
+    circuit_breakers: dict[str, Any] = {}
+    any_breaker_open = False
+    for name, info in breaker_states.items():
+        state = info["state"]
+        if state == "open":
+            any_breaker_open = True
+        circuit_breakers[name] = {
+            "state": state,
+            "failure_count": info["failure_count"],
+            "last_error": info["last_error"],
+        }
+
     all_up = all(s.get("status") == "up" for s in services.values())
+    overall = "healthy" if (all_up and not any_breaker_open) else "degraded"
+
     return {
-        "status": "healthy" if all_up else "degraded",
+        "status": overall,
         "version": VERSION,
         "services": services,
+        "circuit_breakers": circuit_breakers,
     }

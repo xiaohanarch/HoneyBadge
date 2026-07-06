@@ -11,6 +11,11 @@ from nebula3.Config import Config as NebulaConfig
 from nebula3.gclient.net import ConnectionPool
 
 from honeybadge.core.exceptions import NebulaGraphError
+from honeybadge.resilience.breakers import (
+    CircuitBreakerOpenError,
+    nebula_breaker,
+    sync_breaker_metrics,
+)
 
 logger = structlog.get_logger()
 
@@ -185,10 +190,32 @@ class NebulaGraphClient:
                 session.release()
 
         try:
-            return await loop.run_in_executor(None, _exec)
+            async with nebula_breaker:
+                result: NebulaQueryResult = await loop.run_in_executor(None, _exec)
+            return result
+        except CircuitBreakerOpenError:
+            from honeybadge.metrics.collectors import RESILIENCE_METRICS
+
+            RESILIENCE_METRICS.record_rejected("nebula")
+            logger.warning(
+                "nebula_circuit_breaker_open",
+                retry_after=nebula_breaker.recovery_timeout,
+            )
+            return NebulaQueryResult(
+                columns=[],
+                rows=[],
+                execution_time_ms=0,
+                success=False,
+                error_message=(
+                    f"NebulaGraph service unavailable (circuit breaker open, "
+                    f"retry after {nebula_breaker.recovery_timeout:.0f}s)"
+                ),
+            )
         except NebulaGraphError:
+            sync_breaker_metrics()
             raise
         except Exception as e:
+            sync_breaker_metrics()
             raise NebulaGraphError(f"Query execution failed: {e}", query=ngql) from e
 
     async def execute_file(
