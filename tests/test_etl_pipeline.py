@@ -410,3 +410,129 @@ class TestPipelineRunner:
         # Cleanup
         await runner._quality_checker.disconnect() if runner._quality_checker else None
         shutil.rmtree(output_dir, ignore_errors=True)
+
+
+# ── Unit tests (no infrastructure required) ────────────────────────────────
+
+@pytest.mark.asyncio
+class TestPipelineStatusLogic:
+    """Unit tests for the final status logic in ETLPipelineRunner.run().
+
+    Regression coverage for issue #6: ETL transformations that append to
+    ``state.errors`` without raising were silently marked SUCCESS because
+    ``run()`` set the status unconditionally.
+
+    These tests stub every stage method so they can run without PostgreSQL
+    or NebulaGraph.
+    """
+
+    def _make_runner(self):
+        from honeybadge.etl.run_pipeline import (
+            ETLPipelineRunner,
+            LoadMode,
+            PipelineConfig,
+        )
+
+        config = PipelineConfig(
+            batch_id="ETL-UNIT-001",
+            load_mode=LoadMode.INCREMENTAL,
+            skip_trigger=True,
+        )
+        return ETLPipelineRunner(config)
+
+    def _stub_stages(self, runner, *, errors=None, final_status=None):
+        """Replace every stage coroutine with a no-op that optionally
+        appends errors or downgrades the status (simulating the integrity
+        check's PARTIAL downgrade)."""
+        from datetime import datetime
+
+        async def _noop_append():
+            for err in errors or []:
+                runner.state.errors.append({
+                    "stage": err,
+                    "error": f"simulated {err} failure",
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+
+        async def _noop_clean():
+            return None
+
+        async def _noop_partial():
+            # Mimic _verify_graph_integrity downgrading to PARTIAL.
+            from honeybadge.etl.run_pipeline import PipelineStatus
+
+            runner.state.status = PipelineStatus.PARTIAL
+            runner.state.warnings.append({
+                "stage": "graph_integrity",
+                "expected": 100,
+                "actual": 90,
+            })
+
+        runner._run_extract_stage = _noop_append if errors else _noop_clean
+        runner._wait_for_sync_trigger = _noop_clean
+        runner._run_quality_checks = _noop_clean
+        runner._run_graph_transform = _noop_clean
+        runner._run_import = _noop_clean
+        runner._verify_graph_integrity = (
+            _noop_partial if final_status == "partial" else _noop_clean
+        )
+
+    async def test_clean_pipeline_marks_success(self):
+        from honeybadge.etl.run_pipeline import PipelineStatus
+
+        runner = self._make_runner()
+        self._stub_stages(runner, errors=None, final_status=None)
+
+        state = await runner.run()
+
+        assert state.status == PipelineStatus.SUCCESS
+        assert state.errors == []
+
+    async def test_accumulated_errors_marks_partial(self):
+        """Issue #6: errors appended without raising must NOT be SUCCESS."""
+        from honeybadge.etl.run_pipeline import PipelineStatus
+
+        runner = self._make_runner()
+        # Simulate the extract stage appending an error but not raising
+        # (the real _run_extract_stage explicitly does not re-raise).
+        self._stub_stages(runner, errors=["extract"], final_status=None)
+
+        state = await runner.run()
+
+        assert state.status == PipelineStatus.PARTIAL, (
+            f"Expected PARTIAL when errors accumulated, got {state.status}"
+        )
+        assert len(state.errors) == 1
+        assert state.errors[0]["stage"] == "extract"
+
+    async def test_partial_from_verify_not_overwritten_to_success(self):
+        """Integrity check downgrades to PARTIAL; run() must preserve it."""
+        from honeybadge.etl.run_pipeline import PipelineStatus
+
+        runner = self._make_runner()
+        self._stub_stages(runner, errors=None, final_status="partial")
+
+        state = await runner.run()
+
+        assert state.status == PipelineStatus.PARTIAL, (
+            f"Expected PARTIAL preserved from verify stage, got {state.status}"
+        )
+        assert state.errors == []
+        assert len(state.warnings) == 1
+
+    async def test_errors_take_precedence_over_partial(self):
+        """If both errors and a PARTIAL downgrade occur, errors win (PARTIAL
+        with error_count logged at error level)."""
+        from honeybadge.etl.run_pipeline import PipelineStatus
+
+        runner = self._make_runner()
+        self._stub_stages(
+            runner,
+            errors=["extract", "transform_vertices"],
+            final_status="partial",
+        )
+
+        state = await runner.run()
+
+        assert state.status == PipelineStatus.PARTIAL
+        assert len(state.errors) == 2

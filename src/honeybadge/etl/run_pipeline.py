@@ -276,17 +276,42 @@ class ETLPipelineRunner:
             # Stage 5: Verify graph integrity
             await self._verify_graph_integrity()
 
-            # Mark as success
-            self.state.status = PipelineStatus.SUCCESS
+            # Determine final status. Several stages (extract, per-tag/edge
+            # transform) append to ``self.state.errors`` without raising, so
+            # an unconditional SUCCESS would silently swallow non-fatal
+            # failures and leave operations with no alert (issue #6).
+            # ``_verify_graph_integrity`` may also have downgraded the status
+            # to PARTIAL — preserve that instead of overwriting to SUCCESS.
             self.state.end_time = datetime.utcnow()
-
-            logger.info(
-                "pipeline_completed",
-                batch_id=self.config.batch_id,
-                duration_sec=self.state.duration_sec,
-                vertices=self.state.vertices_written,
-                edges=self.state.edges_written,
-            )
+            if self.state.errors:
+                self.state.status = PipelineStatus.PARTIAL
+                logger.error(
+                    "pipeline_completed_with_errors",
+                    batch_id=self.config.batch_id,
+                    duration_sec=self.state.duration_sec,
+                    vertices=self.state.vertices_written,
+                    edges=self.state.edges_written,
+                    error_count=len(self.state.errors),
+                    errors=self.state.errors,
+                )
+            elif self.state.status == PipelineStatus.PARTIAL:
+                logger.warning(
+                    "pipeline_completed_partial",
+                    batch_id=self.config.batch_id,
+                    duration_sec=self.state.duration_sec,
+                    vertices=self.state.vertices_written,
+                    edges=self.state.edges_written,
+                    warnings=self.state.warnings,
+                )
+            else:
+                self.state.status = PipelineStatus.SUCCESS
+                logger.info(
+                    "pipeline_completed",
+                    batch_id=self.config.batch_id,
+                    duration_sec=self.state.duration_sec,
+                    vertices=self.state.vertices_written,
+                    edges=self.state.edges_written,
+                )
 
         except Exception as e:
             logger.error(
