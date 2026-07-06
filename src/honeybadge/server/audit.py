@@ -1,8 +1,12 @@
 """Audit trail API router.
 
-Security: Non-admin users can only retrieve their own audit records.
-Admins (role includes "admin") may retrieve any record. This enforces
-L5 audit isolation at the API boundary.
+Security:
+  - Non-privileged users can only retrieve their own audit records.
+  - Privileged users (admin/auditor) can view records within their own
+    organization (``org_id`` match). A superadmin with ``org_id IS NULL``
+    in the JWT (or the ``"superadmin"`` role) can view records across all
+    organizations — this is the only role that bypasses the org filter.
+  This enforces L5 audit isolation at both the user and tenant boundary.
 """
 
 from typing import Any
@@ -14,7 +18,8 @@ from honeybadge.server.dependencies import get_current_user, get_pg
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
-_ADMIN_ROLES = frozenset({"admin", "auditor"})
+_ADMIN_ROLES = frozenset({"admin", "auditor", "superadmin"})
+_SUPERADMIN_ROLE = "superadmin"
 
 
 class AuditTrailResponse(BaseModel):
@@ -39,6 +44,19 @@ def _is_privileged(user: dict[str, Any]) -> bool:
     return any(r in _ADMIN_ROLES for r in roles)
 
 
+def _is_superadmin(user: dict[str, Any]) -> bool:
+    """Return True if the user can bypass org-level filtering.
+
+    A superadmin has either the ``"superadmin"`` role or ``org_id IS NULL``
+    in the JWT (the legacy admin pattern where None means "all orgs").
+    """
+    roles = user.get("roles") or []
+    if _SUPERADMIN_ROLE in roles:
+        return True
+    # JWT org_id=None signals cross-org access (the original admin design).
+    return user.get("org_id") is None and _is_privileged(user)
+
+
 def _user_identity(user: dict[str, Any]) -> str:
     """Extract the canonical identity string for ownership checks.
 
@@ -46,6 +64,16 @@ def _user_identity(user: dict[str, Any]) -> str:
     (see websocket.py: ``payload.get("username", payload.get("sub"))``).
     """
     return user.get("username") or user.get("sub") or ""
+
+
+def _user_org_id(user: dict[str, Any]) -> int | None:
+    """Extract org_id from the JWT payload, if present."""
+    org = user.get("org_id")
+    if isinstance(org, int):
+        return org
+    if isinstance(org, str) and org.isdigit():
+        return int(org)
+    return None
 
 
 @router.get("/{trace_id}", response_model=AuditTrailResponse)
@@ -86,6 +114,20 @@ async def get_audit_trail(
             raise HTTPException(
                 status_code=403,
                 detail="You do not have permission to view this audit record",
+            )
+
+    # Tenant boundary: privileged users (admin/auditor) are further restricted
+    # to records within their own organization. Only superadmin (org_id=None
+    # or explicit "superadmin" role) can view cross-org audit records.
+    # Records with org_id=NULL (legacy rows written before the column existed)
+    # are visible only to superadmin — org-scoped admins cannot see them.
+    if _is_privileged(user) and not _is_superadmin(user):
+        requester_org = _user_org_id(user)
+        record_org = result.get("org_id")
+        if requester_org is not None and record_org is not None and requester_org != record_org:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to view audit records from another organization",
             )
 
     # Extract rows and columns from raw_result (JSONB)

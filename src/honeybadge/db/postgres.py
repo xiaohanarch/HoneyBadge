@@ -26,6 +26,7 @@ class AuditLogEntry:
     execution_time_ms: int
     row_count: int
     error_message: str | None = None
+    org_id: int | None = None
 
 
 class PostgreSQLClient:
@@ -111,6 +112,14 @@ class PostgreSQLClient:
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_session_id ON audit_logs(session_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at DESC)")
 
+            # Multi-tenancy: add org_id column for tenant-level audit isolation.
+            # ALTER TABLE IF NOT EXISTS is idempotent — existing deployments get
+            # the column added on the next init_schema() call, with NULL for
+            # legacy rows (treated as "unknown org" — filtered out for
+            # org-scoped queries but visible to superadmins with org_id=None).
+            await conn.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS org_id INT")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_org_id ON audit_logs(org_id)")
+
             # chat_sessions table (new)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -155,8 +164,9 @@ class PostgreSQLClient:
                     """
                     INSERT INTO audit_logs (
                         trace_id, question, cypher, raw_result, summary,
-                        user_id, session_id, execution_time_ms, row_count, error_message
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        user_id, session_id, execution_time_ms, row_count, error_message,
+                        org_id
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                     """,
                     entry.trace_id,
                     entry.question,
@@ -168,6 +178,7 @@ class PostgreSQLClient:
                     entry.execution_time_ms,
                     entry.row_count,
                     entry.error_message,
+                    entry.org_id,
                 )
 
             logger.info(
