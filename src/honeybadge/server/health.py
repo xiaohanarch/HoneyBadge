@@ -10,6 +10,12 @@ from honeybadge.resilience.breakers import get_breaker_states, sync_breaker_metr
 router = APIRouter(prefix="/api", tags=["system"])
 
 
+# NOTE: /api/health is intentionally exempt from the unified response envelope.
+# Monitoring tools (Prometheus, k8s liveness probes, etc.) expect the raw
+# {"status", "version", "services"} shape and would break if it were wrapped
+# in {success, data, ...}. Do not wrap health responses.
+
+
 @router.get("/health")
 async def health_check(request: Request) -> dict[str, Any]:
     services: dict[str, Any] = {}

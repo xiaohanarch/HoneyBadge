@@ -25,11 +25,24 @@ http.interceptors.request.use(
   }
 );
 
-// 响应拦截器 - 处理错误和 token 刷新
+// 响应拦截器 - 解包统一信封并处理错误和 token 刷新
 http.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Success: unwrap the {success, data, error, trace_id} envelope so call
+    // sites see the payload directly under response.data.
+    if (response.data && response.data.success === true) {
+      response.data = response.data.data;
+    }
+    return response;
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+
+    // Error: extract safe message from the envelope if present.
+    const body = error.response?.data;
+    if (body && body.success === false && body.error) {
+      error.message = body.error.message;
+    }
 
     // 处理 401 未授权
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -38,10 +51,13 @@ http.interceptors.response.use(
       const refreshToken = localStorage.getItem('refresh_token');
       if (refreshToken) {
         try {
+          // This call uses raw axios (not the `http` instance) so it bypasses
+          // the response interceptor — unwrap the envelope manually.
           const response = await axios.post<LoginResponse>('/api/auth/refresh', {
             refresh_token: refreshToken,
           });
-          const { token, refresh_token, user } = response.data;
+          const envelope = response.data as unknown as { success: boolean; data: LoginResponse };
+          const { token, refresh_token, user } = envelope.data ?? (response.data as LoginResponse);
           localStorage.setItem('token', token);
           localStorage.setItem('refresh_token', refresh_token);
 
@@ -64,11 +80,13 @@ http.interceptors.response.use(
 
     // 处理其他错误
     if (error.response?.status === 403) {
-      ElMessage.error('没有权限访问该资源');
+      ElMessage.error(error.message || '没有权限访问该资源');
     } else if (error.response?.status === 500) {
-      ElMessage.error('服务器内部错误');
+      ElMessage.error(error.message || '服务器内部错误');
     } else if (!error.response) {
       ElMessage.error('网络连接失败，请检查网络');
+    } else if (error.message) {
+      ElMessage.error(error.message);
     }
 
     return Promise.reject(error);

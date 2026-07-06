@@ -201,7 +201,7 @@ class TestAuditOrgFiltering:
         admin_user = {"roles": ["admin"], "org_id": 1000, "username": "admin_a"}
 
         result = await get_audit_trail(trace_id="TRC-test", user=admin_user, pg=mock_pg)
-        assert result.trace_id == "TRC-test"
+        assert result["data"]["trace_id"] == "TRC-test"
 
     @pytest.mark.asyncio
     async def test_superadmin_can_view_any_org(self) -> None:
@@ -226,7 +226,7 @@ class TestAuditOrgFiltering:
         superadmin = {"roles": ["superadmin"], "org_id": 1000, "username": "root"}
 
         result = await get_audit_trail(trace_id="TRC-test", user=superadmin, pg=mock_pg)
-        assert result.trace_id == "TRC-test"
+        assert result["data"]["trace_id"] == "TRC-test"
 
     @pytest.mark.asyncio
     async def test_superadmin_can_view_null_org_records(self) -> None:
@@ -251,7 +251,7 @@ class TestAuditOrgFiltering:
         superadmin = {"roles": ["admin"], "org_id": None, "username": "root"}
 
         result = await get_audit_trail(trace_id="TRC-legacy", user=superadmin, pg=mock_pg)
-        assert result.trace_id == "TRC-legacy"
+        assert result["data"]["trace_id"] == "TRC-legacy"
 
 
 # ---------------------------------------------------------------------------

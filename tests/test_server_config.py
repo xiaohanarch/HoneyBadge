@@ -1,6 +1,6 @@
 """Tests for ServerConfig dataclass."""
 
-
+import pytest
 
 from honeybadge.server.config import ServerConfig
 
@@ -152,3 +152,40 @@ class TestConfigFromEnv:
         assert config.host == "0.0.0.0"
         assert config.nebula_host == "localhost"
 
+
+class TestCorsOrigins:
+    """Tests for the cors_origins config field."""
+
+    def test_default_cors_origins(self):
+        """Default cors_origins should include localhost:3000 and :5173."""
+        config = ServerConfig()
+        assert "http://localhost:3000" in config.cors_origins
+        assert "http://localhost:5173" in config.cors_origins
+
+    def test_cors_origins_from_env(self, monkeypatch):
+        """HONEYBADGE_CORS_ORIGINS should be parsed as a comma-separated list."""
+        monkeypatch.setenv("HONEYBADGE_CORS_ORIGINS", "https://a.example.com,https://b.example.com")
+        config = ServerConfig.from_env()
+        assert config.cors_origins == ["https://a.example.com", "https://b.example.com"]
+
+    def test_cors_origins_from_env_trims_whitespace(self, monkeypatch):
+        """Whitespace around origins should be trimmed."""
+        monkeypatch.setenv("HONEYBADGE_CORS_ORIGINS", " https://a.example.com , https://b.example.com ")
+        config = ServerConfig.from_env()
+        assert config.cors_origins == ["https://a.example.com", "https://b.example.com"]
+
+    def test_cors_origins_empty_env_uses_defaults(self, monkeypatch):
+        """An empty HONEYBADGE_CORS_ORIGINS should fall back to defaults."""
+        monkeypatch.setenv("HONEYBADGE_CORS_ORIGINS", "")
+        config = ServerConfig.from_env()
+        assert "http://localhost:3000" in config.cors_origins
+
+    def test_cors_origins_production_rejects_wildcard(self, monkeypatch):
+        """Production mode should reject '*' in cors_origins."""
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setenv("HONEYBADGE_CORS_ORIGINS", "*")
+        monkeypatch.setenv("JWT_SECRET", "x" * 40)
+        monkeypatch.setenv("NEBULA_PASSWORD", "real-password")
+        monkeypatch.setenv("LLM_API_KEY", "real-api-key")
+        with pytest.raises(SystemExit):
+            ServerConfig.from_env()

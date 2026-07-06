@@ -24,6 +24,9 @@ from honeybadge.server.auth import (
 )
 from honeybadge.server.config import ServerConfig
 from honeybadge.server.dependencies import get_current_user
+from honeybadge.server.envelope import success
+from honeybadge.server.exception_handlers import register_exception_handlers
+from honeybadge.server.middleware import TraceIdMiddleware, get_trace_id
 from honeybadge.server.security import (
     LOGIN_LIMIT,
     TokenRevocationStore,
@@ -121,13 +124,20 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     # --- Rate limiter (slowapi) ---
     limiter = configure_rate_limiter(app)
 
+    # TraceIdMiddleware is added BEFORE CORSMiddleware so CORS stays the
+    # outermost layer and handles preflight without trace-id headers leaking
+    # into browser-side CORS errors.
+    app.add_middleware(TraceIdMiddleware)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=config.cors_origins,
         allow_credentials=False,
         allow_methods=["*"],
-        allow_headers=["*"],
+        allow_headers=["*", "X-Trace-Id"],
     )
+
+    # --- Global exception handlers (unified envelope) ---
+    register_exception_handlers(app)
 
     # --- Prometheus /metrics endpoint ---
     # Exposes all honeybadge_* metrics collected by collectors.py. Scraped by
@@ -155,17 +165,17 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         token_data = {"sub": user["id"], "username": user["username"], "roles": user["roles"], "org_id": user["org_id"]}
         access_token = create_access_token(token_data, config.jwt_secret, config.jwt_access_expire_minutes)
         refresh_token = create_refresh_token({"sub": user["id"]}, config.jwt_secret, config.jwt_refresh_expire_days)
-        return {"token": access_token, "refresh_token": refresh_token, "user": user_to_response(user)}
+        return success({"token": access_token, "refresh_token": refresh_token, "user": user_to_response(user)}, trace_id=get_trace_id())
 
     @app.get("/api/auth/me")
     async def me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
-        return {"id": user["sub"], "username": user["username"], "display_name": user.get("display_name", user["username"]), "roles": user["roles"], "org_id": user.get("org_id")}
+        return success({"id": user["sub"], "username": user["username"], "display_name": user.get("display_name", user["username"]), "roles": user["roles"], "org_id": user.get("org_id")}, trace_id=get_trace_id())
 
     @app.post("/api/auth/logout")
     async def logout(
         request: Request,
         user: dict[str, Any] = Depends(get_current_user),
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Revoke the current access token via Redis blacklist.
 
         The token's JTI is added to a blacklist with TTL equal to the
@@ -180,7 +190,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             now = int(datetime.now(tz=timezone.utc).timestamp())
             ttl = max(0, int(exp) - now) if exp else config.jwt_access_expire_minutes * 60
             await revocation.revoke(jti, ttl)
-        return {"message": "Logged out"}
+        return success({"message": "Logged out"}, trace_id=get_trace_id())
 
     @app.post("/api/auth/refresh")
     async def refresh(body: RefreshRequest) -> dict[str, Any]:
@@ -197,7 +207,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         token_data = {"sub": user["id"], "username": user["username"], "roles": user["roles"], "org_id": user["org_id"]}
         access_token = create_access_token(token_data, config.jwt_secret, config.jwt_access_expire_minutes)
         new_refresh = create_refresh_token({"sub": user["id"]}, config.jwt_secret, config.jwt_refresh_expire_days)
-        return {"token": access_token, "refresh_token": new_refresh, "user": user_to_response(user)}
+        return success({"token": access_token, "refresh_token": new_refresh, "user": user_to_response(user)}, trace_id=get_trace_id())
 
     # --- Mount routers ---
     from honeybadge.server.admin import router as admin_router
@@ -217,20 +227,29 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
-        """WebSocket endpoint for query processing with full metadata."""
+        """WebSocket endpoint for query processing with full metadata.
+
+        Authentication is enforced BEFORE the handshake completes: a valid
+        JWT must be supplied via the ``token`` query parameter. Anonymous
+        connections are rejected with close code 1008 (policy violation).
+        """
         from honeybadge.server.auth import decode_token
 
-        # Extract token from query params
         token = websocket.query_params.get("token", "")
-        user_id = "anonymous"
-        org_id: int | None = None
-        roles: list[str] = []
-        if token:
-            payload = decode_token(token, config.jwt_secret)
-            if payload:
-                user_id = payload.get("username", payload.get("sub", "anonymous"))
-                org_id = payload.get("org_id")
-                roles = payload.get("roles", [])
+        if not token:
+            await websocket.close(code=1008)
+            return
+        payload = decode_token(token, config.jwt_secret)
+        if not payload:
+            await websocket.close(code=1008)
+            return
+        if payload.get("type") != "access" and payload.get("iss") != "honeybadge-auth":
+            await websocket.close(code=1008)
+            return
+
+        user_id = payload.get("username", payload.get("sub", "anonymous"))
+        org_id: int | None = payload.get("org_id")
+        roles: list[str] = payload.get("roles", [])
 
         await websocket.accept()
 
@@ -292,9 +311,16 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         except WebSocketDisconnect:
             logger.info("ws_client_disconnected")
         except Exception as e:
-            logger.error("ws_error", error=str(e))
+            logger.error("ws_error", error=str(e), exc_info=True)
             try:
-                await websocket.send_text(json.dumps({"type": "error", "payload": {"message": str(e)}}))
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "payload": {
+                        "message": "An internal error occurred",
+                        "code": "INTERNAL_ERROR",
+                        "trace_id": get_trace_id(),
+                    },
+                }))
             except Exception:
                 pass
 

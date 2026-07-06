@@ -11,10 +11,15 @@ Security:
 
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from honeybadge.server.dependencies import get_current_user, get_pg
+from honeybadge.server.envelope import success
+from honeybadge.server.middleware import get_trace_id
+
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
@@ -76,12 +81,12 @@ def _user_org_id(user: dict[str, Any]) -> int | None:
     return None
 
 
-@router.get("/{trace_id}", response_model=AuditTrailResponse)
+@router.get("/{trace_id}")
 async def get_audit_trail(
     trace_id: str,
     user: dict[str, Any] = Depends(get_current_user),
     pg: Any = Depends(get_pg),
-) -> AuditTrailResponse:
+) -> dict[str, Any]:
     """Get audit trail by trace_id.
 
     Returns the full L5 audit chain: question -> nGQL -> raw result -> summary.
@@ -99,7 +104,8 @@ async def get_audit_trail(
     try:
         result = await pg.get_audit_log(trace_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to query audit log: {e}") from e
+        logger.error("audit_query_failed", trace_id=get_trace_id(), error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to query audit log") from e
 
     if result is None:
         # Return 404 for non-existent records rather than 403, to avoid
@@ -142,18 +148,21 @@ async def get_audit_trail(
         rows = None
         columns = None
 
-    return AuditTrailResponse(
-        trace_id=result["trace_id"],
-        question=result["question"],
-        cypher=result["cypher"],
-        summary=result["summary"],
-        session_id=result.get("session_id") or "",
-        user_id=result.get("user_id") or "",
-        execution_time_ms=result.get("execution_time_ms") or 0,
-        row_count=result.get("row_count") or 0,
-        created_at=result.get("created_at").isoformat() if result.get("created_at") else "",
-        llm_model=result.get("llm_model"),
-        error_message=result.get("error_message"),
-        rows=rows,
-        columns=columns,
+    return success(
+        {
+            "trace_id": result["trace_id"],
+            "question": result["question"],
+            "cypher": result["cypher"],
+            "summary": result["summary"],
+            "session_id": result.get("session_id") or "",
+            "user_id": result.get("user_id") or "",
+            "execution_time_ms": result.get("execution_time_ms") or 0,
+            "row_count": result.get("row_count") or 0,
+            "created_at": result.get("created_at").isoformat() if result.get("created_at") else "",
+            "llm_model": result.get("llm_model"),
+            "error_message": result.get("error_message"),
+            "rows": rows,
+            "columns": columns,
+        },
+        trace_id=get_trace_id(),
     )

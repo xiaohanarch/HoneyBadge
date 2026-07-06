@@ -18,7 +18,6 @@ from typing import Any
 
 import structlog
 from slowapi import Limiter
-from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 logger = structlog.get_logger()
@@ -96,16 +95,9 @@ def configure_rate_limiter(app: Any) -> Limiter:
 
     app.state.limiter = limiter
 
-    # Register the rate-limit-exceeded handler so clients get a clean 429
-    from fastapi import Request
-    from fastapi.responses import JSONResponse
-
-    @app.exception_handler(RateLimitExceeded)  # type: ignore[untyped-decorator]
-    async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Rate limit exceeded", "retry_after": getattr(exc, "retry_after", 60)},
-        )
+    # The RateLimitExceeded exception handler is registered centrally by
+    # honeybadge.server.exception_handlers.register_exception_handlers so it
+    # returns the unified envelope shape.
 
     return limiter
 

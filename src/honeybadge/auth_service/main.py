@@ -16,9 +16,9 @@ from typing import Any
 
 import httpx
 import structlog
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse
 from jose import jwt
 from pydantic import BaseModel
 
@@ -160,34 +160,27 @@ app = FastAPI(
     version="1.0.0",
 )
 
+def _parse_cors_origins(raw: str) -> list[str]:
+    """Parse a comma-separated HONEYBADGE_CORS_ORIGINS value into a list."""
+    defaults = ["http://localhost:3000", "http://localhost:5173"]
+    if not raw or not raw.strip():
+        return defaults
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    return origins if origins else defaults
+
+
+_cors_origins = _parse_cors_origins(os.environ.get("HONEYBADGE_CORS_ORIGINS", ""))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-Trace-Id"],
 )
-
-
-@app.middleware("http")
-async def options_middleware(request: Request, call_next: Any) -> Any:
-    """Globally intercept OPTIONS preflight requests and return CORS headers.
-
-    Without this, some HTTP clients (notably the Vite proxy forwarding from a
-    browser) get a 405 because Starlette's routing layer can't find an
-    explicit OPTIONS handler for the path.
-    """
-    if request.method == "OPTIONS":
-        return Response(
-            status_code=200,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
-                "Access-Control-Max-Age": "3600",
-            },
-        )
-    return await call_next(request)
+# NOTE: CORSMiddleware already handles OPTIONS preflight. The manual
+# options_middleware that was here previously hardcoded
+# Access-Control-Allow-Origin: * which defeated the configured origins.
 
 # ---------------------------------------------------------------------------
 # Request / Response models

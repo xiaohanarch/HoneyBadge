@@ -1,4 +1,8 @@
-"""Exception hierarchy for HoneyBadge."""
+"""Exception hierarchy for HoneyBadge.
+
+Renamed RateLimitExceeded to AppRateLimitExceeded to avoid collision with
+slowapi.errors.RateLimitExceeded.
+"""
 
 
 class HoneyBadgeError(Exception):
@@ -114,8 +118,13 @@ class LLMTimeoutError(LLMError):
         super().__init__(message, "LLM_TIMEOUT")
 
 
-class RateLimitExceeded(HoneyBadgeError):
-    """Rate limit exceeded."""
+class AppRateLimitExceeded(HoneyBadgeError):
+    """Application-level rate limit exceeded (e.g. LLM provider throttling).
+
+    Distinct from ``slowapi.errors.RateLimitExceeded`` which is raised by the
+    slowapi HTTP rate limiter. This one represents upstream provider throttling
+    surfaced through the LLM adapter.
+    """
 
     def __init__(self, message: str = "Rate limit exceeded"):
         super().__init__(message, "RATE_LIMIT_EXCEEDED")
