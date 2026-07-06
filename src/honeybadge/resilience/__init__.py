@@ -21,6 +21,14 @@ Wiring:
     frees up worker capacity and prevents request pile-up.
 """
 
+from honeybadge.resilience.breakers import (
+    BREAKERS,
+    get_breaker_states,
+    llm_breaker,
+    nebula_breaker,
+    redis_breaker,
+    sync_breaker_metrics,
+)
 from honeybadge.resilience.circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerOpenError,
@@ -28,7 +36,13 @@ from honeybadge.resilience.circuit_breaker import (
 )
 
 __all__ = [
+    "BREAKERS",
     "CircuitBreaker",
     "CircuitBreakerOpenError",
     "CircuitState",
+    "get_breaker_states",
+    "llm_breaker",
+    "nebula_breaker",
+    "redis_breaker",
+    "sync_breaker_metrics",
 ]

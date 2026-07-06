@@ -11,6 +11,11 @@ import structlog
 
 from honeybadge.core.exceptions import LLMError, RateLimitExceeded
 from honeybadge.llm.adapter import LLMAdapter, LLMRequest, LLMResponse
+from honeybadge.resilience.breakers import (
+    CircuitBreakerOpenError,
+    llm_breaker,
+    sync_breaker_metrics,
+)
 
 logger = structlog.get_logger()
 
@@ -192,7 +197,25 @@ class LLMProviderManager:
                 model=request.model,
                 trace_id=request.trace_id,
             )
-            return await primary.chat(request)
+            async with llm_breaker:
+                result = await primary.chat(request)
+            return result
+
+        except CircuitBreakerOpenError:
+            from honeybadge.metrics.collectors import RESILIENCE_METRICS
+
+            RESILIENCE_METRICS.record_rejected("llm")
+            sync_breaker_metrics()
+            logger.warning(
+                "llm_circuit_breaker_open",
+                provider=primary_name,
+                retry_after=llm_breaker.recovery_timeout,
+                trace_id=request.trace_id,
+            )
+            raise LLMError(
+                f"LLM service unavailable (circuit breaker open, "
+                f"retry after {llm_breaker.recovery_timeout:.0f}s)"
+            ) from None
 
         except RateLimitExceeded:
             # Rate limit - do not fallback, propagate immediately

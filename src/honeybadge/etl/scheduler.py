@@ -49,8 +49,8 @@ class ETLScheduler:
 
     async def start(self) -> None:
         """Register the cron job and start the underlying scheduler."""
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-not-found]
-        from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
 
         trigger = CronTrigger.from_crontab(
             self._config.scheduler.cron,

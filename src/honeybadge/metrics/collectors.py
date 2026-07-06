@@ -637,6 +637,62 @@ class ETLMetricsCollector:
 
 
 # =============================================================================
+# Resilience Metrics
+# =============================================================================
+
+class ResilienceMetricsCollector:
+    """Circuit breaker and resilience metrics.
+
+    Metrics:
+    - circuit_breaker_state: Breaker state as numeric gauge (labels: name)
+      0=CLOSED, 1=OPEN, 2=HALF_OPEN
+    - circuit_breaker_failures_total: Consecutive failure count (labels: name)
+    - circuit_breaker_rejected_total: Calls rejected because breaker was OPEN (labels: name)
+    """
+
+    _STATE_VALUES = {"closed": 0, "open": 1, "half_open": 2}
+
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
+        self._registry = registry or REGISTRY
+
+        self.breaker_state = Gauge(
+            "honeybadge_circuit_breaker_state",
+            "Circuit breaker state (0=closed, 1=open, 2=half_open)",
+            ["name"],
+            registry=self._registry,
+        )
+
+        self.breaker_failures = Gauge(
+            "honeybadge_circuit_breaker_failures",
+            "Current consecutive failure count for circuit breakers",
+            ["name"],
+            registry=self._registry,
+        )
+
+        self.breaker_rejected_total = Counter(
+            "honeybadge_circuit_breaker_rejected_total",
+            "Total calls rejected because the circuit breaker was open",
+            ["name"],
+            registry=self._registry,
+        )
+
+    def update_breaker(self, name: str, state: str, failure_count: int) -> None:
+        """Update metrics for a single circuit breaker.
+
+        Args:
+            name: Breaker name (e.g. "nebula", "llm", "redis").
+            state: One of "closed", "open", "half_open".
+            failure_count: Current consecutive failure count.
+        """
+        self.breaker_state.labels(name=name).set(self._STATE_VALUES.get(state, 0))
+        self.breaker_failures.labels(name=name).set(failure_count)
+
+    def record_rejected(self, name: str) -> None:
+        """Record a call rejected by an open circuit breaker."""
+        self.breaker_rejected_total.labels(name=name).inc()
+
+
+# =============================================================================
 # Global Metrics Instances
 # =============================================================================
 
@@ -646,3 +702,4 @@ HICLAW_METRICS = HiClawMetricsCollector()
 VALIDATION_METRICS = ValidationMetricsCollector()
 QUERY_METRICS = QueryMetricsCollector()
 ETL_METRICS = ETLMetricsCollector()
+RESILIENCE_METRICS = ResilienceMetricsCollector()

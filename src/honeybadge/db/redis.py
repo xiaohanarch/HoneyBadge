@@ -8,6 +8,11 @@ import redis.asyncio as aioredis
 import structlog
 
 from honeybadge.core.exceptions import RedisError
+from honeybadge.resilience.breakers import (
+    CircuitBreakerOpenError,
+    redis_breaker,
+    sync_breaker_metrics,
+)
 
 logger = structlog.get_logger()
 
@@ -113,12 +118,27 @@ class RedisClient:
     # =========================================================================
 
     async def get_cache(self, key: str) -> Any | None:
-        """Get cached value."""
+        """Get cached value.
+
+        Returns None on cache miss or when the Redis circuit breaker is OPEN
+        (graceful degradation — callers treat this as a cache miss).
+        """
         if not self._client:
             raise RedisError("Not connected to Redis")
 
         full_key = f"{self.cache_prefix}:{key}"
-        data = await self._client.get(full_key)
+        try:
+            async with redis_breaker:
+                data = await self._client.get(full_key)
+        except CircuitBreakerOpenError:
+            from honeybadge.metrics.collectors import RESILIENCE_METRICS
+
+            RESILIENCE_METRICS.record_rejected("redis")
+            logger.debug("redis_cache_degraded_skip_get", key=key)
+            return None
+        finally:
+            sync_breaker_metrics()
+
         if data:
             return json.loads(data)
         return None
@@ -129,13 +149,27 @@ class RedisClient:
         value: Any,
         ttl: int = 300,
     ) -> bool:
-        """Set cached value."""
+        """Set cached value.
+
+        Returns False when the Redis circuit breaker is OPEN (graceful
+        degradation — the cache write is skipped, callers continue normally).
+        """
         if not self._client:
             raise RedisError("Not connected to Redis")
 
         full_key = f"{self.cache_prefix}:{key}"
         serialized = json.dumps(value, ensure_ascii=False, default=str)
-        await self._client.setex(full_key, ttl, serialized)
+        try:
+            async with redis_breaker:
+                await self._client.setex(full_key, ttl, serialized)
+        except CircuitBreakerOpenError:
+            from honeybadge.metrics.collectors import RESILIENCE_METRICS
+
+            RESILIENCE_METRICS.record_rejected("redis")
+            logger.debug("redis_cache_degraded_skip_set", key=key)
+            return False
+        finally:
+            sync_breaker_metrics()
         return True
 
     async def invalidate_cache(self, pattern: str) -> int:
