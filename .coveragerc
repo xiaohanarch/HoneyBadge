@@ -14,6 +14,10 @@ omit =
     mcp-servers/*/server.py
     # Gateway stubs (matrix-js-sdk bridge, not yet production)
     src/honeybadge/gateway/*
+    # CLI/service entrypoints (tested via E2E, not unit tests)
+    src/honeybadge/__main__.py
+    src/honeybadge/etl/__main__.py
+    src/honeybadge/auth_service/main.py
     # __init__.py files (trivial)
     */__init__.py
 
