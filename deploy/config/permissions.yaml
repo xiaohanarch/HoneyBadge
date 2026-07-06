@@ -1,0 +1,50 @@
+# ===========================================================================
+# HoneyBadge Permission Configuration
+#
+# Maps user IDs to their PermissionContext (allowed processes, org scope,
+# data scope). Loaded by src/honeybadge/permission_service/config.py.
+#
+# If this file is absent or HONEYBADGE_PERMISSIONS_CONFIG is unset, the
+# loader falls back to the built-in defaults compiled into config.py.
+#
+# data_scope:
+#   ALL  — no row-level filtering (admin, auditor)
+#   ORG  — filter to org_ids listed below (subsidiary_lead, analyst)
+#   DEPT — reserved for future department-level scoping
+# ===========================================================================
+
+permissions:
+  admin:
+    user_id: admin
+    allowed_processes: [PTP, OTC]
+    org_ids: null
+    dept_ids: null
+    data_scope: ALL
+
+  procurement_lead:
+    user_id: procurement_lead
+    allowed_processes: [PTP]
+    org_ids: null
+    dept_ids: null
+    data_scope: ALL
+
+  subsidiary_lead:
+    user_id: subsidiary_lead
+    allowed_processes: [PTP, OTC]
+    org_ids: [1021]
+    dept_ids: null
+    data_scope: ORG
+
+  analyst:
+    user_id: analyst
+    allowed_processes: [PTP]
+    org_ids: [1000]
+    dept_ids: null
+    data_scope: ORG
+
+  auditor:
+    user_id: auditor
+    allowed_processes: [PTP, OTC]
+    org_ids: null
+    dept_ids: null
+    data_scope: ALL

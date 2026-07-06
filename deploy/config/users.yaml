@@ -1,0 +1,59 @@
+# ===========================================================================
+# HoneyBadge Demo User Store
+#
+# DEVELOPMENT / TESTING ONLY. In production, replace with a real user store
+# (LDAP, Active Directory, or a hashed-credential database table). Plaintext
+# passwords below are hashed with bcrypt at load time by server/auth.py.
+#
+# Loaded by src/honeybadge/server/auth.py when HONEYBADGE_USERS_CONFIG points
+# to this file. If the env var is unset or the file is absent, the loader
+# falls back to the built-in DEMO_USERS defaults compiled into auth.py.
+#
+# Default dev credentials (DO NOT use in production):
+#   admin             / admin123    (系统管理员,   roles=[admin],    org_id=1000)
+#   analyst           / analyst123  (数据分析师,   roles=[analyst],  org_id=1000)
+#   auditor           / auditor123  (审计员,       roles=[auditor],  org_id=1000)
+#   procurement_lead  / lead123     (采购部门领导, roles=[analyst],  org_id=1000)
+#   subsidiary_lead   / lead123     (子公司领导,   roles=[analyst],  org_id=1021)
+# ===========================================================================
+
+users:
+  admin:
+    id: admin
+    username: admin
+    password: admin123
+    display_name: 系统管理员
+    roles: [admin]
+    org_id: 1000
+
+  analyst:
+    id: analyst
+    username: analyst
+    password: analyst123
+    display_name: 数据分析师
+    roles: [analyst]
+    org_id: 1000
+
+  auditor:
+    id: auditor
+    username: auditor
+    password: auditor123
+    display_name: 审计员
+    roles: [auditor]
+    org_id: 1000
+
+  procurement_lead:
+    id: procurement_lead
+    username: procurement_lead
+    password: lead123
+    display_name: 采购部门领导
+    roles: [analyst]
+    org_id: 1000
+
+  subsidiary_lead:
+    id: subsidiary_lead
+    username: subsidiary_lead
+    password: lead123
+    display_name: 子公司领导
+    roles: [analyst]
+    org_id: 1021
