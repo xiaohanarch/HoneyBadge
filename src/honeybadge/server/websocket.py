@@ -659,8 +659,18 @@ async def process_query(
                 error_message=str(e),
             )
             await pg.write_audit_log(audit_entry)
-        except Exception:
-            pass
+        except Exception as audit_err:
+            # L5 audit promise: never silently swallow audit-write failures.
+            # The success path already logs ws_audit_write_failed; the error
+            # path is the more severe case (query failed AND audit failed), so
+            # it gets a distinct event for independent alerting. Without this,
+            # an audit-service outage during a failed query permanently lost
+            # the audit record with zero observability signal (issue #4).
+            logger.warning(
+                "ws_error_audit_write_failed",
+                trace_id=trace_id,
+                error=str(audit_err),
+            )
 
         return {
             "summary": f"查询处理失败: {str(e)}",
