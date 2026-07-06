@@ -2,6 +2,7 @@ groups:
   - name: honeybadge
     rules:
       # Query error rate above 5%
+      # Metric: honeybadge_query_total (QueryMetricsCollector, labels: query_type, status)
       - alert: HighErrorRate
         expr: |
           sum(rate(honeybadge_query_total{status!="success"}[5m]))
@@ -14,10 +15,11 @@ groups:
           description: "The query error rate has exceeded 5% for the past 5 minutes."
 
       # P95 query latency above 30s
+      # Metric: honeybadge_query_duration_seconds (QueryMetricsCollector histogram)
       - alert: HighLatency
         expr: |
           histogram_quantile(0.95,
-            rate(honeybadge_query_e2e_duration_seconds_bucket[5m])
+            sum by (le) (rate(honeybadge_query_duration_seconds_bucket[5m]))
           ) > 30
         for: 10m
         labels:
@@ -27,10 +29,12 @@ groups:
           description: "The P95 end-to-end query latency has exceeded 30 seconds for the past 10 minutes."
 
       # LLM error rate above 10%
+      # Metric: honeybadge_llm_errors_total / honeybadge_llm_requests_total
+      # (errors/tokens was semantically wrong — tokens is a count of tokens, not requests)
       - alert: LLMHighErrorRate
         expr: |
           sum(rate(honeybadge_llm_errors_total[5m]))
-          / sum(rate(honeybadge_llm_tokens_total[5m])) > 0.1
+          / sum(rate(honeybadge_llm_requests_total[5m])) > 0.1
         for: 5m
         labels:
           severity: critical
@@ -39,8 +43,9 @@ groups:
           description: "The LLM error rate has exceeded 10% for the past 5 minutes."
 
       # No active HiClaw workers
+      # Metric: honeybadge_hiclaw_workers_active (HiClawMetricsCollector, no labels)
       - alert: NoActiveWorkers
-        expr: sum(honeybadge_hiclaw_workers{status="active"}) == 0
+        expr: honeybadge_hiclaw_workers_active == 0
         for: 1m
         labels:
           severity: critical
@@ -49,10 +54,12 @@ groups:
           description: "There are no active HiClaw workers for the past 1 minute."
 
       # NebulaGraph connection pool exhausted
+      # Metric: honeybadge_nebula_connection_pool_available (NebulaMetricsCollector)
+      #         honeybadge_nebula_connection_pool_size (total capacity)
       - alert: NebulaPoolExhausted
         expr: |
-          honeybadge_nebula_pool_size{status="idle"} == 0
-          AND honeybadge_nebula_pool_size{status="active"} > 0
+          honeybadge_nebula_connection_pool_available == 0
+          and honeybadge_nebula_connection_pool_size > 0
         for: 5m
         labels:
           severity: warning
@@ -61,6 +68,7 @@ groups:
           description: "All NebulaGraph connections are in use and no idle connections available for 5 minutes."
 
       # nGQL validation failure rate above 30%
+      # Metric: honeybadge_validation_total (ValidationMetricsCollector, labels: level, result)
       - alert: HighValidationFailRate
         expr: |
           sum(rate(honeybadge_validation_total{result="fail"}[15m]))
@@ -73,6 +81,7 @@ groups:
           description: "The nGQL validation failure rate has exceeded 30% for the past 15 minutes."
 
       # ETL pipeline has not run successfully in 26+ hours
+      # Metric: honeybadge_etl_last_success_timestamp (ETLMetricsCollector gauge, added in observability fix)
       - alert: ETLStale
         expr: |
           (time() - honeybadge_etl_last_success_timestamp) > 93600
@@ -82,3 +91,14 @@ groups:
         annotations:
           summary: "ETL pipeline has not run successfully in 26+ hours"
           description: "The ETL pipeline has not completed successfully for more than 26 hours."
+
+      # ETL data freshness lag — source data is stale
+      # Metric: honeybadge_etl_watermark_lag_seconds (ETLMetricsCollector, labels: table)
+      - alert: ETLLagHigh
+        expr: max(honeybadge_etl_watermark_lag_seconds) > 86400
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ETL data freshness lag exceeds 24h"
+          description: "The maximum ETL watermark lag across all tables exceeds 24 hours."

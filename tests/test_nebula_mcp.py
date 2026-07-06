@@ -142,11 +142,24 @@ async def test_validate_and_execute_passes_valid_query():
     client = FakeNebulaClient({ngql: expected_result})
     validator = NgqlValidator()
 
+    # L3 fail-closed requires a valid user_context (admin with ALL data_scope).
+    user_context = {
+        "user_id": "admin",
+        "permissions": {
+            "user_id": "admin",
+            "allowed_processes": ["PTP", "OTC"],
+            "org_ids": None,
+            "dept_ids": None,
+            "data_scope": "ALL",
+        },
+    }
+
     result = await validate_and_execute_impl(
         nebula=client,
         validator=validator,
         ngql=ngql,
         space="test_space",
+        user_context=user_context,
     )
 
     assert result["success"] is True
@@ -375,14 +388,16 @@ class TestValidateAndExecuteWithPermissions:
         assert result["warnings"] == []
 
     @pytest.mark.asyncio
-    async def test_no_user_context_has_empty_warnings(self, nebula, validator):
+    async def test_no_user_context_is_fail_closed(self, nebula, validator):
+        """L3 fail-closed: user_context=None is rejected with L3_NO_USER_CONTEXT."""
         result = await validate_and_execute_impl(
             nebula, validator,
             "MATCH (po:PurchaseOrder) RETURN po.po_number",
             user_context=None,
         )
-        assert result["success"] is True
-        assert result["warnings"] == []
+        assert result["success"] is False
+        assert result["error"] == "L3_NO_USER_CONTEXT"
+        assert result["details"][0]["code"] == "E301"
 
 
 # ---------------------------------------------------------------------------

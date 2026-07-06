@@ -420,6 +420,16 @@ async def validate_and_execute_impl(
     """L1-L3 validate then execute an nGQL statement.
 
     Returns a dict with ``success``, result data, and ``trace_id``.
+
+    Security: L3 is fail-closed by default. If ``user_context`` is ``None``
+    or ``user_id`` is empty/``"manager"``/``"anonymous"``, the query is
+    rejected with ``L3_NO_USER_CONTEXT``. Set ``HONEYBADGE_L3_FAIL_OPEN=1``
+    to restore the legacy fail-open behavior (dev/test only).
+
+    Ordering: L1 (syntax + write guard) runs before the identity check so
+    that obviously malformed or write queries are rejected without leaking
+    schema/permission info. L0 (identity) then gates L2 (schema) and L3
+    (permissions), which do reveal information.
     """
     trace_id = generate_trace_id()
     target_space = space or _default_space()
@@ -447,6 +457,45 @@ async def validate_and_execute_impl(
             ],
             "trace_id": trace_id,
         }
+
+    # --- L0: Fail-closed user context check (hard guard) ---------------
+    # SKILL.md says "Never omit user_context" and "Never use USER_ID=manager/anonymous".
+    # Enforce this at the tool layer so LLM non-compliance cannot bypass L3.
+    # Runs after L1 (syntax) so malformed/write queries are rejected without
+    # revealing whether the caller is authenticated.
+    _fail_open = os.environ.get("HONEYBADGE_L3_FAIL_OPEN", "") == "1"
+    _FORBIDDEN_USER_IDS = frozenset({"", "manager", "anonymous", "unknown"})
+
+    if user_context is None:
+        if _fail_open:
+            logger.warning("l3_skipped_no_user_context_fail_open", trace_id=trace_id)
+        else:
+            return {
+                "success": False,
+                "error": "L3_NO_USER_CONTEXT",
+                "details": [{
+                    "code": "E301",
+                    "message": "user_context is required (L3 fail-closed). "
+                               "Call get_user_permissions(user_id) first, then pass user_context.",
+                }],
+                "trace_id": trace_id,
+            }
+    else:
+        _uid = str(user_context.get("user_id", "")).strip()
+        if _uid in _FORBIDDEN_USER_IDS:
+            if _fail_open:
+                logger.warning("l3_skipped_forbidden_user_id_fail_open", trace_id=trace_id, user_id=_uid)
+            else:
+                return {
+                    "success": False,
+                    "error": "L3_INVALID_USER_ID",
+                    "details": [{
+                        "code": "E302",
+                        "message": f"user_id '{_uid}' is not allowed. "
+                                   "Extract the real user identity from the request sender.",
+                    }],
+                    "trace_id": trace_id,
+                }
 
     # --- Defense: rewrite two-part var.prop → var.Tag.prop --------------
     # NebulaGraph v3.8 MATCH bug: two-part var.prop returns wrong results.
@@ -495,8 +544,21 @@ async def validate_and_execute_impl(
                 "trace_id": trace_id,
             }
     else:
-        if user_context is None:
-            logger.warning("l3_skipped_no_user_context", trace_id=trace_id)
+        # Either user_context is None (fail-open path allowed it through) or
+        # user_context exists but has no permissions resolved. Guard both.
+        if _fail_open:
+            logger.warning("l3_skipped_no_permissions_fail_open", trace_id=trace_id)
+        else:
+            return {
+                "success": False,
+                "error": "L3_NO_PERMISSIONS",
+                "details": [{
+                    "code": "E303",
+                    "message": "user_context provided but permissions unresolved. "
+                               "Ensure get_user_permissions(user_id) returns a valid PermissionContext.",
+                }],
+                "trace_id": trace_id,
+            }
         perm_warnings = []
 
     # --- Execute --------------------------------------------------------

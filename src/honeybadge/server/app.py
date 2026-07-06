@@ -4,11 +4,12 @@ import json
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -23,6 +24,12 @@ from honeybadge.server.auth import (
 )
 from honeybadge.server.config import ServerConfig
 from honeybadge.server.dependencies import get_current_user
+from honeybadge.server.security import (
+    LOGIN_LIMIT,
+    TokenRevocationStore,
+    configure_rate_limiter,
+    extract_jti,
+)
 
 logger = structlog.get_logger()
 
@@ -78,9 +85,11 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             )
             await redis.connect()
             app.state.redis = redis
+            app.state.token_revocation = TokenRevocationStore(redis._client if hasattr(redis, "_client") else None)
             ready.append("redis")
         except Exception as e:
             logger.error("redis_init_failed", error=str(e))
+            app.state.token_revocation = TokenRevocationStore(None)
 
         try:
             llm_config = {
@@ -109,6 +118,9 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     app = FastAPI(title="HoneyBadge", version=VERSION, lifespan=lifespan)
     app.state.config = config
 
+    # --- Rate limiter (slowapi) ---
+    limiter = configure_rate_limiter(app)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -135,7 +147,8 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         refresh_token: str
 
     @app.post("/api/auth/login")
-    async def login(body: LoginRequest) -> dict[str, Any]:
+    @limiter.limit(LOGIN_LIMIT)
+    async def login(body: LoginRequest, request: Request) -> dict[str, Any]:
         user = authenticate_user(body.username, body.password)
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -149,7 +162,24 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         return {"id": user["sub"], "username": user["username"], "display_name": user.get("display_name", user["username"]), "roles": user["roles"], "org_id": user.get("org_id")}
 
     @app.post("/api/auth/logout")
-    async def logout(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, str]:
+    async def logout(
+        request: Request,
+        user: dict[str, Any] = Depends(get_current_user),
+    ) -> dict[str, str]:
+        """Revoke the current access token via Redis blacklist.
+
+        The token's JTI is added to a blacklist with TTL equal to the
+        token's remaining lifetime, so it expires naturally. Subsequent
+        requests carrying the same token are rejected in
+        ``get_current_user``.
+        """
+        revocation: TokenRevocationStore | None = getattr(request.app.state, "token_revocation", None)
+        if revocation is not None:
+            jti = extract_jti(user)
+            exp = user.get("exp")
+            now = int(datetime.now(tz=timezone.utc).timestamp())
+            ttl = max(0, int(exp) - now) if exp else config.jwt_access_expire_minutes * 60
+            await revocation.revoke(jti, ttl)
         return {"message": "Logged out"}
 
     @app.post("/api/auth/refresh")

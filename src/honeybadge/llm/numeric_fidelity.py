@@ -7,10 +7,19 @@ of the "不要修改任何数值" prompt instruction used by ``summarize_results
 
 Wiring:
     ``summarize_results()`` calls ``check_and_log_fidelity()`` immediately after
-    the LLM returns a summary. The guard is **log-only** — on mismatch it emits a
-    ``numeric_fidelity_mismatch`` warning (with ``trace_id``) and returns; it
-    never raises, so LLM hallucination attempts surface in logs without breaking
-    the production chat path. The ``LLMResponse`` is returned unchanged.
+    the LLM returns a summary. The guard supports two modes:
+
+    * **Log-only** (default, backward-compatible): on mismatch it emits a
+      ``numeric_fidelity_mismatch`` warning and returns; the ``LLMResponse``
+      is returned unchanged.
+    * **Enforce** (``HONEYBADGE_L4_ENFORCE=1``): on mismatch it raises
+      ``NumericFidelityViolation`` so the caller can reject the summary and
+      surface a safe error to the user instead of passing through a
+      hallucinated number.
+
+    Enforce mode is the "hard constraint" complement to the SKILL.md soft
+    instruction "Numbers must be EXACTLY as returned". When enabled, LLM
+    non-compliance with the L4 rule is blocked at the tool layer.
 
 Canonical home:
     This module lives in the runtime package so it is importable from both the
@@ -33,6 +42,7 @@ Known limitation (pre-strip validation):
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -40,6 +50,15 @@ from typing import Any
 import structlog
 
 logger = structlog.get_logger()
+
+
+class NumericFidelityViolation(Exception):
+    """Raised when L4 enforce mode is active and summary numbers diverge from raw.
+
+    This turns the SKILL.md soft instruction "Numbers must be EXACTLY as returned"
+    into a hard, code-level guard. Caught by the caller to return a safe error
+    instead of passing through a hallucinated summary.
+    """
 
 # Matches comma-grouped numbers (``100,000`` / ``1,234,567.89``) OR plain
 # integers/decimals (``42`` / ``123.45`` / ``100000``). The comma-grouped
@@ -128,14 +147,24 @@ def check_and_log_fidelity(
     columns: list[str],
     trace_id: str | None = None,
 ) -> None:
-    """Post-hoc L4 guard: log a warning if summary numbers diverge from raw.
+    """Post-hoc L4 guard: log or block on summary number divergence.
 
-    Called by ``summarize_results()`` immediately after the LLM returns. This is
-    a **log-only** guard — it never raises, so a fidelity mismatch (or an
-    unexpected error inside the checker) surfaces in logs without breaking the
-    production chat path. The caller returns the ``LLMResponse`` unchanged
-    regardless of the outcome.
+    Called by ``summarize_results()`` immediately after the LLM returns.
+
+    Behavior depends on ``HONEYBADGE_L4_ENFORCE``:
+
+    * Not set or ``"0"`` (default): **log-only** — emits a
+      ``numeric_fidelity_mismatch`` warning and returns. The caller returns
+      the ``LLMResponse`` unchanged. This preserves backward compatibility.
+    * Set to ``"1"``: **enforce** — raises :class:`NumericFidelityViolation`
+      so the caller can catch it, discard the hallucinated summary, and
+      return a safe error to the user. This turns the SKILL.md soft
+      instruction into a hard, code-level constraint.
+
+    Unexpected errors inside the checker are always log-only (never raise)
+    to avoid breaking the chat path on checker bugs.
     """
+    _enforce = os.environ.get("HONEYBADGE_L4_ENFORCE", "") == "1"
     try:
         result = validate_numeric_fidelity(summary, raw_results, columns)
     except Exception as exc:
@@ -150,4 +179,7 @@ def check_and_log_fidelity(
             "numeric_fidelity_mismatch",
             trace_id=trace_id,
             detail=result.detail,
+            enforce=_enforce,
         )
+        if _enforce:
+            raise NumericFidelityViolation(result.detail)

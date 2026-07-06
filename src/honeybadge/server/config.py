@@ -2,10 +2,22 @@
 
 All configuration fields are loaded from environment variables with
 sensible defaults for local development.
+
+Security: In production (ENV=production), insecure default secrets are
+rejected at startup. See ``_validate_production_config``.
 """
 
 import os
+import sys
 from dataclasses import dataclass, field
+
+# Known insecure default values — rejected in production mode
+_INSECURE_JWT_DEFAULTS = frozenset({
+    "change-me-in-production",
+    "honeybadge-dev-secret-change-in-prod",
+})
+_INSECURE_NEBULA_DEFAULTS = frozenset({"nebula", ""})
+_INSECURE_HICLAW_DEFAULTS = frozenset({"admin1234", "hiclaw-manager-password-dev", ""})
 
 
 @dataclass
@@ -80,10 +92,13 @@ class ServerConfig:
         Each field maps to an env var (see field names above for the mapping).
         Missing env vars fall back to the dataclass field defaults.
 
+        In production (``ENV=production``), insecure defaults are rejected
+        and startup aborts. See ``_validate_production_config``.
+
         Returns:
             A populated ServerConfig instance.
         """
-        return cls(
+        config = cls(
             # Server networking
             host=os.environ.get("SERVER_HOST", "0.0.0.0"),
             port=int(os.environ.get("SERVER_PORT", "8090")),
@@ -118,3 +133,43 @@ class ServerConfig:
             matrix_url=os.environ.get("MATRIX_URL", ""),
             hiclaw_manager_url=os.environ.get("HICLAW_MANAGER_URL", ""),
         )
+
+        if os.environ.get("ENV") == "production":
+            cls._validate_production_config(config)
+
+        return config
+
+    @staticmethod
+    def _validate_production_config(config: "ServerConfig") -> None:
+        """Reject insecure defaults when running in production.
+
+        Called from ``from_env`` when ``ENV=production``. Aborts startup
+        via ``SystemExit`` so misconfigured deployments fail fast rather
+        than silently running with weak secrets.
+
+        Args:
+            config: The ServerConfig to validate.
+
+        Raises:
+            SystemExit: If any secret retains a known insecure default.
+        """
+        errors: list[str] = []
+
+        if config.jwt_secret in _INSECURE_JWT_DEFAULTS or len(config.jwt_secret) < 32:
+            errors.append(
+                "JWT_SECRET must be set to a random value >= 32 chars in production "
+                "(current value is an insecure default or too short)."
+            )
+
+        if config.nebula_password in _INSECURE_NEBULA_DEFAULTS:
+            errors.append(
+                "NEBULA_PASSWORD must be set in production (empty/'nebula' defaults rejected)."
+            )
+
+        if config.llm_api_key == "":
+            errors.append("LLM_API_KEY must be set in production.")
+
+        if errors:
+            for e in errors:
+                print(f"[security] FATAL: {e}", file=sys.stderr)
+            raise SystemExit(1)
