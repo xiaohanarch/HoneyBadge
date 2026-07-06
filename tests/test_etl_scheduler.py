@@ -14,7 +14,6 @@ import pytest
 from honeybadge.etl.config import ETLConfig, OracleConfig, PipelineSection, SchedulerSection
 from honeybadge.etl.scheduler import ETLScheduler
 
-
 # ── Config helpers ───────────────────────────────────────────────────────────
 
 def make_config() -> ETLConfig:

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # O1: Alert rule metric names match collectors.py definitions
 # ---------------------------------------------------------------------------

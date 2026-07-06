@@ -74,8 +74,10 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.3.0",
     "ruff>=0.3.0",
     "mypy>=1.8.0",
+    "types-pyyaml>=6.0.0",
 ]
 
 [project.scripts]
@@ -104,6 +106,9 @@ ignore = ["E501", "B008", "N818"]
 # whose execution is intentionally commented out (TODO: wire to asyncpg pool).
 "src/honeybadge/etl/quality.py" = ["F841"]
 "src/honeybadge/etl/transform.py" = ["F841"]
+# run_pipeline.py is a standalone prototype script (excluded from mypy too).
+# batch_dir is a dead assignment; BATCH_SIZE is a local constant.
+"src/honeybadge/etl/run_pipeline.py" = ["F841", "N806"]
 # MCP test files manipulate sys.path before importing the server package.
 "tests/test_audit_mcp.py" = ["E402"]
 "tests/test_cache_mcp.py" = ["E402"]

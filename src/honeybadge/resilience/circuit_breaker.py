@@ -34,8 +34,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import time
+from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, TypeVar
 
 import structlog
 
@@ -197,7 +198,7 @@ class CircuitBreaker:
         except self.expected_exception as exc:
             await self._on_failure(exc)
             raise
-        except Exception as exc:
+        except Exception:
             # Unexpected exceptions don't count as failures — re-raise as-is.
             # This prevents the breaker from opening on programmer errors
             # (e.g., TypeError, ValueError) that aren't service health signals.
