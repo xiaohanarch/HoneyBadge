@@ -21,11 +21,109 @@ from honeybadge.metrics.collectors import QUERY_METRICS
 from honeybadge.permission_service.config import PERMISSION_CONFIG
 from honeybadge.permission_service.models import PermissionContext
 from honeybadge.permission_service.permission_enforcer import PermissionEnforcer
-from honeybadge.protocols.validator import rewrite_vertex_property_access
+from honeybadge.protocols.validator import (
+    NgqlValidator,
+    SchemaEdge,
+    SchemaProperty,
+    SchemaTag,
+    ValidationIssue,
+    rewrite_vertex_property_access,
+)
 
 _permission_enforcer = PermissionEnforcer()
 
 logger = structlog.get_logger()
+
+# ---------------------------------------------------------------------------
+# L1/L2 validator singleton + write-operation guard
+#
+# Mirrors mcp-servers/honeybadge-nebula-mcp/server.py:134-171 — the MCP path
+# already runs L1→write-guard→L2→L3→execute. process_query previously skipped
+# L1/L2 entirely, so malformed/schema-non-compliant nGQL only failed after a
+# NebulaGraph round-trip. Wiring the validator in here closes that gap.
+# ---------------------------------------------------------------------------
+
+_validator: NgqlValidator | None = None
+_validator_schema_loaded_space: str | None = None
+
+_WRITE_OPS = re.compile(
+    r"^\s*(INSERT|UPDATE|UPSERT|DELETE|DROP|CREATE|ALTER)\b",
+    re.IGNORECASE,
+)
+
+
+def _get_validator() -> NgqlValidator:
+    """Return the process-global NgqlValidator (lazy singleton)."""
+    global _validator
+    if _validator is None:
+        _validator = NgqlValidator()
+    return _validator
+
+
+async def _ensure_validator_schema(
+    nebula: NebulaGraphClient,
+    space: str,
+) -> None:
+    """Load NebulaGraph schema into the validator once per space.
+
+    Fetches SHOW TAGS / DESCRIBE TAG / SHOW EDGES / DESCRIBE EDGE and parses
+    rows into SchemaTag / SchemaEdge / SchemaProperty objects. Cached by space
+    name so it only runs once per space per process lifetime. Failures are
+    logged and tolerated — L2 validation degrades to warning-only when no
+    schema is loaded (see NgqlValidator.validate_schema W003).
+    """
+    global _validator_schema_loaded_space
+    if _validator_schema_loaded_space == space:
+        return
+
+    validator = _get_validator()
+    tags: list[SchemaTag] = []
+    edges: list[SchemaEdge] = []
+
+    try:
+        tags_result = await nebula.execute("SHOW TAGS", space=space)
+        if tags_result.success:
+            for row in tags_result.rows:
+                name = row.get("Name") or row.get("name") or ""
+                if name:
+                    props = await _describe_schema_props(nebula, "TAG", str(name), space)
+                    tags.append(SchemaTag(name=str(name), properties=props))
+
+        edges_result = await nebula.execute("SHOW EDGES", space=space)
+        if edges_result.success:
+            for row in edges_result.rows:
+                name = row.get("Name") or row.get("name") or ""
+                if name:
+                    props = await _describe_schema_props(nebula, "EDGE", str(name), space)
+                    edges.append(SchemaEdge(name=str(name), properties=props))
+    except Exception as exc:
+        logger.warning(
+            "ws_validator_schema_load_failed",
+            space=space,
+            error=str(exc),
+        )
+        return  # keep _validator_schema_loaded_space unset → retry on next query
+
+    validator.load_schema(tags, edges)
+    _validator_schema_loaded_space = space
+
+
+async def _describe_schema_props(
+    nebula: NebulaGraphClient,
+    kind: str,
+    name: str,
+    space: str,
+) -> list[SchemaProperty]:
+    """Describe a TAG or EDGE and return its properties as SchemaProperty list."""
+    result = await nebula.execute(f"DESCRIBE {kind} `{name}`", space=space)
+    props: list[SchemaProperty] = []
+    if result.success:
+        for row in result.rows:
+            col = row.get("Field") or row.get("field") or ""
+            typ = row.get("Type") or row.get("type") or ""
+            if col:
+                props.append(SchemaProperty(name=str(col), type=str(typ)))
+    return props
 
 # Known entity keywords for schema filtering (English + Chinese)
 _ENTITY_KEYWORDS = {
@@ -432,6 +530,89 @@ def _resolve_permission_context(
     )
 
 
+# ---------------------------------------------------------------------------
+# nGQL regeneration helper + validation error hints
+#
+# L1/L2/execution failures all feed into the same retry budget. Each failure
+# type carries a targeted hint so the LLM knows what to fix on regeneration.
+# ---------------------------------------------------------------------------
+
+# L1 syntax error codes → human-readable hint (Chinese, matches LLM prompt lang)
+_L1_HINTS: dict[str, str] = {
+    "E002": "括号不匹配，检查 MATCH 语句的括号配对",
+    "E003": "括号不匹配，检查 MATCH 语句的括号配对",
+    "E004": "引号不匹配，检查字符串字面量",
+    "E005": "引号不匹配，检查字符串字面量",
+}
+
+# L2 schema error codes → human-readable hint
+_L2_HINTS: dict[str, str] = {
+    "E101": "Tag 名称不在 schema 中，参考 schema 里的 Tag 名",
+    "E102": "Edge 名称不在 schema 中，参考 schema 里的 Edge 名",
+    "E103": "属性不存在于该 Tag/Edge，参考 schema 里的属性名",
+}
+
+# Execution error substrings → hint (preserved from the original retry logic)
+_EXECUTION_HINTS: dict[str, str] = {
+    "optional match": "不要在 OPTIONAL MATCH 后加 WHERE，先用 MATCH 查出必要有数据的部分，再用 OPTIONAL MATCH 查可选部分",
+    "timed out": "查询太慢了，在 WHERE 条件后加 LIMIT 限制数量，或用更小的遍历深度",
+    "syntax error": "检查 nGQL 语法是否正确，确保每条 MATCH/OPTIONAL MATCH 语句的 WHERE 只跟在对应的 MATCH 后面",
+    "not found": "检查 Tag 和 Edge 名称是否拼写正确，注意大小写",
+}
+
+
+def _hint_for_validation(errors: list[ValidationIssue], hint_map: dict[str, str]) -> str:
+    """Build a hint suffix from validation error codes."""
+    parts = [hint_map[e.code] for e in errors if e.code in hint_map]
+    if not parts:
+        return ""
+    return "\n\n另外注意：\n" + "\n".join(parts)
+
+
+def _hint_for_execution(error: str) -> str:
+    """Build a hint suffix from an execution error message."""
+    hint = ""
+    for key, val in _EXECUTION_HINTS.items():
+        if key.lower() in str(error).lower():
+            hint = f"\n\n另外注意：{val}"
+            break
+    return hint
+
+
+async def _regenerate_ngql(
+    llm_adapter: OpenAICompatibleAdapter,
+    question: str,
+    ngql: str,
+    error: str,
+    schema_str: str,
+    ontology_str: str,
+    conversation_history: list[dict[str, str]] | None,
+    trace_id: str,
+    hint: str = "",
+) -> str:
+    """Regenerate nGQL after a validation/execution failure.
+
+    Passes the broken query + error + targeted hint back to the LLM so it can
+    correct the mistake in one shot. Returns the stripped nGQL string.
+    """
+    enhanced_question = (
+        f"原始问题：{question}\n\n"
+        f"上次生成的nGQL查询（有问题）:\n```ngql\n{ngql}\n```\n"
+        f"执行失败，错误: {error}\n"
+        f"请根据错误信息修正nGQL，只返回正确的nGQL查询语句，不要解释。{hint}"
+    )
+    ngql_response = await llm_generate_ngql(
+        adapter=llm_adapter,
+        question=enhanced_question,
+        schema_info=schema_str,
+        ontology_info=ontology_str,
+        conversation_history=conversation_history,
+    )
+    new_ngql = _strip_markdown_fence(ngql_response.content)
+    logger.info("ws_ngql_retry", trace_id=trace_id, ngql=new_ngql[:100])
+    return new_ngql
+
+
 async def process_query(
     question: str,
     session_id: str,
@@ -509,33 +690,116 @@ async def process_query(
         ngql = _strip_markdown_fence(ngql_response.content)
         logger.info("ws_ngql_generated", trace_id=trace_id, ngql=ngql[:100])
 
-        # Step 2b: L3 Permission enforcement (process ACL + org_id injection)
-        # Mandatory for ALL authenticated users; fail-closed when context unresolved.
+        # Step 2b: Resolve L3 permission context (fail-closed when unresolved).
+        # perm_ctx is user-scoped, not nGQL-scoped, so it is resolved once here.
+        # The enforce() call itself moves into the retry loop below so a
+        # regenerated nGQL is re-enforced.
         perm_ctx = _resolve_permission_context(user_id, org_id, roles)
         if perm_ctx is None:
             raise Exception(
                 f"L3 permission context unresolved for user={user_id}, "
                 f"org_id={org_id} — refusing query (fail-closed)"
             )
-        ngql, perm_warnings = _permission_enforcer.enforce(ngql, perm_ctx)
-        for w in perm_warnings:
-            logger.info("ws_permission_filter", trace_id=trace_id, warning=w)
 
-        # Step 3: Execute with retry on syntax/semantic errors
+        # Step 2c: Load NebulaGraph schema into the L1/L2 validator (once per space).
+        # Best-effort: on failure L2 degrades to warning-only (W003), L1 still runs.
+        await _ensure_validator_schema(nebula, space)
+        validator = _get_validator()
+
+        # Step 3: L1 → write-guard → L2 → L3 → execute, with regeneration on failure.
+        # Mirrors mcp-servers/honeybadge-nebula-mcp/server.py:validate_and_execute_impl.
+        # L1/L2/execution failures share the same retry budget (max_retries=2); each
+        # failure regenerates nGQL with a targeted hint. Write-ops are hard-rejected
+        # with no retry (matches MCP server L1_WRITE_REJECTED).
         _exec_phase_start = time.time()
         max_retries = 2
-        last_error = None
+        last_error: str | None = None
+        query_result = None
+        succeeded = False
         for attempt in range(max_retries + 1):
-            # Defense: rewrite two-part var.prop → var.Tag.prop (NebulaGraph v3.8 bug).
-            # Applied inside the retry loop so regenerated nGQL on retry is also fixed.
+            # --- L1: Syntax validation ---
+            _validation_start = time.monotonic()
+            l1 = validator.validate_syntax(ngql)
+            if not l1.valid:
+                last_error = "L1_SYNTAX: " + "; ".join(
+                    f"{e.code}: {e.message}" for e in l1.errors
+                )
+                QUERY_METRICS.record_phase(
+                    "validation", time.monotonic() - _validation_start
+                )
+                logger.warning(
+                    "ws_l1_validation_failed",
+                    trace_id=trace_id,
+                    attempt=attempt + 1,
+                    error=last_error,
+                    ngql=ngql[:100],
+                )
+                if attempt < max_retries:
+                    hint = _hint_for_validation(l1.errors, _L1_HINTS)
+                    ngql = await _regenerate_ngql(
+                        llm_adapter, question, ngql, last_error,
+                        schema_str, ontology_str, conversation_history, trace_id, hint,
+                    )
+                    continue
+                break  # retries exhausted
+
+            # --- Write-operation guard (hard reject, no retry) ---
+            # Mirrors MCP server L1_WRITE_REJECTED. NebulaGraph write ops would
+            # mutate data; the chat path is read-only, so reject before L2/L3/execute.
+            if _WRITE_OPS.match(ngql):
+                write_kw = ngql.split()[0].upper() if ngql.split() else "WRITE"
+                raise Exception(
+                    f"L1_WRITE_REJECTED: write operations are not allowed on the "
+                    f"chat path ({write_kw})"
+                )
+
+            # --- L2: Schema compliance ---
+            _validation_start = time.monotonic()
+            l2 = validator.validate_schema(ngql)
+            if not l2.valid:
+                last_error = "L2_SCHEMA: " + "; ".join(
+                    f"{e.code}: {e.message}" for e in l2.errors
+                )
+                QUERY_METRICS.record_phase(
+                    "validation", time.monotonic() - _validation_start
+                )
+                logger.warning(
+                    "ws_l2_validation_failed",
+                    trace_id=trace_id,
+                    attempt=attempt + 1,
+                    error=last_error,
+                    ngql=ngql[:100],
+                )
+                if attempt < max_retries:
+                    hint = _hint_for_validation(l2.errors, _L2_HINTS)
+                    ngql = await _regenerate_ngql(
+                        llm_adapter, question, ngql, last_error,
+                        schema_str, ontology_str, conversation_history, trace_id, hint,
+                    )
+                    continue
+                break  # retries exhausted
+
+            # --- L3: Permission enforcement (process ACL + org_id injection) ---
+            # Runs after L1+L2 so a regenerated nGQL is re-enforced. Injects
+            # org_id filters at the AST level (never string concat).
+            ngql, perm_warnings = _permission_enforcer.enforce(ngql, perm_ctx)
+            for w in perm_warnings:
+                logger.info("ws_permission_filter", trace_id=trace_id, warning=w)
+
+            # --- Defense: rewrite two-part var.prop → var.Tag.prop ---
+            # NebulaGraph v3.8 bug: two-part var.prop returns wrong results.
+            # Applied inside the retry loop so regenerated nGQL is also fixed.
             ngql = rewrite_vertex_property_access(ngql)
+
+            # --- Execute ---
             query_result = await nebula.execute(ngql, space=space)
             execution_time_ms = int((time.time() - start_time) * 1000)
 
             if query_result.success:
+                succeeded = True
                 break
 
-            last_error = query_result.error_message
+            last_error = query_result.error_message or "unknown execution error"
             logger.warning(
                 "ws_ngql_execution_failed",
                 trace_id=trace_id,
@@ -545,34 +809,20 @@ async def process_query(
             )
 
             if attempt < max_retries:
-                # Retry: pass broken query + error + explicit fix guidance
-                error_hints = {
-                    "optional match": "不要在 OPTIONAL MATCH 后加 WHERE，先用 MATCH 查出必要有数据的部分，再用 OPTIONAL MATCH 查可选部分",
-                    "timed out": "查询太慢了，在 WHERE 条件后加 LIMIT 限制数量，或用更小的遍历深度",
-                    "syntax error": "检查 nGQL 语法是否正确，确保每条 MATCH/OPTIONAL MATCH 语句的 WHERE 只跟在对应的 MATCH 后面",
-                    "not found": "检查 Tag 和 Edge 名称是否拼写正确，注意大小写",
-                }
-                hint = ""
-                for key, val in error_hints.items():
-                    if key.lower() in str(last_error).lower():
-                        hint = f"\n\n另外注意：{val}"
-                enhanced_question = (
-                    f"原始问题：{question}\n\n"
-                    f"上次生成的nGQL查询（有问题）:\n```ngql\n{ngql}\n```\n"
-                    f"执行失败，错误: {last_error}\n"
-                    f"请根据错误信息修正nGQL，只返回正确的nGQL查询语句，不要解释。{hint}"
+                hint = _hint_for_execution(last_error)
+                ngql = await _regenerate_ngql(
+                    llm_adapter, question, ngql, last_error,
+                    schema_str, ontology_str, conversation_history, trace_id, hint,
                 )
-                ngql_response = await llm_generate_ngql(
-                    adapter=llm_adapter,
-                    question=enhanced_question,
-                    schema_info=schema_str,
-                    ontology_info=ontology_str,
-                    conversation_history=conversation_history,
-                )
-                ngql = _strip_markdown_fence(ngql_response.content)
-                logger.info("ws_ngql_retry", trace_id=trace_id, attempt=attempt + 2, ngql=ngql[:100])
-        else:
-            raise Exception(f"Query execution failed: {last_error}")
+
+        if not succeeded:
+            raise Exception(
+                f"Query validation/execution failed: {last_error}"
+            )
+
+        # Narrow for mypy: succeeded==True guarantees query_result was assigned
+        # by nebula.execute() above before the successful break.
+        assert query_result is not None
 
         QUERY_METRICS.record_phase("execution", time.time() - _exec_phase_start)
 
