@@ -3,7 +3,7 @@
 #
 # The Manager container auto-runs manager-init-internal.sh on every startup
 # via entrypoint-wrapper.sh. That script:
-#   - Creates the hiclaw-storage MinIO bucket
+#   - Creates the agentteams-storage MinIO bucket
 #   - Registers workers on Matrix (generate-worker-config.sh, NOT the
 #     removed create-worker.sh)
 #   - Generates openclaw.json for each worker and uploads to MinIO
@@ -23,7 +23,7 @@
 #   bash ../../deploy/hiclaw/init-workers.sh
 #
 # Check auto-init log:
-#   docker exec honeybadge-hiclaw-manager cat /var/log/hiclaw/honeybadge-init.log
+#   docker exec honeybadge-hiclaw-manager cat /var/log/agentteams/honeybadge-init.log
 
 set -euo pipefail
 
@@ -57,8 +57,8 @@ MANAGER_CONTAINER="${MANAGER_CONTAINER:-honeybadge-hiclaw-manager}"
 # mc operations and Higress health checks target EMBEDDED_CONTAINER;
 # manager-workspace file edits and Python patches stay in MANAGER_CONTAINER.
 EMBEDDED_CONTAINER="${EMBEDDED_CONTAINER:-honeybadge-hiclaw-embedded}"
-REG_TOKEN="${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}"
-MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
+REG_TOKEN="${AGENTTEAMS_REGISTRATION_TOKEN:-honeybadge-reg-token}"
+MATRIX_DOMAIN="${AGENTTEAMS_MATRIX_DOMAIN:-matrix-local.agentteams.io}"
 
 # ANSI colors
 GREEN='\033[0;32m'
@@ -108,16 +108,16 @@ echo ""
 log "MinIO is ready."
 
 # ---------------------------------------------------------------------------
-# 1a. Ensure hiclaw-storage bucket exists (safety net)
+# 1a. Ensure agentteams-storage bucket exists (safety net)
 #     manager-init-internal.sh creates this, but workers may start their
 #     file-sync BEFORE the Manager's background auto-init reaches that step.
 #     Creating it here from the host eliminates the "specified bucket does
 #     not exist" errors that cause workers to start without configs.
 # ---------------------------------------------------------------------------
-log "Ensuring hiclaw-storage bucket exists..."
+log "Ensuring agentteams-storage bucket exists..."
 docker exec "$EMBEDDED_CONTAINER" bash -c \
-    "mc mb --ignore-existing hiclaw/hiclaw-storage >/dev/null 2>&1 && echo 'bucket ready' || echo 'bucket already exists'" \
-    && log "  → hiclaw-storage bucket ready" \
+    "mc mb --ignore-existing agentteams/agentteams-storage >/dev/null 2>&1 && echo 'bucket ready' || echo 'bucket already exists'" \
+    && log "  → agentteams-storage bucket ready" \
     || warn "  Failed to create bucket (Manager auto-init will retry)"
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ docker exec "$EMBEDDED_CONTAINER" bash -c \
 #     and the "create-worker.sh failed" path silently skips everything.
 # ---------------------------------------------------------------------------
 log "Waiting for Manager auto-init to complete..."
-INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+INIT_LOG="/var/log/agentteams/honeybadge-init.log"
 AUTO_INIT_MARKER="HoneyBadge auto-init complete!"
 AUTO_INIT_WAIT_RETRIES="${AUTO_INIT_WAIT_RETRIES:-30}"  # 30 × 10s = 300s max
 for i in $(seq 1 "$AUTO_INIT_WAIT_RETRIES"); do
@@ -156,7 +156,7 @@ done
 #     a different configuration that doesn't see the same objects.
 # ---------------------------------------------------------------------------
 for worker in graph-worker analytics-worker; do
-    if docker exec "$MANAGER_CONTAINER" mc stat "hiclaw/hiclaw-storage/agents/${worker}/openclaw.json" >/dev/null 2>&1; then
+    if docker exec "$MANAGER_CONTAINER" mc stat "agentteams/agentteams-storage/agents/${worker}/openclaw.json" >/dev/null 2>&1; then
         log "  → ${worker}/openclaw.json verified in MinIO"
     else
         warn "  ${worker}/openclaw.json NOT in MinIO — workers may not function"
@@ -224,12 +224,12 @@ fi
 docker cp "$MANAGER_CONTAINER:/root/manager-workspace/SOUL.md" /tmp/hb-manager-SOUL.md 2>/dev/null && \
     docker cp /tmp/hb-manager-SOUL.md "$EMBEDDED_CONTAINER:/tmp/hb-manager-SOUL.md" && \
     docker exec "$EMBEDDED_CONTAINER" bash -c \
-        "mc cp /tmp/hb-manager-SOUL.md hiclaw/hiclaw-storage/agents/manager/SOUL.md 2>/dev/null && echo synced || true" \
+        "mc cp /tmp/hb-manager-SOUL.md agentteams/agentteams-storage/agents/manager/SOUL.md 2>/dev/null && echo synced || true" \
     && log "  → Manager SOUL.md synced to MinIO" || true
 docker cp "$MANAGER_CONTAINER:/root/manager-workspace/AGENTS.md" /tmp/hb-manager-AGENTS.md 2>/dev/null && \
     docker cp /tmp/hb-manager-AGENTS.md "$EMBEDDED_CONTAINER:/tmp/hb-manager-AGENTS.md" && \
     docker exec "$EMBEDDED_CONTAINER" bash -c \
-        "mc cp /tmp/hb-manager-AGENTS.md hiclaw/hiclaw-storage/agents/manager/AGENTS.md 2>/dev/null && echo synced || true" \
+        "mc cp /tmp/hb-manager-AGENTS.md agentteams/agentteams-storage/agents/manager/AGENTS.md 2>/dev/null && echo synced || true" \
     && log "  → Manager AGENTS.md synced to MinIO" || true
 
 # Inject Manager's custom skills (e.g., erp-query-dispatch)
@@ -247,13 +247,13 @@ if [ -d "$MANAGER_SKILLS" ]; then
     docker cp "$MANAGER_CONTAINER:/root/manager-workspace/skills/" /tmp/hb-manager-skills/ 2>/dev/null && \
         docker cp /tmp/hb-manager-skills/ "$EMBEDDED_CONTAINER:/tmp/hb-manager-skills/" && \
         docker exec "$EMBEDDED_CONTAINER" bash -c \
-            "mc mirror /tmp/hb-manager-skills/ hiclaw/hiclaw-storage/agents/manager/skills/ --overwrite 2>/dev/null && echo synced || true" \
+            "mc mirror /tmp/hb-manager-skills/ agentteams/agentteams-storage/agents/manager/skills/ --overwrite 2>/dev/null && echo synced || true" \
         && log "  → Manager skills synced to MinIO" || true
 fi
 
 # ---------------------------------------------------------------------------
 # 2. Upload worker SOUL.md files into MinIO via mc (inside hiclaw-embedded)
-#    MinIO bucket path: hiclaw-storage/agents/{WORKER_NAME}/SOUL.md
+#    MinIO bucket path: agentteams-storage/agents/{WORKER_NAME}/SOUL.md
 #    v1.1.0 split: mc runs in EMBEDDED_CONTAINER; the 'hiclaw' alias is
 #    pre-configured by the upstream hiclaw-embedded image (localhost:9000).
 # ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ for worker in graph-worker analytics-worker; do
     # v1.1.0 split: mc lives in hiclaw-embedded; copy files there for MinIO upload.
     docker cp "$SOUL_SRC" "$EMBEDDED_CONTAINER:/tmp/${worker}-SOUL.md"
     docker exec "$EMBEDDED_CONTAINER" bash -c \
-        "mc cp /tmp/${worker}-SOUL.md hiclaw/hiclaw-storage/agents/${worker}/SOUL.md"
+        "mc cp /tmp/${worker}-SOUL.md agentteams/agentteams-storage/agents/${worker}/SOUL.md"
     log "  → ${worker}/SOUL.md uploaded to MinIO"
 
     # Upload skills if they exist
@@ -275,7 +275,7 @@ for worker in graph-worker analytics-worker; do
         # creates a nested skills/skills/ path in MinIO.
         docker cp "$SKILLS_DIR/" "$EMBEDDED_CONTAINER:/tmp/${worker}-skills/"
         docker exec "$EMBEDDED_CONTAINER" bash -c \
-            "mc mirror /tmp/${worker}-skills/ hiclaw/hiclaw-storage/agents/${worker}/skills/ --overwrite"
+            "mc mirror /tmp/${worker}-skills/ agentteams/agentteams-storage/agents/${worker}/skills/ --overwrite"
         log "  → ${worker}/skills/ uploaded to MinIO"
     fi
 done
@@ -293,7 +293,7 @@ done
 #    fix it here. This is idempotent — if the config is already correct,
 #    the Python script prints "No changes needed" and exits.
 # ---------------------------------------------------------------------------
-log "Verifying/patching worker LLM config (→ aigw-local.hiclaw.io:8080/v1, model → ${MANAGER_LLM_MODEL:-glm-5.2})..."
+log "Verifying/patching worker LLM config (→ aigw-local.agentteams.io:8080/v1, model → ${MANAGER_LLM_MODEL:-glm-5.2})..."
 # baseUrl MUST include /v1: OpenAI JS SDK appends /chat/completions directly
 # Without /v1: path becomes /chat/completions → misses llm-minimax-route → no API key → 404
 for worker in graph-worker analytics-worker; do
@@ -302,7 +302,7 @@ import json, os, sys
 
 paths = [
     '/tmp/${worker}-workspace/openclaw.json',
-    '/root/hiclaw-fs/agents/${worker}/openclaw.json',
+    '/root/agentteams-fs/agents/${worker}/openclaw.json',
 ]
 
 cfg_path = None
@@ -321,8 +321,8 @@ with open(cfg_path) as f:
 providers = cfg.get('models', {}).get('providers', {})
 for name, p in providers.items():
     old = p.get('baseUrl', '')
-    if 'aigw-local.hiclaw.io:8080/v1' not in old:
-        p['baseUrl'] = 'http://aigw-local.hiclaw.io:8080/v1'
+    if 'aigw-local.agentteams.io:8080/v1' not in old:
+        p['baseUrl'] = 'http://aigw-local.agentteams.io:8080/v1'
         print('Patched ' + name + ' baseUrl: ' + old + ' -> ' + p['baseUrl'])
     for model in p.get('models', []):
         old_id = model.get('id', '')
@@ -357,7 +357,7 @@ if '${MANAGER_LLM_MODEL:-glm-5.2}' not in old_primary:
 # create-worker.sh may generate the wrong port; patch it here.
 matrix_cfg = cfg.get('channels', {}).get('matrix', {})
 hs = matrix_cfg.get('homeserver', '')
-if hs and ':8080' in hs and 'matrix-local.hiclaw.io' in hs:
+if hs and ':8080' in hs and 'matrix-local.agentteams.io' in hs:
     fixed = hs.replace(':8080', ':6167')
     matrix_cfg['homeserver'] = fixed
     print('Fixed Matrix homeserver port: ' + hs + ' -> ' + fixed)
@@ -397,24 +397,24 @@ print('done')
 
     # Sync patched config to MinIO.
     # v1.1.0 split: stage via host /tmp, then run mc inside hiclaw-embedded.
-    docker cp "$MANAGER_CONTAINER:/root/hiclaw-fs/agents/${worker}/openclaw.json" \
+    docker cp "$MANAGER_CONTAINER:/root/agentteams-fs/agents/${worker}/openclaw.json" \
         "/tmp/${worker}-openclaw.json" 2>/dev/null && \
     docker cp "/tmp/${worker}-openclaw.json" \
         "$EMBEDDED_CONTAINER:/tmp/${worker}-openclaw.json" && \
     docker exec "$EMBEDDED_CONTAINER" bash -c \
-        "mc cp /tmp/${worker}-openclaw.json hiclaw/hiclaw-storage/agents/${worker}/openclaw.json 2>/dev/null && echo synced || true" \
+        "mc cp /tmp/${worker}-openclaw.json agentteams/agentteams-storage/agents/${worker}/openclaw.json 2>/dev/null && echo synced || true" \
         && log "  → ${worker} openclaw.json synced to MinIO" || warn "  MinIO sync skipped for ${worker}"
 done
 
 # (Step 3c-pre removed: no longer patching McpBridge YAML directly.
-#  HICLAW_LLM_PROVIDER=openai-compat in docker-compose.yaml makes setup-higress.sh
+#  AGENTTEAMS_LLM_PROVIDER=openai-compat in docker-compose.yaml makes setup-higress.sh
 #  create openai-compat.dns → coding.dashscope.aliyuncs.com on every startup via
 #  idempotent PUT. The llm-minimax-route (step 3c) uses openai-compat.dns as backend.)
 
 # ---------------------------------------------------------------------------
 # 3c. Ensure Higress LLM route for DashScope (qwen3.5-plus) exists
 #
-#     setup-higress.sh (HICLAW_LLM_PROVIDER=openai-compat) creates an
+#     setup-higress.sh (AGENTTEAMS_LLM_PROVIDER=openai-compat) creates an
 #     auto-generated route at / that has NO API key injected.
 #     We create (or update) a more-specific route at /v1/ that takes priority
 #     and injects the real DashScope API key into all LLM requests.
@@ -426,9 +426,9 @@ done
 #     IRON RULE: ALL LLM calls MUST go through Higress. Workers never call any
 #     LLM endpoint directly. This route is the single exit point for all LLM traffic.
 # ---------------------------------------------------------------------------
-log "Ensuring Higress LLM route (aigw-local.hiclaw.io /v1/ → BigModel/${MANAGER_LLM_MODEL:-glm-5.2})..."
-HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
-LLM_API_KEY="${LLM_API_KEY:-${HICLAW_LLM_API_KEY:-}}"
+log "Ensuring Higress LLM route (aigw-local.agentteams.io /v1/ → BigModel/${MANAGER_LLM_MODEL:-glm-5.2})..."
+HIGRESS_AUTH="$(echo -n "${AGENTTEAMS_ADMIN_USER:-admin}:${AGENTTEAMS_ADMIN_PASSWORD:-admin1234}" | base64)"
+LLM_API_KEY="${LLM_API_KEY:-${AGENTTEAMS_LLM_API_KEY:-}}"
 
 # Wait for openai-compat.dns service source to exist (created by setup-higress.sh).
 # This is OPTIONAL — if setup-higress.sh skipped (e.g., placeholder LLM_API_KEY in CI),
@@ -457,7 +457,7 @@ if [ "$SVC_READY" -eq 1 ]; then
     RESULT=$(docker exec "$MANAGER_CONTAINER" sh -c \
         "curl -sf -X PUT 'http://hiclaw-embedded:8001/v1/routes/llm-minimax-route' \
           -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
-          -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" || true)
+          -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.agentteams.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" || true)
 
     if echo "$RESULT" | grep -q '"name":"llm-minimax-route"'; then
         log "  → llm-minimax-route updated (openai-compat.dns → coding.dashscope.aliyuncs.com)"
@@ -465,7 +465,7 @@ if [ "$SVC_READY" -eq 1 ]; then
         docker exec "$MANAGER_CONTAINER" sh -c \
             "curl -sf -X POST 'http://hiclaw-embedded:8001/v1/routes' \
               -H 'Authorization: Basic $HIGRESS_AUTH' -H 'Content-Type: application/json' \
-              -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
+              -d '{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.agentteams.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"coding.dashscope.aliyuncs.com\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}' 2>&1" \
             && log "  → llm-minimax-route created (openai-compat.dns → coding.dashscope.aliyuncs.com)" \
             || warn "  Failed to create/update LLM route (Higress not ready?)"
     fi
@@ -556,7 +556,7 @@ docker cp "$MANAGER_CONTAINER:/root/manager-workspace/openclaw.json" \
 docker cp /tmp/hb-manager-openclaw.json \
     "$EMBEDDED_CONTAINER:/tmp/hb-manager-openclaw.json" && \
 docker exec "$EMBEDDED_CONTAINER" bash -c \
-    "mc cp /tmp/hb-manager-openclaw.json hiclaw/hiclaw-storage/agents/manager/openclaw.json 2>/dev/null && echo synced || true" \
+    "mc cp /tmp/hb-manager-openclaw.json agentteams/agentteams-storage/agents/manager/openclaw.json 2>/dev/null && echo synced || true" \
     && log "  → Synced to MinIO" || warn "  MinIO sync skipped (optional)"
 
 # ---------------------------------------------------------------------------
@@ -564,7 +564,7 @@ docker exec "$EMBEDDED_CONTAINER" bash -c \
 #
 #    We bypass setup-mcp-server.sh (which requires a session cookie from the
 #    Higress Console and can expire).  mcporter's CLI directly writes
-#    /root/hiclaw-fs/config/mcporter.json inside the worker container, then
+#    /root/agentteams-fs/config/mcporter.json inside the worker container, then
 #    we persist that file to MinIO so it survives restarts.
 # ---------------------------------------------------------------------------
 log "Registering MCP servers in workers via mcporter..."
@@ -589,12 +589,12 @@ for worker in graph-worker analytics-worker; do
 
     # Persist mcporter.json to MinIO so it survives container restarts.
     # v1.1.0 split: stage via host /tmp, then mc in hiclaw-embedded.
-    docker cp "${WORKER_CONTAINER}:/root/hiclaw-fs/config/mcporter.json" \
+    docker cp "${WORKER_CONTAINER}:/root/agentteams-fs/config/mcporter.json" \
         "/tmp/${worker}-mcporter.json" 2>/dev/null && \
     docker cp "/tmp/${worker}-mcporter.json" \
         "$EMBEDDED_CONTAINER:/tmp/${worker}-mcporter.json" && \
     docker exec "$EMBEDDED_CONTAINER" bash -c \
-        "mc cp /tmp/${worker}-mcporter.json hiclaw/hiclaw-storage/agents/${worker}/config/mcporter.json 2>&1 | tail -1" \
+        "mc cp /tmp/${worker}-mcporter.json agentteams/agentteams-storage/agents/${worker}/config/mcporter.json 2>&1 | tail -1" \
         && log "    → mcporter.json synced to MinIO" \
         || warn "    MinIO sync failed (config still active in running container)"
 done
@@ -644,7 +644,7 @@ docker exec "$MANAGER_CONTAINER" bash -c \
 docker cp "$TMP_DIR/hb-manager-mcporter.json" \
     "$EMBEDDED_CONTAINER:/tmp/hb-manager-mcporter.json" && \
 docker exec "$EMBEDDED_CONTAINER" bash -c \
-    "mc cp /tmp/hb-manager-mcporter.json hiclaw/hiclaw-storage/agents/manager/config/mcporter.json 2>&1 | tail -1" \
+    "mc cp /tmp/hb-manager-mcporter.json agentteams/agentteams-storage/agents/manager/config/mcporter.json 2>&1 | tail -1" \
     && log "  → Manager mcporter.json synced to MinIO" \
     || warn "  MinIO sync failed (config still active in running Manager)"
 

@@ -133,13 +133,13 @@ cp deploy/docker/.env.example deploy/docker/.env
 Never commit `deploy/docker/.env`. The repo's pre-commit hook does not block
 it (the file was historically tracked), so it's on you to keep secrets out.
 
-### Dev gateway modes (`HICLAW_DEV_GATEWAY`)
+### Dev gateway modes (`AGENTTEAMS_DEV_GATEWAY`)
 
 The worker → LLM path is controlled by a single env var in `.env`:
 
 | Mode | What happens | When to use |
 |---|---|---|
-| `nginx-bypass` (default) | A `hiclaw-aigw-bypass` nginx sidecar owns the `aigw-local.hiclaw.io` DNS alias and forwards `/v1/*` to `LLM_UPSTREAM_HOST` with `LLM_API_KEY` injected. Steps 2c/2d (Higress route + consumer) are **skipped**. | WSL2 hosts (Higress binary segfaults under the WSL2 kernel) and any time you want to debug end-to-end without Higress in the way. |
+| `nginx-bypass` (default) | A `hiclaw-aigw-bypass` nginx sidecar owns the `aigw-local.agentteams.io` DNS alias and forwards `/v1/*` to `LLM_UPSTREAM_HOST` with `LLM_API_KEY` injected. Steps 2c/2d (Higress route + consumer) are **skipped**. | WSL2 hosts (Higress binary segfaults under the WSL2 kernel) and any time you want to debug end-to-end without Higress in the way. |
 | `higress` | The embedded Higress instance owns the alias. Step 2c creates the LLM route, Step 2d binds the manager consumer. | Linux dev hosts and the k3s/ECS production target. |
 
 Switching modes only requires updating `.env` and recreating the affected
@@ -147,7 +147,7 @@ containers:
 
 ```bash
 # Switch to nginx-bypass (WSL2 friendly)
-sed -i 's/^HICLAW_DEV_GATEWAY=.*/HICLAW_DEV_GATEWAY=nginx-bypass/' deploy/docker/.env
+sed -i 's/^AGENTTEAMS_DEV_GATEWAY=.*/AGENTTEAMS_DEV_GATEWAY=nginx-bypass/' deploy/docker/.env
 docker-compose up -d --force-recreate hiclaw-aigw-bypass hiclaw-manager
 docker-compose restart hiclaw-graph-worker hiclaw-analytics-worker
 ```
@@ -165,7 +165,7 @@ The bypass mirrors the slice of Higress contract that workers actually
 exercise:
 
 - Listens on `:8080` inside the compose network.
-- Owns the `aigw-local.hiclaw.io` Docker network alias workers expect.
+- Owns the `aigw-local.agentteams.io` Docker network alias workers expect.
 - Strips the worker-supplied gateway key and injects `LLM_API_KEY`
   (what real Higress does via consumer / credential mapping).
 - Forwards `/v1/*` to `https://${LLM_UPSTREAM_HOST}` with SNI, streaming

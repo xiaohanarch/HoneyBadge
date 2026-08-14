@@ -102,7 +102,7 @@ def _normalize_user_id(user_id: str) -> str:
     """Strip Matrix prefix/suffix to get the plain application username.
 
     Matrix usernames are prefixed with 'hb-' (e.g. 'hb-admin') and may
-    arrive as full MXIDs ('@hb-admin:matrix-local.hiclaw.io').  The
+    arrive as full MXIDs ('@hb-admin:matrix-local.agentteams.io').  The
     permission service expects the plain username (e.g. 'admin').
     """
     if not user_id:

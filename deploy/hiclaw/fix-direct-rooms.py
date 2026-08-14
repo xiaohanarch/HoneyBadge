@@ -14,8 +14,8 @@ import json, urllib.request, urllib.parse, time, sys, os
 CONFIG_PATH = os.path.expanduser(
     os.environ.get("OPENCLAW_CONFIG", "/root/manager-workspace/.openclaw/openclaw.json")
 )
-MANAGER_ID = "@manager:matrix-local.hiclaw.io"
-BASE = os.environ.get("HICLAW_MATRIX_URL", "http://matrix-local.hiclaw.io:6167")
+MANAGER_ID = "@manager:matrix-local.agentteams.io"
+BASE = os.environ.get("AGENTTEAMS_MATRIX_URL", "http://matrix-local.agentteams.io:6167")
 POLL_INTERVAL = 2  # seconds
 
 def load_token():

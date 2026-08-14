@@ -227,7 +227,7 @@ def reset_manager_sessions():
     #    reuse instead of making a fresh query.
     subprocess.run(
         ["docker", "exec", MANAGER_CONTAINER, "bash", "-c",
-         "rm -rf /root/hiclaw-fs/shared/tasks/erp-* /root/hiclaw-fs/shared/tasks/fast-* 2>/dev/null"],
+         "rm -rf /root/agentteams-fs/shared/tasks/erp-* /root/agentteams-fs/shared/tasks/fast-* 2>/dev/null"],
         capture_output=True, timeout=10,
     )
 

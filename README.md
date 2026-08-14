@@ -81,10 +81,10 @@
 - 测试数据集覆盖 57 种实体 + 81 种关系，含 12 种欺诈异常模式
 
 **智能 Agent 编排**：
-- **HiClaw** 阿里巴巴开源多 Agent 协作框架（v1.1.2）
+- **AgentTeams** 阿里巴巴开源多 Agent 协作框架（v1.2.2）
 - Manager-Worker 架构，任务解耦与弹性伸缩
 - Matrix 协议通信，所有交互可审计
-- **每个用户独立 Matrix 账号**（`@hb-{用户名}:matrix-local.hiclaw.io`），彻底隔离会话
+- **每个用户独立 Matrix 账号**（`@hb-{用户名}:matrix-local.agentteams.io`），彻底隔离会话
 
 **五层防幻觉框架**：
 
@@ -128,8 +128,8 @@
 | 任务 | 状态 | 说明 |
 |------|------|------|
 | NebulaGraph Schema | ✅ | 34 Tags, 38 Edges + 测试数据 57 实体类型 |
-| HiClaw Manager-Worker | ✅ | Matrix 协议通信，Manager + graph-worker + analytics-worker |
-| HiClaw v1.1.2 升级 | ✅ | v1.1.0 → v1.1.2，6 个死代码 workaround 已删，observe-recovery 禁用 |
+| AgentTeams Manager-Worker | ✅ | Matrix 协议通信，Manager + graph-worker + analytics-worker |
+| AgentTeams v1.1.2 升级 | ✅ | v1.1.0 → v1.1.2，6 个死代码 workaround 已删，observe-recovery 禁用 |
 | 五层防幻觉框架 | ✅ | L1-L5 全部实现；L3 权限通过 route-and-execute.sh 强制执行；L4 原始数据前端直传；L5 审计日志写入 PostgreSQL |
 | honeybadge-auth 服务 | ✅ | 每用户 Matrix 账号 + JWT |
 | matrix-js-sdk 前端 | ✅ | 浏览器直连 Tuwunel |
@@ -284,7 +284,7 @@
 **Approach B 的核心设计**：
 - 每个用户登录时，`honeybadge-auth` 在 Tuwunel 中创建专属 Matrix 账号 `@hb-{username}`
 - 浏览器拿到 `matrix_access_token` 后直接用 matrix-js-sdk 建立连接
-- 每个用户与 Manager 的 DM 房间完全独立，符合 HiClaw per-channel-peer 设计
+- 每个用户与 Manager 的 DM 房间完全独立，符合 AgentTeams per-channel-peer 设计
 - `honeybadge-server` 仅提供审计 REST API，不再作为 Matrix 代理
 
 ### 3.2 目标架构（Phase 3+）
@@ -300,7 +300,7 @@
                         └──────┬───────┘
                                ↓
                     ┌─────────────────────┐
-                    │   HiClaw Manager     │ ← 无状态，多副本
+                    │   AgentTeams Manager     │ ← 无状态，多副本
                     │  (Matrix Protocol)   │
                     └──┬──────┬──────┬────┘
                        ↓      ↓      ↓
@@ -336,9 +336,9 @@
 | 组件 | 选型 | 版本 | 说明 |
 |------|------|------|------|
 | 图数据库 | NebulaGraph | 3.8 | 分布式，存算分离 |
-| Agent 编排 | HiClaw | 1.1.2 | 阿里巴巴开源 |
-| Matrix 服务器 | Tuwunel | - | 内嵌于 HiClaw Manager |
-| AI 网关 | Higress | - | 内嵌于 HiClaw Manager |
+| Agent 编排 | AgentTeams | 1.2.2 | 阿里巴巴开源 |
+| Matrix 服务器 | Tuwunel | - | 内嵌于 AgentTeams Manager |
+| AI 网关 | Higress | - | 内嵌于 AgentTeams Manager |
 | 前端框架 | Vue 3 | 3.4+ | Composition API + matrix-js-sdk |
 | 后端框架 | FastAPI | 0.115+ | async/await |
 | 认证服务 | honeybadge-auth | 1.0 | 专属 Matrix 账号 + JWT |
@@ -352,7 +352,7 @@
 
 ## 四、核心技术选型与决策
 
-### 4.1 Agent 编排层：HiClaw
+### 4.1 Agent 编排层：AgentTeams
 
 **项目地址**：https://github.com/alibaba/hiclaw
 
@@ -361,7 +361,7 @@
 - 内置 AI 网关（Higress）实现凭证零暴露
 - 基于 Matrix 协议，所有 Agent 交互可审计
 - 原生 MCP Server 集成
-- 阿里背书 + Apache 协议 + 活跃维护（v1.1.2）
+- 阿里背书 + Apache 协议 + 活跃维护（v1.2.2）
 
 **架构**：
 - **Manager Agent**（基于 OpenClaw）：接收用户任务，通过 `route-and-execute.sh` 统一路由决定走 fast-query 直通路径还是分发 Worker
@@ -381,7 +381,7 @@ Matrix Room 是极轻量的消息通道，Worker 是重量级计算资源：
 
 **per-channel-peer 与 Approach B**：
 
-HiClaw Manager 对每个 Matrix peer 只维护一个活跃 DM 会话。不能用单一共享账号代表所有用户——Approach A 失败的根本原因。Approach B 通过 `honeybadge-auth` 为每个用户创建独立 Matrix 账号解决此问题。
+AgentTeams Manager 对每个 Matrix peer 只维护一个活跃 DM 会话。不能用单一共享账号代表所有用户——Approach A 失败的根本原因。Approach B 通过 `honeybadge-auth` 为每个用户创建独立 Matrix 账号解决此问题。
 
 ### 4.2 图谱存储：NebulaGraph
 
@@ -456,7 +456,7 @@ HiClaw Manager 对每个 Matrix peer 只维护一个活跃 DM 会话。不能用
 
 ### 4.5 共享存储与无状态化
 
-HiClaw 要求 Worker 完全无状态——Worker 容器可随时销毁重建而不丢失任何状态。所有持久化数据存放在共享存储层：
+AgentTeams 要求 Worker 完全无状态——Worker 容器可随时销毁重建而不丢失任何状态。所有持久化数据存放在共享存储层：
 
 | 存储 | 用途 | 技术选型 | 说明 |
 |------|------|----------|------|
@@ -471,19 +471,19 @@ HiClaw 要求 Worker 完全无状态——Worker 容器可随时销毁重建而�
 
 #### MinIO 在架构中的角色
 
-MinIO 是 HiClaw Manager 内置的对象存储，在本项目中承担两个职责：
+MinIO 是 AgentTeams Manager 内置的对象存储，在本项目中承担两个职责：
 
-1. **Worker 配置分发**：Worker 的 `openclaw.json`（模型配置）、`SOUL.md`（人格定义）、`SKILL.md`（技能文件）全部存储在 MinIO 的 `hiclaw-storage` 桶中。Worker 容器启动时从 MinIO 拉取配置，因此 Worker 本身不持有任何状态。
+1. **Worker 配置分发**：Worker 的 `openclaw.json`（模型配置）、`SOUL.md`（人格定义）、`SKILL.md`（技能文件）全部存储在 MinIO 的 `agentteams-storage` 桶中。Worker 容器启动时从 MinIO 拉取配置，因此 Worker 本身不持有任何状态。
 2. **非结构化文件存储**：合同 PDF、图纸图片等文件存入 MinIO，图谱中仅存储元数据节点和关联边。
 
 管理入口：http://localhost:19001（admin/admin1234）
 
 #### Tuwunel（Matrix 服务器）在架构中的角色
 
-Tuwunel 是 HiClaw Manager 内置的 Matrix 协议服务器（Conduwuit 的 fork），在本项目中承担三个职责：
+Tuwunel 是 AgentTeams Manager 内置的 Matrix 协议服务器（Conduwuit 的 fork），在本项目中承担三个职责：
 
 1. **Agent 通信总线**：Manager 与 Worker 之间通过 Matrix Room 通信，所有消息天然持久化且可审计
-2. **用户会话隔离**：每个用户拥有独立的 Matrix 账号 `@hb-{username}:matrix-local.hiclaw.io`，与 Manager 建立独立 DM 房间，完全隔离
+2. **用户会话隔离**：每个用户拥有独立的 Matrix 账号 `@hb-{username}:matrix-local.agentteams.io`，与 Manager 建立独立 DM 房间，完全隔离
 3. **对话历史存储**：当前对话的完整上下文保存在 Matrix Room 历史中，无需额外存储
 
 管理入口：http://localhost:18888（Element Web，任意 Matrix 用户登录）
@@ -501,7 +501,7 @@ Tuwunel 是 HiClaw Manager 内置的 Matrix 协议服务器（Conduwuit 的 fork
 | 组件 | 选型 | 备选方案 |
 |------|------|----------|
 | 图谱库 | NebulaGraph | TigerGraph（商业协议） |
-| Agent 编排 | HiClaw | LangGraph、Dify |
+| Agent 编排 | AgentTeams | LangGraph、Dify |
 | AI 网关 | Higress（基于 Envoy） | APISIX + AI 插件 |
 | 向量库 | Milvus | Qdrant（更轻量） |
 | 消息队列 | Kafka | - |
@@ -582,9 +582,9 @@ def handle_query(user_question, user):
 ```
 用户请求 → Higress 网关（SSO token 验证 + 用户身份提取）
               ↓
-         HiClaw Manager
+         AgentTeams Manager
               ↓
-         HiClaw Worker (Python) ──MCP──→ 权限 MCP Server (Java)
+         AgentTeams Worker (Python) ──MCP──→ 权限 MCP Server (Java)
                                                    │
                                               调用 Java SDK → 权限服务
 ```
@@ -608,7 +608,7 @@ def handle_query(user_question, user):
 
 ```
 用户 A 登录 → honeybadge-auth:
-                ├─ 创建/登录 @hb-admin:matrix-local.hiclaw.io
+                ├─ 创建/登录 @hb-admin:matrix-local.agentteams.io
                 └─ 服务端预创建与 @manager 的 DM 房间（Room-A）← 返回 matrix_dm_room_id
       ↓
 浏览器用 @hb-admin 的 access_token + Room-A ID 直连 Tuwunel
@@ -616,7 +616,7 @@ def handle_query(user_question, user):
 用户 A 直接向 Room-A 发消息（无需客户端发现房间）
 
 用户 B 登录 → honeybadge-auth:
-                ├─ 创建/登录 @hb-analyst:matrix-local.hiclaw.io
+                ├─ 创建/登录 @hb-analyst:matrix-local.agentteams.io
                 └─ 服务端预创建与 @manager 的 DM 房间（Room-B）← 返回 matrix_dm_room_id
       ↓
 Room-A 与 Room-B 完全独立，@manager 在登录时已 join 两个房间
@@ -687,7 +687,7 @@ RETURN s.supplier_name, c.customer_name, s.bank_account
 **核心思路**：核心实体 + 交易明细入图，非核心数据通过 MCP 联邦查询。
 
 ```
-              HiClaw Agent
+              AgentTeams Agent
                    ↓
   ┌──────────────────────────────────┐
   │        MCP Router / Gateway       │
@@ -807,7 +807,7 @@ Phase 3: 准实时（T+分钟级）
 
 **单次请求处理链路及耗时**：
 ```
-用户提问 → HiClaw Manager(~50ms) → LLM 生成 nGQL(~2-5s)
+用户提问 → AgentTeams Manager(~50ms) → LLM 生成 nGQL(~2-5s)
   → nGQL 校验(~50ms) → NebulaGraph 查询(~100-500ms)
   → LLM 生成摘要(~1-3s) → 返回用户
 
@@ -826,7 +826,7 @@ Phase 3: 准实时（T+分钟级）
 ### 5.10 高可用与容灾
 
 **部署架构**：
-- HiClaw Manager：无状态，至少 2 个 Pod + 负载均衡
+- AgentTeams Manager：无状态，至少 2 个 Pod + 负载均衡
 - NebulaGraph：3 Meta + 3 Graph + 3-6 Storage（副本数 2），Raft 自动故障转移
 - Redis：Cluster 模式（3 主 3 从）
 - Kafka：3 Broker 副本
@@ -971,8 +971,8 @@ py -3.12 -m eval.scripts.generate_cases --output eval/cases/generated/ --count 4
 | NebulaGraph Meta | 16 核/64GB | 3 台 |
 | NebulaGraph Graph | 32 核/128GB | 3 台 |
 | NebulaGraph Storage | 64 核/256GB/8TB NVMe | 6 台 |
-| HiClaw Manager | 8 核/16GB | 3 Pod |
-| HiClaw Worker | 8 核/16GB | 5-8 Pod |
+| AgentTeams Manager | 8 核/16GB | 3 Pod |
+| AgentTeams Worker | 8 核/16GB | 5-8 Pod |
 | Redis Cluster | 8 核/64GB | 6 台（3 主 3 从） |
 | **合计** | | **约 30-35 台** |
 
@@ -982,7 +982,7 @@ py -3.12 -m eval.scripts.generate_cases --output eval/cases/generated/ --count 4
 |------|------|------|
 | LLM 推理 | Atlas 800T A3 | 4 台 |
 | NebulaGraph | Meta + Graph + Storage | 9 台 |
-| HiClaw + 通用服务 | 混部 | 8-10 台 |
+| AgentTeams + 通用服务 | 混部 | 8-10 台 |
 | **合计** | | **约 21-23 台** |
 
 **成本优化**：语义缓存命中率每提升 10%，LLM 服务器需求减少 ~1 台。目标缓存命中率 30-40%。
@@ -998,7 +998,7 @@ py -3.12 -m eval.scripts.generate_cases --output eval/cases/generated/ --count 4
 | 团队技术预研 | 4 周 | 4 周 |
 | NebulaGraph 集群 + Schema | 3 周 | 含 1 周摸索 |
 | Neo4j → NebulaGraph 迁移 | 3 周 | 含 1 周兼容性踩坑 |
-| HiClaw 部署 + 配置 | 3 周 | 含 1.5 周学习 |
+| AgentTeams 部署 + 配置 | 3 周 | 含 1.5 周学习 |
 | Higress 网关 + SSO 对接 | 4 周 | 含 2 周企业协调 |
 | 前端 + 防幻觉 + 可观测性 | 6 周 | |
 | 集成测试 + 缓冲 | 5 周 | |
@@ -1023,7 +1023,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 关键里程碑：
   M1 (第 4 周)  ：技术预研完成
-  M2 (第 12 周) ：NebulaGraph + HiClaw + LLM 端到端跑通
+  M2 (第 12 周) ：NebulaGraph + AgentTeams + LLM 端到端跑通
   M3 (第 20 周) ：Phase 1 完成，内部小范围试用
   M4 (第 30 周) ：权限 + ETL 完成，可交付业务部门
   M5 (第 40 周) ：Phase 2 完成，生产级运营
@@ -1038,8 +1038,8 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 | 角色 | 人数 | 职责 |
 |------|------|------|
-| 架构师/Tech Lead | 1 | 全栈架构决策，Schema 设计，HiClaw 编排设计 |
-| Python 后端 | 1 | HiClaw Worker、LLM 集成、防幻觉框架、Prompt 工程 |
+| 架构师/Tech Lead | 1 | 全栈架构决策，Schema 设计，AgentTeams 编排设计 |
+| Python 后端 | 1 | AgentTeams Worker、LLM 集成、防幻觉框架、Prompt 工程 |
 | Java 后端 | 1 | 权限 MCP Server、ETL 管道、ERP 系统对接 |
 | 数据工程师 | 1 | NebulaGraph 运维、ETL、数据质量校验 |
 | 前端工程师 | 1 | 聊天界面、数据可视化、Grafana 看板 |
@@ -1058,7 +1058,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 | 风险 | 概率 | 影响 | 应对 |
 |------|------|------|------|
 | NebulaGraph 学习曲线陡峭 | 高 | 中 | 前 4 周专项预研 + 外部顾问 |
-| HiClaw 文档不完善 | 中 | 中 | 阿里云社区支持，备选 LangGraph |
+| AgentTeams 文档不完善 | 中 | 中 | 阿里云社区支持，备选 LangGraph |
 | 昇腾 910B 部署踩坑 | 中 | 高 | 专项攻关 + 昇腾社区 |
 | openCypher 兼容性问题 | 高 | 中 | 迁移时逐条验证 |
 | LLM token 成本超预期 | 高 | 中 | 大小模型分流 + 语义缓存 |
@@ -1076,7 +1076,7 @@ Phase 3: 全面生产                24 周（~6 个月）
                          ↑
                          │
         HoneyBadge ●─────┤
-        (HiClaw+LLM+     │         SAP Joule ●
+        (AgentTeams+LLM+     │         SAP Joule ●
          NebulaGraph)     │         (专有封闭)
                          │
      ─────────────────────┼─────────────────────→ 有本体/语义层
@@ -1096,7 +1096,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 | 维度 | SAP Joule | Neo4j GraphRAG | 美团 KG | HoneyBadge |
 |------|-----------|---------------|--------|------------|
 | 图数据库 | HANA Graph（专有） | Neo4j（单机受限） | NebulaGraph | NebulaGraph |
-| Agent | 单 Agent（专有） | 无 | 无 | HiClaw 多 Agent |
+| Agent | 单 Agent（专有） | 无 | 无 | AgentTeams 多 Agent |
 | 本体 | 封闭，不可扩展 | 通常缺失 | 隐含在 Schema | 开放，ontology-as-prompt |
 | NL→查询准确率 | 隐藏 | ~60-80% | - | ~80-90%+（有本体约束） |
 | 锁定风险 | 高 | 中 | 低 | 低（全开源栈） |
@@ -1105,15 +1105,15 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 ## 十二、Agent 框架架构深度对比
 
-> 本章节对比 HoneyBadge 当前架构与四个主流 Agent 框架（OpenClaw、DeerFlow、HiClaw、HermesClaw）的设计差异，从性能、智能性、开放度、健壮性四个维度进行分析。
+> 本章节对比 HoneyBadge 当前架构与四个主流 Agent 框架（OpenClaw、DeerFlow、AgentTeams、HermesClaw）的设计差异，从性能、智能性、开放度、健壮性四个维度进行分析。
 
 ### 12.1 架构总览
 
-| 维度 | HoneyBadge（当前） | OpenClaw 原生 | DeerFlow (ByteDance) | HiClaw (Alibaba) | HermesClaw/Hermes Agent |
+| 维度 | HoneyBadge（当前） | OpenClaw 原生 | DeerFlow (ByteDance) | AgentTeams (Alibaba) | HermesClaw/Hermes Agent |
 |------|-------------------|--------------|----------------------|-------------------|------------------------|
 | **定位** | 企业知识图谱助手 | 个人 AI 代理框架 | 全栈 SuperAgent 执行引擎 | 多 Agent 协作操作系统 | 自我进化 AI 代理 |
 | **架构模式** | Manager-Worker + 5 层反幻觉 | 单 Gateway + Channel-Brain-Body | Lead Agent + SubAgent DAG | Manager-Worker-Matrix Room | Agent-first 学习循环 |
-| **编排层** | HiClaw Manager via Matrix | 单进程 Gateway | LangGraph DAG 图调度 | Supervisord 全合一容器 | 同步对话循环 |
+| **编排层** | AgentTeams Manager via Matrix | 单进程 Gateway | LangGraph DAG 图调度 | Supervisord 全合一容器 | 同步对话循环 |
 | **消息总线** | Matrix (Tuwunel) | 24+ 平台适配器 | HTTP SSE + REST | Matrix (Tuwunel) | 6 平台 + Matrix |
 | **LLM 网关** | Higress (Envoy) | 内置 failover 链 | 直连 LLM API | Higress (Envoy) | Provider resolver |
 | **执行环境** | MCP Server（无沙箱） | Shell + MCP | Docker/K8s 沙箱 | MCP via mcporter | 47 工具 + 118 技能 |
@@ -1122,7 +1122,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 ### 12.2 性能（Performance）
 
-| 指标 | HoneyBadge | OpenClaw | DeerFlow | HiClaw | HermesClaw |
+| 指标 | HoneyBadge | OpenClaw | DeerFlow | AgentTeams | HermesClaw |
 |------|-----------|----------|----------|--------|------------|
 | **冷启动** | ~15-20s（Worker 从 MinIO 拉配置） | ~6s (Node.js) | ~3-5s（容器已就绪） | ~15-20s（同 HoneyBadge） | ~2s（本地进程） |
 | **内存占用** | ~500MB/Worker + Manager 全合一 | ~394MB | 可配（沙箱 2GB 上限） | ~500MB/Worker | ~300MB |
@@ -1137,7 +1137,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 ### 12.3 智能性（Intelligence）
 
-| 指标 | HoneyBadge | OpenClaw | DeerFlow | HiClaw | HermesClaw |
+| 指标 | HoneyBadge | OpenClaw | DeerFlow | AgentTeams | HermesClaw |
 |------|-----------|----------|----------|--------|------------|
 | **任务路由** | 关键词匹配 + route-and-execute.sh 统一路由 | Binding 优先级路由 | Lead Agent LLM 推理分解 | 同 OpenClaw 机制 | LLM 推理 |
 | **上下文管理** | 40K token 裁剪 + ontology 动态注入 | Context Window Guard | 渐进式技能加载 + checkpoint | 同 OpenClaw | 3 层记忆系统 |
@@ -1153,7 +1153,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 ### 12.4 开放度（Openness）
 
-| 指标 | HoneyBadge | OpenClaw | DeerFlow | HiClaw | HermesClaw |
+| 指标 | HoneyBadge | OpenClaw | DeerFlow | AgentTeams | HermesClaw |
 |------|-----------|----------|----------|--------|------------|
 | **许可证** | 专有项目 | MIT | MIT | Apache 2.0 | MIT |
 | **生态** | 自建 MCP Servers | 3,200+ ClawHub 技能 | ByteDance 内部验证 | OpenClaw 生态 | 118 技能 + 插件系统 |
@@ -1169,7 +1169,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 ### 12.5 健壮性（Robustness）
 
-| 指标 | HoneyBadge | OpenClaw | DeerFlow | HiClaw | HermesClaw |
+| 指标 | HoneyBadge | OpenClaw | DeerFlow | AgentTeams | HermesClaw |
 |------|-----------|----------|----------|--------|------------|
 | **安全模型** | ✅ Higress 凭证隔离 + AST 级权限注入 | ❌ 9 个 CVE（2026.3），含 CVSS 9.9 | 中间件 Guardrail + Seccomp | ✅ 零信任凭证模型 | ✅ 硬件级沙箱（Landlock + Seccomp） |
 | **审计追踪** | ✅ **全链路审计（最强）** — trace_id 从问题到结果 | ❌ JSONL 日志仅存 | ❌ token 统计级 | ✅ Matrix 聊天记录 | ❌ SQLite 会话存储 |
@@ -1193,7 +1193,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 
 1. **反幻觉框架无可替代** — 5 层验证是所有方案中唯一针对"LLM 生成错误数据"的系统性解决方案，对财务审计场景是刚性需求
 2. **全链路审计能力最强** — question→nGQL→raw result→summary 全程 trace_id 可追溯
-3. **零信任凭证模型** — Worker 永远不持有真实 API 密钥（继承自 HiClaw）
+3. **零信任凭证模型** — Worker 永远不持有真实 API 密钥（继承自 AgentTeams）
 4. **领域知识注入成熟** — 12 份 ontology 文件 + 关键词路由，精准控制上下文
 
 #### 当前架构的关键短板
@@ -1212,7 +1212,7 @@ Phase 3: 全面生产                24 周（~6 个月）
 | **企业 ERP 审计（当前场景）** | **HoneyBadge（当前）** | 反幻觉 + 审计追踪不可妥协 |
 | 通用个人 AI 助手 | OpenClaw | 24+ 平台、生态最丰富 |
 | 长时研究/代码生成 | DeerFlow | Docker 沙箱 + checkpoint 恢复 |
-| 多 Agent 团队协作 | HiClaw | Manager-Worker-Matrix 最成熟 |
+| 多 Agent 团队协作 | AgentTeams | Manager-Worker-Matrix 最成熟 |
 | 安全敏感 + 自学习 | HermesClaw | 硬件沙箱 + 技能自生成 |
 
 #### 可借鉴的改进方向
@@ -1273,7 +1273,7 @@ DeerFlow 无细粒度数据权限控制。HoneyBadge 在查询 AST 层注入用�
 
 **⑤ 零信任凭证模型**
 
-HoneyBadge Worker 永不持有真实 API 密钥（继承自 HiClaw），凭证由 Higress 网关隔离代理。DeerFlow 直连 LLM API，密钥暴露面更大。
+HoneyBadge Worker 永不持有真实 API 密钥（继承自 AgentTeams），凭证由 Higress 网关隔离代理。DeerFlow 直连 LLM API，密钥暴露面更大。
 
 #### 12.7.3 DeerFlow 的架构长板（客观承认）
 
@@ -1317,11 +1317,11 @@ DeerFlow 与 HoneyBadge 不是替代关系，而是场景互补：
 
 ### 12.9 Worker Runtime 选型：OpenClaw vs Hermes
 
-> HiClaw v1.1.2 内置三种 worker runtime（OpenClaw / Hermes / Copaw，见 manager 容器 `/opt/hiclaw/agent/` 下的 `worker-agent` / `hermes-worker-agent` / `copaw-worker-agent`）。本节给出 HoneyBadge 场景下 OpenClaw 与 Hermes 的选型建议。
+> AgentTeams v1.2.2 内置三种 worker runtime（OpenClaw / Hermes / Copaw，见 manager 容器 `/opt/agentteams/agent/` 下的 `worker-agent` / `hermes-worker-agent` / `copaw-worker-agent`）。本节给出 HoneyBadge 场景下 OpenClaw 与 Hermes 的选型建议。
 
 #### 12.9.1 实际版本与现状
 
-- **OpenClaw**：容器内 `/opt/openclaw/package.json` 确认版本为 **`2026.4.14`**（commit 2f35b6f），采用日期版本号——**并非 v1.1.2**。v1.1.2 是 HiClaw 发行版版本（`.builtin-version`），openclaw 自身用日期版本号。代码注释中出现的"OpenClaw v1.1.2"属误标。
+- **OpenClaw**：容器内 `/opt/openclaw/package.json` 确认版本为 **`2026.4.14`**（commit 2f35b6f），采用日期版本号——**并非 v1.2.2**。v1.2.2 是 AgentTeams 发行版版本（`.builtin-version`），openclaw 自身用日期版本号。代码注释中出现的"OpenClaw v1.2.2"属误标。
 - **Hermes**：Python-based，powered by `hermes-agent`，经自定义 Matrix adapter 集成；配置从 `openclaw.json` 桥接生成 `~/.hermes/config.yaml` + `.env`，桥接键每次启动重写。
 - **当前现状**：HoneyBadge 使用 OpenClaw（已跑通 E2E + 生产 ECS 15 pods running），Hermes 内置支持但**未启用**。
 
@@ -1341,7 +1341,7 @@ DeerFlow 与 HoneyBadge 不是替代关系，而是场景互补：
 | 生态 | 3,200+ ClawHub 技能（20% 含恶意代码） | 118 技能 + 插件系统 |
 | MCP 工具 | mcporter-servers.json | mcporter（config/mcporter.json） |
 | 反幻觉 | ❌ 依赖 LLM 自身 | ❌ 依赖 LLM 自身（两者相同） |
-| HiClaw 成熟度 | 默认 runtime，本项目已跑通 | 内置支持，本项目未启用 / 未验证 |
+| AgentTeams 成熟度 | 默认 runtime，本项目已跑通 | 内置支持，本项目未启用 / 未验证 |
 
 > **注**：HoneyBadge 的 5 层反幻觉框架位于 MCP Server + 项目代码层，与 worker runtime 无关——OpenClaw 与 Hermes 均同等享受该能力。换 runtime 不带来反幻觉增强。
 
@@ -1427,7 +1427,7 @@ LLM_API_KEY=your-llm-api-key
 docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env up -d
 ```
 
-等待约 60 秒，HiClaw Manager 内部启动 Tuwunel + MinIO + Higress。
+等待约 60 秒，AgentTeams Manager 内部启动 Tuwunel + MinIO + Higress。
 
 ### 4. 初始化 NebulaGraph Schema（仅第一次）
 
@@ -1437,16 +1437,16 @@ bash deploy/docker/init-nebula.sh
 
 执行 ADD HOSTS、建 Space、应用 Schema、重建索引，约 30 秒完成。
 
-### 5. HiClaw 自动初始化（无需手动操作）
+### 5. AgentTeams 自动初始化（无需手动操作）
 
-HiClaw Manager 容器在每次启动时，会通过 `entrypoint-wrapper.sh` → `manager-init-internal.sh` 自动执行完整初始化：
+AgentTeams Manager 容器在每次启动时，会通过 `entrypoint-wrapper.sh` → `manager-init-internal.sh` 自动执行完整初始化：
 
 - 上传 Worker SOUL.md + 技能文件到 MinIO
 - 注册 Workers（`create-worker.sh`）
 - 修正 LLM baseUrl / model / contextPruning 配置
 - 创建 Higress LLM 路由（`llm-minimax-route`）
 - 注入 Manager 的 SOUL.md、AGENTS.md、HEARTBEAT.md
-- **修补 Manager allowFrom 白名单**（`@hb-*` 用户列表）← 每次重启都执行，升级 HiClaw 后无需手动恢复
+- **修补 Manager allowFrom 白名单**（`@hb-*` 用户列表）← 每次重启都执行，升级 AgentTeams 后无需手动恢复
 
 K8s 部署同理：`hiclaw-init-scripts` ConfigMap 将这两个脚本挂载进 Pod，`command` 覆盖默认入口，Pod 每次重启都自动运行。
 
@@ -1521,7 +1521,7 @@ HoneyBadge/
 │   ├── server/                  # 审计 REST API
 │   └── metrics/                 # Prometheus 指标采集
 │
-├── hiclaw/                      # HiClaw Agent 配置
+├── hiclaw/                      # AgentTeams Agent 配置
 │   ├── manager/agent/
 │   │   ├── SOUL.md              # Manager 人格与行为定义
 │   │   ├── AGENTS.md            # Worker 注册表
@@ -1599,7 +1599,7 @@ PG_DB=honeybadge_audit
 # ============ Redis ============
 REDIS_PASSWORD=redis123
 
-# ============ HiClaw Manager ============
+# ============ AgentTeams Manager ============
 HICLAW_ADMIN_USER=admin
 HICLAW_ADMIN_PASSWORD=admin1234       # MinIO 要求 >= 8 字符
 HICLAW_REGISTRATION_TOKEN=honeybadge-reg-token
@@ -1645,7 +1645,7 @@ Content-Type: application/json
 {
   "matrix_access_token": "eksx9...",
   "matrix_homeserver": "http://localhost:6167",
-  "matrix_user_id": "@hb-admin:matrix-local.hiclaw.io",
+  "matrix_user_id": "@hb-admin:matrix-local.agentteams.io",
   "roles_jwt": "eyJhbGci...",
   "user": {
     "username": "admin",
@@ -1655,7 +1655,7 @@ Content-Type: application/json
 }
 ```
 
-首次登录会在 Tuwunel 中自动创建 `@hb-admin:matrix-local.hiclaw.io` 账号。
+首次登录会在 Tuwunel 中自动创建 `@hb-admin:matrix-local.agentteams.io` 账号。
 
 ### 发起查询（前端通过 matrix-js-sdk）
 
@@ -1688,7 +1688,7 @@ GET http://localhost:8090/api/health
 
 ### `honeybadge-auth` 启动失败
 
-等待 60 秒让 HiClaw Manager 完全启动，然后：
+等待 60 秒让 AgentTeams Manager 完全启动，然后：
 ```bash
 docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.env restart honeybadge-auth
 ```
@@ -1758,7 +1758,7 @@ docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.en
 
 ### 参考资源
 
-- [HiClaw 文档](https://github.com/alibaba/hiclaw)
+- [AgentTeams 文档](https://github.com/alibaba/hiclaw)
 - [NebulaGraph 官网](https://nebula-graph.io/)
 - [NebulaGraph 资源准备文档](https://docs.nebula-graph.com.cn/3.8.0/4.deployment-and-installation/1.resource-preparations/)
 - [美团图数据库平台建设](https://tech.meituan.com/2021/04/01/nebula-graph-practice-in-meituan.html)
@@ -1788,7 +1788,7 @@ docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.en
 | v3.0 | 2026-04-10 | Phase 1 Approach B 实现：per-user Matrix 账号、matrix-js-sdk 直连、honeybadge-auth |
 | v3.1 | 2026-04-13 | 实际部署状态说明、容器清单、10 倍流量扩容建议 |
 | v3.2 | 2026-04-16 | 合并 starter.md 与 README.md；更新 Schema 计数（34 Tags + 38 Edges）；更新 LLM 配置（qwen3.5-plus via DashScope）；新增 12 种欺诈检测模式说明；更新项目结构 |
-| v3.3 | 2026-04-23 | 新增第十二章「Agent 框架架构深度对比」：HoneyBadge vs OpenClaw / DeerFlow / HiClaw / HermesClaw，覆盖性能、智能性、开放度、健壮性四维度分析 |
+| v3.3 | 2026-04-23 | 新增第十二章「Agent 框架架构深度对比」：HoneyBadge vs OpenClaw / DeerFlow / AgentTeams / HermesClaw，覆盖性能、智能性、开放度、健壮性四维度分析 |
 | v3.4 | 2026-06-27 | 第十二章新增 12.7「HoneyBadge vs DeerFlow 企业 ERP 审计场景专题对比」（定位差异、五项不可替代能力、DeerFlow 长板、共存定位）与 12.8「向上汇报核心口径」（技术能力→业务/合规价值映射） |
 | v3.5 | 2026-06-27 | 第十二章新增 12.9「Worker Runtime 选型：OpenClaw vs Hermes」：核实 openclaw 实际版本 2026.4.14（非 v1.1.2）、两者对比表、短期继续 OpenClaw / 长期评估 Hermes 推荐及渐进切换路径 |
 

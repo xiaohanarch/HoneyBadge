@@ -1,6 +1,68 @@
-# UPGRADE-NOTES — HiClaw v1.1.0 → v1.1.2
+# UPGRADE-NOTES
 
-> 本文件记录升级过程中的实际行为差异，事后合并回 `docs/1.1.2-upgrade-plan.md` 的"实测记录"章节。
+> 本文件记录升级过程中的实际行为差异。每次升级追加新章节。
+
+---
+
+## v1.1.2 → AgentTeams v1.2.2 (2026-08-14)
+
+**Scope**: Docker Compose only (k8s manifests out of scope)
+
+### Summary
+
+Upgraded from hiclaw v1.1.2 to AgentTeams v1.2.2. All containers running on v1.2.2
+images with AGENTTEAMS_* env vars, agentteams.io domains, and /opt/agentteams/ paths.
+
+### Phase 0 Findings
+
+1. **Higress segfault on WSL2**: CONFIRMED (exit 139). nginx bypass retained.
+2. **Script paths**: `/opt/agentteams/` confirmed (renamed from `/opt/hiclaw/`).
+3. **FS paths**: `/root/agentteams-fs/` confirmed.
+4. **Zero HICLAW_ residuals** in v1.2.2 images (hard cut).
+5. **QwenPaw 2.0**: `start-qwenpaw-manager.sh` exists but `/opt/venv/qwenpaw/bin/python3`
+   is MISSING from the manager image. OpenClaw runtime used instead
+   (`AGENTTEAMS_MANAGER_RUNTIME=openclaw`).
+6. **Official hermes-worker image**: Lacks hermes-agent + pip3. Self-built retained.
+7. **openclaw.json**: Still the primary config input for both runtimes.
+
+### Phase 2: QwenPaw Switch — BLOCKED
+
+Manager image missing `/opt/venv/qwenpaw/` venv + `copaw_worker` module.
+`start-qwenpaw-manager.sh` hardcodes `/opt/venv/qwenpaw/bin/python3` (lines 75, 282).
+OpenClaw runtime working. All 3 workarounds retained (fix-direct-rooms.py already
+inactive, LLM_PROVIDER + allowlist patch still needed for OpenClaw).
+
+### Naming Changes
+
+| Dimension | v1.1.2 | v1.2.2 |
+|-----------|--------|--------|
+| env var prefix | `HICLAW_*` | `AGENTTEAMS_*` |
+| Matrix domain | `matrix-local.hiclaw.io` | `matrix-local.agentteams.io` |
+| AI gateway domain | `aigw-local.hiclaw.io` | `aigw-local.agentteams.io` |
+| MinIO bucket | `hiclaw-storage` | `agentteams-storage` |
+| mc alias | `hiclaw` | `agentteams` |
+| Container FS | `/root/hiclaw-fs/` | `/root/agentteams-fs/` |
+| Scripts | `/opt/hiclaw/` | `/opt/agentteams/` |
+| Secrets | `/data/hiclaw-secrets.env` | `/data/agentteams-secrets.env` |
+| Provider name | `hiclaw-gateway` | `agentteams-gateway` |
+| Log dir | `/var/log/hiclaw/` | `/var/log/agentteams/` |
+
+### Verification
+
+- All 17 containers running
+- Manager init completed (exit 0)
+- `@manager:matrix-local.agentteams.io` logged in
+- Workers connected to Matrix
+- MinIO `agentteams-storage` bucket correct
+- Provider `agentteams-gateway/glm-5.2` working
+- Zero `HICLAW_` / `hiclaw.io` / `hiclaw-fs` in docker-compose scope
+- Auth/API/Frontend/MinIO health checks passing
+
+---
+
+## v1.1.0 → v1.1.2 (2026-06-25)
+
+> 以下为 v1.1.0 → v1.1.2 升级记录。
 
 ## 环境信息
 

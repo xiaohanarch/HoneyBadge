@@ -21,7 +21,7 @@ POLL_INTERVAL=2
 MAX_WAIT=600
 ELAPSED=0
 
-TASK_DIR="/root/hiclaw-fs/shared/tasks/$TASK_ID"
+TASK_DIR="/root/agentteams-fs/shared/tasks/$TASK_ID"
 RESULT_JSON="$TASK_DIR/result.json"
 DELIVERED_MARKER="/tmp/.watcher-delivered-$TASK_ID"
 LOCK_FILE="/tmp/.watcher-running-$TASK_ID"

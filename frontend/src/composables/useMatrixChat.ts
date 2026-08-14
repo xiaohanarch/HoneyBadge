@@ -13,7 +13,7 @@ import {
 import type { ChatMessage, ChatSession } from '@/types'
 
 const MANAGER_USER_ID =
-  import.meta.env.VITE_MANAGER_USER_ID || '@manager:matrix-local.hiclaw.io'
+  import.meta.env.VITE_MANAGER_USER_ID || '@manager:matrix-local.agentteams.io'
 
 // Converts a Matrix room message event to a ChatMessage for history restore.
 // Returns null for non-message events, worker progress updates, and empty bodies.

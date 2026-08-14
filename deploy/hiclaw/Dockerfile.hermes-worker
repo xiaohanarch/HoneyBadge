@@ -1,8 +1,8 @@
 # deploy/hiclaw/Dockerfile.hermes-worker
-# HoneyBadge Hermes Worker — extends hiclaw-worker v1.1.2 with hermes-agent
+# HoneyBadge Hermes Worker — extends agentteams-worker v1.2.2 with hermes-agent
 # Built for analytics-worker only; graph-worker continues using the base image.
 
-FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/hiclaw-worker:v1.1.2
+FROM higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-worker:v1.2.2
 
 # Bootstrap pip, then install hermes-agent
 # The base image has Python 3.12 but no pip

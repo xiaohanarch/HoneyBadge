@@ -38,12 +38,12 @@ if [[ -z "$USER_ID" ]] || [[ -z "$RESULT_JSON" ]]; then
     exit 1
 fi
 
-# Tuwunel base URL. Honor HICLAW_MATRIX_URL when set (split topology — Tuwunel
+# Tuwunel base URL. Honor AGENTTEAMS_MATRIX_URL when set (split topology — Tuwunel
 # lives in honeybadge-hiclaw-embedded, not the Manager container). Falls back
-# to the matrix-local.hiclaw.io network alias, which resolves correctly in
+# to the matrix-local.agentteams.io network alias, which resolves correctly in
 # both embedded and split deployments.
-TUWUNEL_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
-USER_MXID="@hb-${USER_ID}:matrix-local.hiclaw.io"
+TUWUNEL_URL="${AGENTTEAMS_MATRIX_URL:-http://matrix-local.agentteams.io:6167}"
+USER_MXID="@hb-${USER_ID}:matrix-local.agentteams.io"
 
 # Get Manager's Matrix token
 MANAGER_TOKEN=""
@@ -82,7 +82,7 @@ result_path = os.environ["FF_RESULT_JSON"]
 ngql        = os.environ.get("FF_NGQL", "")
 
 # 1. Look up user's DM room from Manager's m.direct
-mgr_uid = "@manager:matrix-local.hiclaw.io"
+mgr_uid = "@manager:matrix-local.agentteams.io"
 enc_mgr = urllib.parse.quote(mgr_uid, safe="")
 url = f'{tuwunel}/_matrix/client/v3/user/{enc_mgr}/account_data/m.direct'
 req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})

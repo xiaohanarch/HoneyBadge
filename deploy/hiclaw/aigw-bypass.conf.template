@@ -46,7 +46,7 @@ server {
         # Strip any incoming Authorization (worker gateway key) and inject upstream key
         proxy_set_header Authorization "Bearer ${LLM_API_KEY}";
         proxy_set_header Host ${LLM_UPSTREAM_HOST};
-        proxy_set_header User-Agent "honeybadge-dev-bypass/1.1.0";
+        proxy_set_header User-Agent "honeybadge-dev-bypass/1.2.2";
 
         # SNI + cert validation against the real upstream hostname
         proxy_ssl_server_name on;

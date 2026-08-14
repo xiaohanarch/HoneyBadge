@@ -11,7 +11,7 @@ The canonical architecture document is `README.md` (v3.2, written in Chinese). A
 ## Current Status
 
 - **Phase 0 (MVP)**: Complete — single-node Neo4j, OpenClaw agent, cloud LLM API
-- **Phase 1 (Active)**: Infrastructure upgrade — NebulaGraph, HiClaw, Higress gateway, observability stack
+- **Phase 1 (Active)**: Infrastructure upgrade — NebulaGraph, AgentTeams, Higress gateway, observability stack
 
 ## Architecture
 
@@ -20,7 +20,7 @@ The canonical architecture document is `README.md` (v3.2, written in Chinese). A
 Frontend (Vue 3 + matrix-js-sdk)
   → honeybadge-auth (FastAPI :8091, login + per-user Matrix account provisioning)
   → Tuwunel Matrix homeserver (browser-direct DM to @manager)
-  → HiClaw Manager (supervisord container — Tuwunel + MinIO + Higress + Element)
+  → AgentTeams Manager (supervisord container — Tuwunel + MinIO + Higress + Element)
   → Worker pool (graph-worker, analytics-worker)
   → MCP Servers (SSE :8000) → NebulaGraph / PostgreSQL / Redis
 honeybadge-server (FastAPI :8090) handles audit REST + sessions only
@@ -158,7 +158,7 @@ git config core.hooksPath .githooks
 # or:
 bash deploy/hiclaw/install-git-hooks.sh
 ```
-The hook (`.githooks/pre-commit`) blocks CRLF in `*.sh|bash|ngql|cypher|py|yaml|json|env|conf|cfg|dockerfile`, `Dockerfile`, `Makefile`. CRLF in shell scripts silently breaks HiClaw / ConfigMaps in production.
+The hook (`.githooks/pre-commit`) blocks CRLF in `*.sh|bash|ngql|cypher|py|yaml|json|env|conf|cfg|dockerfile`, `Dockerfile`, `Makefile`. CRLF in shell scripts silently breaks AgentTeams / ConfigMaps in production.
 
 ## nGQL / NebulaGraph notes (v3)
 - Comments use `#`, not `--` (SQL syntax fails)
@@ -167,11 +167,13 @@ The hook (`.githooks/pre-commit`) blocks CRLF in `*.sh|bash|ngql|cypher|py|yaml|
 - All schema DDL is `IF NOT EXISTS`, so `init-nebula.sh` is safe to re-run
 
 ## LLM / Higress Gateway gotchas
-- Workers reach the gateway via Docker network alias `aigw-local.hiclaw.io:8080` (NOT `hiclaw-manager:8080`, which Envoy blackholes)
+- Workers reach the gateway via Docker network alias `aigw-local.agentteams.io:8080` (NOT `hiclaw-manager:8080`, which Envoy blackholes)
 - Worker `openclaw.json` `baseUrl` MUST end in `/v1` (OpenAI SDK appends `/chat/completions` directly)
-- Use `HICLAW_LLM_PROVIDER=openai-compat` (idempotent). The built-in `qwen` provider hardcodes `dashscope.aliyuncs.com` and overwrites manual YAML on every restart.
-- `HICLAW_AI_GATEWAY_DOMAIN` (v1.1.0+ name; old v1.0.8 name `HICLAW_AI_GATEWAY_SERVER` removed) must be set, or `manager-openclaw.json.tmpl` generates `baseUrl: http://:8080/v1` (empty host). K8s manifests also need `HICLAW_AI_GATEWAY_URL` (full URL incl. scheme+port) for CRD validation.
-- HiClaw v1.1.2 disabled `observe-recovery` — container recreation **no longer resets** Manager's DM allowlist to `[@admin]`. `init-workers.sh` still patches it on boot as a safety measure, but it is no longer required after every recreation.
+- Use `AGENTTEAMS_LLM_PROVIDER=openai-compat` (idempotent). The built-in `qwen` provider hardcodes `dashscope.aliyuncs.com` and overwrites manual YAML on every restart.
+- `AGENTTEAMS_AI_GATEWAY_DOMAIN` must be set, or `manager-openclaw.json.tmpl` generates `baseUrl: http://:8080/v1` (empty host). K8s manifests also need `AGENTTEAMS_AI_GATEWAY_URL` (full URL incl. scheme+port) for CRD validation.
+- AgentTeams v1.2.2 disabled `observe-recovery` — container recreation **no longer resets** Manager's DM allowlist to `[@admin]`. `init-workers.sh` still patches it on boot as a safety measure, but it is no longer required after every recreation.
+- AgentTeams v1.2.2 defaults to QwenPaw 2.0 runtime (`AGENTTEAMS_MANAGER_RUNTIME=qwenpaw`). QwenPaw reads `openclaw.json` via a Python bridge — the config injection chain is preserved.
+- Higress-controller still segfaults on WSL2 (exit 139). The `hiclaw-aigw-bypass` nginx sidecar handles `/v1/*` instead. This is a WSL2-only issue; production k3s uses real Higress.
 
 ## Language
 

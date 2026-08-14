@@ -10,7 +10,7 @@
 #   echo "$SUMMARY" | bash forward-to-user.sh --task-id task-XXX --content -
 #
 # Reads:
-#   /root/hiclaw-fs/shared/tasks/$TASK_ID/meta.json    — user_room_id / user_mxid
+#   /root/agentteams-fs/shared/tasks/$TASK_ID/meta.json    — user_room_id / user_mxid
 #   Manager's Matrix token                             — from openclaw.json
 #
 # Outputs (stdout):
@@ -53,12 +53,12 @@ if [ -z "$CONTENT" ]; then
     exit 1
 fi
 
-META_PATH="/root/hiclaw-fs/shared/tasks/$TASK_ID/meta.json"
-# Tuwunel base URL. Honor HICLAW_MATRIX_URL when set (split topology — Tuwunel
+META_PATH="/root/agentteams-fs/shared/tasks/$TASK_ID/meta.json"
+# Tuwunel base URL. Honor AGENTTEAMS_MATRIX_URL when set (split topology — Tuwunel
 # lives in honeybadge-hiclaw-embedded, not the Manager container). Falls back
-# to the matrix-local.hiclaw.io network alias, which resolves correctly in
+# to the matrix-local.agentteams.io network alias, which resolves correctly in
 # both embedded and split deployments.
-TUWUNEL_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
+TUWUNEL_URL="${AGENTTEAMS_MATRIX_URL:-http://matrix-local.agentteams.io:6167}"
 
 # 1. Look up user_room_id (and user_mxid) from task meta.json
 if [ ! -f "$META_PATH" ]; then
@@ -134,7 +134,7 @@ import json, urllib.request, urllib.parse, os, sys
 token  = os.environ["FB_TOKEN"]
 base   = os.environ["FB_TUWUNEL"]
 target = os.environ["FB_USER_MXID"]
-mgr    = "@manager:matrix-local.hiclaw.io"
+mgr    = "@manager:matrix-local.agentteams.io"
 
 def api(path):
     req = urllib.request.Request(

@@ -17,7 +17,7 @@ _INSECURE_JWT_DEFAULTS = frozenset({
     "honeybadge-dev-secret-change-in-prod",
 })
 _INSECURE_NEBULA_DEFAULTS = frozenset({"nebula", ""})
-_INSECURE_HICLAW_DEFAULTS = frozenset({"admin1234", "hiclaw-manager-password-dev", ""})
+_INSECURE_AGENTTEAMS_DEFAULTS = frozenset({"admin1234", "hiclaw-manager-password-dev", ""})
 
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:3000",
@@ -100,7 +100,7 @@ class ServerConfig:
     # Reserved URLs (HiClaw / Matrix Room integration, Phase 2+)
     # -------------------------------------------------------------------------
     matrix_url: str = field(default="")
-    hiclaw_manager_url: str = field(default="")
+    agentteams_manager_url: str = field(default="")
 
     # -------------------------------------------------------------------------
     # CORS (allowed origins for browser requests)
@@ -156,7 +156,7 @@ class ServerConfig:
             milvus_port=int(os.environ.get("MILVUS_PORT", "19530")),
             # Reserved URLs
             matrix_url=os.environ.get("MATRIX_URL", ""),
-            hiclaw_manager_url=os.environ.get("HICLAW_MANAGER_URL", ""),
+            agentteams_manager_url=os.environ.get("AGENTTEAMS_MANAGER_URL", ""),
             # CORS
             cors_origins=_parse_cors_origins(
                 os.environ.get("HONEYBADGE_CORS_ORIGINS", "")

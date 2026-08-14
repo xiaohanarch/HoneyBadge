@@ -5,7 +5,7 @@
 #   bash /opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts/dispatch-to-worker.sh \
 #     --worker graph-worker \
 #     --task-id task-20260417-143052 \
-#     --message "@graph-worker:matrix-local.hiclaw.io Task task-20260417-143052: ..."
+#     --message "@graph-worker:matrix-local.agentteams.io Task task-20260417-143052: ..."
 #
 # Reads:
 #   ~/workers-registry.json    — worker room_id lookup
@@ -53,7 +53,7 @@ if [[ "$USER_ID" == "manager" || -z "$USER_ID" ]]; then
             USER_ID="$RECOVERED_ID"
             # Also fix --user-mxid so meta.json has the correct user_mxid
             if [[ -z "$USER_MXID" || "$USER_MXID" == *"@hb-manager:"* ]]; then
-                MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
+                MATRIX_DOMAIN="${AGENTTEAMS_MATRIX_DOMAIN:-matrix-local.agentteams.io}"
                 USER_MXID="@hb-${USER_ID}:${MATRIX_DOMAIN}"
             fi
         fi
@@ -61,11 +61,11 @@ if [[ "$USER_ID" == "manager" || -z "$USER_ID" ]]; then
 fi
 
 REGISTRY="$HOME/workers-registry.json"
-# Tuwunel base URL. Honor HICLAW_MATRIX_URL when set (split topology — Tuwunel
+# Tuwunel base URL. Honor AGENTTEAMS_MATRIX_URL when set (split topology — Tuwunel
 # lives in honeybadge-hiclaw-embedded, not the Manager container). Falls back
-# to the matrix-local.hiclaw.io network alias, which resolves correctly in
+# to the matrix-local.agentteams.io network alias, which resolves correctly in
 # both embedded and split deployments.
-TUWUNEL_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
+TUWUNEL_URL="${AGENTTEAMS_MATRIX_URL:-http://matrix-local.agentteams.io:6167}"
 
 # 1. Look up worker room_id from registry
 if [ ! -f "$REGISTRY" ]; then
@@ -121,7 +121,7 @@ fi
 #    Also write spec.md with user_id so the Worker can extract it deterministically
 #    (not relying on LLM substitution for L3 permission enforcement).
 if [ -n "$TASK_ID" ] && [ -n "$USER_MXID" ]; then
-    TASK_META_DIR="/root/hiclaw-fs/shared/tasks/$TASK_ID"
+    TASK_META_DIR="/root/agentteams-fs/shared/tasks/$TASK_ID"
     mkdir -p "$TASK_META_DIR"
     python3 -c "
 import json, sys
