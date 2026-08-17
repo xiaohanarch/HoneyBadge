@@ -146,7 +146,7 @@ SPECEOF
 
         # Sync spec.md to MinIO so the Worker can pull it
         mc cp "$TASK_META_DIR/spec.md" \
-            "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/spec.md" 2>/dev/null \
+            "agentteams/agentteams-storage/shared/tasks/$TASK_ID/spec.md" 2>/dev/null \
             || echo "SPEC_MINIO_SYNC_FAILED (continuing)" >&2
 
         # Write conversation history for multi-turn context (worker-dispatch path).
@@ -158,7 +158,7 @@ SPECEOF
                 > "$TASK_META_DIR/history.json" 2>/dev/null \
                 || echo '[]' > "$TASK_META_DIR/history.json"
             mc cp "$TASK_META_DIR/history.json" \
-                "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/history.json" 2>/dev/null \
+                "agentteams/agentteams-storage/shared/tasks/$TASK_ID/history.json" 2>/dev/null \
                 || echo "HISTORY_MINIO_SYNC_FAILED (continuing)" >&2
         fi
     fi

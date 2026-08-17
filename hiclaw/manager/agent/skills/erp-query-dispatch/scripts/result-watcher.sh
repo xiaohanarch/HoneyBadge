@@ -56,7 +56,7 @@ while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
 
     # Sync task directory from MinIO
     mkdir -p "$TASK_DIR"
-    mc mirror "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/" "$TASK_DIR/" \
+    mc mirror "agentteams/agentteams-storage/shared/tasks/$TASK_ID/" "$TASK_DIR/" \
         --overwrite 2>/dev/null || true
 
     if [ -f "$RESULT_JSON" ]; then
