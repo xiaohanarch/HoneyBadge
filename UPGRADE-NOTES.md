@@ -58,6 +58,82 @@ inactive, LLM_PROVIDER + allowlist patch still needed for OpenClaw).
 - Zero `HICLAW_` / `hiclaw.io` / `hiclaw-fs` in docker-compose scope
 - Auth/API/Frontend/MinIO health checks passing
 
+### Phase 1 — Image + env + domain rename ✅ Complete (2026-08-14 + 2026-08-17 follow-ups)
+
+All 10 steps done. Runtime scope (docker-compose + agent docs + skill scripts + Python +
+frontend + tests) has zero `HICLAW_` / `hiclaw.io` / `hiclaw-fs` / `hiclaw-storage` /
+`/opt/hiclaw/` residuals. Verified via grep across `hiclaw/`, `deploy/docker/`,
+`deploy/hiclaw/`, `src/`, `frontend/`, `tests/`.
+
+Commits:
+- `2f27794` (2026-08-14) — main rename: docker-compose, 4 Dockerfiles, 8 bootstrap
+  scripts, auth_service/main.py + google_oauth.py, server/config.py, frontend
+  useMatrixChat.ts, CLAUDE.md, README.md (32 files, +995/-363).
+- `e422f50` (2026-08-17 follow-up) — runtime agent docs + skill scripts missed by
+  2f27794: Manager/Worker `SOUL.md`/`AGENTS.md`/`SKILL.md` (8 files),
+  `dispatch-to-worker.sh` + `result-watcher.sh` MinIO path, root `.env.example`.
+  **Critical fix**: the two skill scripts still referenced `hiclaw/hiclaw-storage`
+  MinIO alias+bucket after the bucket was renamed to `agentteams-storage`. With
+  `2>/dev/null` graceful degradation in both scripts, task `spec.md` /
+  `history.json` / `result.json` MinIO sync would silently fail — Workers could
+  not pull the spec and could not execute delegated tasks.
+- `cb3fd62` (2026-08-17 follow-up) — regression fix: commit 2f27794 renamed
+  `ServerConfig.hiclaw_manager_url` → `agentteams_manager_url` and env var
+  `HICLAW_MANAGER_URL` → `AGENTTEAMS_MANAGER_URL`, but
+  `tests/test_server_config.py` still asserted on the old field name
+  (AttributeError: 'ServerConfig' object has no attribute 'hiclaw_manager_url')
+  and set the old env var. Also README §env-var example still used `HICLAW_*`
+  and CLAUDE.md incorrectly claimed QwenPaw 2.0 defaults to working.
+
+Static verification (2026-08-17):
+- `pytest tests/` — 687 passed, 13 skipped, 0 failed
+- `ruff check src tests` — clean
+- `mypy src` — 70 source files, no issues
+- `bash -n` on 4 affected shell scripts — OK
+
+### Phase 3 — Worker + hermes verification ✅ Complete (2026-08-14)
+
+Covered by Verification section above. graph-worker + analytics-worker connected
+to Matrix; 3 MCP servers (nebula/audit/cache) health-checked. Official
+hermes-worker image lacks `hermes-agent` + `pip3` — self-built
+`Dockerfile.hermes-worker` retained (per Phase 0 finding #6).
+
+### Phase 4 — E2E + cleanup 🟡 Partial (2026-08-17)
+
+- **4.1 E2E full regression** — NOT RUN. Requires `docker compose` stack
+  (`./scripts/run-e2e-tests.sh`, 9 groups: auth/chat/session/isolation/
+  permission/antihal/mcp/infra/observability). Static unit tests pass (687)
+  but E2E not executed since the v1.2.2 upgrade.
+- **4.2 Workaround elimination grep** — PASS (runtime scope). Zero `HICLAW_` /
+  `hiclaw.io` / `hiclaw-storage` / `hiclaw-fs` / `/opt/hiclaw/` residuals in
+  `hiclaw/`, `deploy/docker/`, `deploy/hiclaw/`, `src/`, `frontend/`, `tests/`.
+  Intentionally retained:
+  - `deploy/k8s/**` — k8s manifests, out of scope per Summary
+  - `src/honeybadge/metrics/collectors.py` `HICLAW_METRICS` instance +
+    `HiClawMetricsCollector` class — NOT dead code. `__init__` registers 7
+    Prometheus metrics (`honeybadge_hiclaw_*`) with global REGISTRY as a
+    side effect of instantiation. `honeybadge_hiclaw_workers_active` is
+    queried by the `NoActiveWorkers` critical alert in
+    `deploy/observability/prometheus/rules/honeybadge.yml`. The Python
+    instance is never called, but removing it would unregister the metrics
+    and silently break the alert. Metric names still use `hiclaw` prefix;
+    renaming to `agentteams` is a separate breaking change (dashboards +
+    historical data) and out of scope for this upgrade.
+  - `docs/baselines/v1.1.{0,2}/`, `docs/superpowers/{plans,specs}/` —
+    historical snapshots, out of scope
+- **4.3 Docs + commit + PR** — partial. Docs updated (CLAUDE.md, README.md,
+  UPGRADE-NOTES.md). Commits local on `ralph/agentteams-v1.2.2-upgrade`.
+  **PR not pushed** — GitHub PAT in remote URL expired; `gh` keyring token
+  invalid. Needs `gh auth login` or new PAT.
+
+### Remaining Work
+
+| Item | Blocker | Action |
+|------|---------|--------|
+| Phase 4.1 — E2E full regression (9 groups) | `docker compose` stack | local run |
+| Phase 4.3 — push branch + open PR | GitHub PAT expired | `gh auth login` |
+| Phase 2 — QwenPaw switch + 3 workaround removals | upstream manager image missing `/opt/venv/qwenpaw/` + `copaw_worker` | wait for upstream fix |
+
 ---
 
 ## v1.1.0 → v1.1.2 (2026-06-25)
