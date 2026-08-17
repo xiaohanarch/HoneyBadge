@@ -172,7 +172,7 @@ The hook (`.githooks/pre-commit`) blocks CRLF in `*.sh|bash|ngql|cypher|py|yaml|
 - Use `AGENTTEAMS_LLM_PROVIDER=openai-compat` (idempotent). The built-in `qwen` provider hardcodes `dashscope.aliyuncs.com` and overwrites manual YAML on every restart.
 - `AGENTTEAMS_AI_GATEWAY_DOMAIN` must be set, or `manager-openclaw.json.tmpl` generates `baseUrl: http://:8080/v1` (empty host). K8s manifests also need `AGENTTEAMS_AI_GATEWAY_URL` (full URL incl. scheme+port) for CRD validation.
 - AgentTeams v1.2.2 disabled `observe-recovery` — container recreation **no longer resets** Manager's DM allowlist to `[@admin]`. `init-workers.sh` still patches it on boot as a safety measure, but it is no longer required after every recreation.
-- AgentTeams v1.2.2 defaults to QwenPaw 2.0 runtime (`AGENTTEAMS_MANAGER_RUNTIME=qwenpaw`). QwenPaw reads `openclaw.json` via a Python bridge — the config injection chain is preserved.
+- AgentTeams v1.2.2 ships QwenPaw 2.0 runtime (`AGENTTEAMS_MANAGER_RUNTIME=qwenpaw`), but the manager image is missing `/opt/venv/qwenpaw/` + `copaw_worker` module. HoneyBadge runs OpenClaw runtime (`AGENTTEAMS_MANAGER_RUNTIME=openclaw`) — QwenPaw switch is BLOCKED until upstream ships a fixed image. See `UPGRADE-NOTES.md` § Phase 2.
 - Higress-controller still segfaults on WSL2 (exit 139). The `hiclaw-aigw-bypass` nginx sidecar handles `/v1/*` instead. This is a WSL2-only issue; production k3s uses real Higress.
 
 ## Language

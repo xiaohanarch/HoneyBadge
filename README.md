@@ -1600,10 +1600,10 @@ PG_DB=honeybadge_audit
 REDIS_PASSWORD=redis123
 
 # ============ AgentTeams Manager ============
-HICLAW_ADMIN_USER=admin
-HICLAW_ADMIN_PASSWORD=admin1234       # MinIO 要求 >= 8 字符
-HICLAW_REGISTRATION_TOKEN=honeybadge-reg-token
-HICLAW_AI_GATEWAY_DOMAIN=aigw-local.hiclaw.io
+AGENTTEAMS_ADMIN_USER=admin
+AGENTTEAMS_ADMIN_PASSWORD=admin1234       # MinIO 要求 >= 8 字符
+AGENTTEAMS_REGISTRATION_TOKEN=honeybadge-reg-token
+AGENTTEAMS_AI_GATEWAY_DOMAIN=aigw-local.agentteams.io
 
 # ============ Auth（生产环境必须修改）============
 MATRIX_USER_SECRET=hb-user-secret-dev    # 用于派生用户 Matrix 密码
