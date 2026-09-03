@@ -26,6 +26,20 @@ COMPOSE_FILE="deploy/docker/docker-compose.yaml"
 ENV_FILE="deploy/docker/.env"
 TIMEOUT_SECONDS=300
 
+# Compose CLI detection: after WSL2 engine crashes the `docker compose` plugin
+# registration breaks and every call dies with "unknown shorthand flag: 'f'
+# in -f" — exactly when the failure-path debug gathering needs to work. Probe
+# once and fall back to the cli-plugins binary (Git Bash path) or a bare
+# docker-compose (Linux/CI).
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE_CMD=(docker compose)
+elif [ -x "/c/Program Files/Docker/Docker/resources/cli-plugins/docker-compose.exe" ]; then
+  COMPOSE_CMD=("/c/Program Files/Docker/Docker/resources/cli-plugins/docker-compose.exe")
+  echo -e "${YELLOW}[WARNING]${NC} docker compose plugin not registered — using cli-plugins binary directly"
+else
+  COMPOSE_CMD=(docker-compose)
+fi
+
 # Parse arguments
 FILTER=""
 SMOKE=false
@@ -142,11 +156,11 @@ setup_infrastructure() {
 
   # Start core services
   log_info "Starting core services..."
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+  "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
 
   # Start observability stack
   log_info "Starting observability stack..."
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" --profile observability up -d
+  "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" --profile observability up -d
 
   # Wait for core services
   log_info "Waiting for services to be healthy..."
@@ -168,7 +182,7 @@ setup_infrastructure() {
 
   # Restart workers
   log_info "Restarting workers..."
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart hiclaw-graph-worker hiclaw-analytics-worker
+  "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart hiclaw-graph-worker hiclaw-analytics-worker
 
   # Wait for workers
   log_info "Waiting for workers to connect..."
@@ -179,7 +193,7 @@ setup_infrastructure() {
   # Show status
   echo ""
   echo "=== Container Status ==="
-  docker compose -f "$COMPOSE_FILE" ps
+  "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" ps
   echo ""
   echo "=== Service URLs ==="
   echo "Frontend:     http://localhost:3000"
@@ -199,7 +213,7 @@ teardown_infrastructure() {
 
   cd "$(dirname "$0")/.."
 
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down
+  "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down
 
   log_success "Infrastructure has been stopped"
 }
@@ -357,7 +371,7 @@ main() {
     log_info "Gathering debug information..."
     echo ""
     echo "=== Recent Container Logs ==="
-    docker compose -f "$COMPOSE_FILE" logs --tail=50
+    "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" logs --tail=50
 
     exit 1
   fi
