@@ -915,6 +915,11 @@ services:
     restart: unless-stopped
     profiles:
       - observability
+    # Host port for tc803/tc808 (Loki readiness + log query). Prometheus
+    # (9090), Grafana (3030) and Alertmanager (9093) already expose theirs —
+    # without this the two Loki tests skip forever even with the profile up.
+    ports:
+      - "3100:3100"
     command: -config.file=/etc/loki/loki-config.yaml
     volumes:
       - ../observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
