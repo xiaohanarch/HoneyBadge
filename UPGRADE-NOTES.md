@@ -152,6 +152,15 @@ fixed before the chat E2E could pass:
    the manager's gateway connection. Deleted both + `docker restart` →
    `[matrix] connected to gateway`. Manager workspace is ephemeral (overlay
    FS), so recreation can re-poison; `init-workers.sh` cleanup TODO remains.
+   **TODO CLOSED (2026-09-03) — obsolete in v1.2.2**: the
+   `devices/{paired,pending}.json` approval flow no longer exists upstream;
+   the running v1.2.2 manager has no `devices/` dir at all — device identity
+   is a plain keypair at `.openclaw/identity/device.json` (verified live).
+   `/root/manager-workspace` sits on no volume (ephemeral overlay), so every
+   container recreation starts with a fresh identity and re-pairs cleanly —
+   exactly what the v1.2.2 upgrade recreation demonstrated. No cleanup code
+   added on purpose (a `rm` for a directory that no longer exists would be
+   cargo-cult).
 3. **Stale Python images (root cause of chat timeouts)**: all 5 Python
    service images were Jun/Apr builds with `@manager:matrix-local.hiclaw.io`
    baked in (pre-rename). `honeybadge-auth` reused a DM room whose only
@@ -558,6 +567,55 @@ fixed before the chat E2E could pass:
       passthrough made this a live vector. New shared
       `frontend/src/utils/markdown.ts` runs DOMPurify (3.4.14) over the
       marked output; `vue-tsc` + build pass.
+
+23. **Round-2 audit fixes (2026-09-03)**:
+    - **`TUWUNEL_URL` default was stale** in `auth_service/main.py`
+      (`http://hiclaw-manager:6167` — the v1.1.2 embedded host) →
+      `http://matrix-local.agentteams.io:6167`, matching the compose value
+      (only mattered when the env var was unset).
+    - **Item 2 devices-pairing TODO closed as obsolete**: the v1.1.2
+      `devices/{paired,pending}.json` approval flow no longer exists in
+      v1.2.2 — device identity is a plain keypair at
+      `.openclaw/identity/device.json` and `/root/manager-workspace` sits
+      on no volume, so every recreation re-pairs cleanly. No cleanup code
+      added on purpose.
+    - **Loki was unreachable from the host** (tc803/tc808 skipped forever):
+      the compose Loki service had no `ports:` — unlike Prometheus/Grafana/
+      Alertmanager. Exposed `3100:3100`; observability group now runs
+      **9 passed / 2 skipped** (tc807 WSL2 Higress, tc810 product gap).
+    - **tc807 hardened** like tc705: catches `httpx.TransportError` (the
+      WSL2 port-18080 dead listener raises `RemoteProtocolError`, not
+      `ConnectError`) and skips only when the aigw-bypass sidecar is up.
+    - **Dead scripts deleted** (pre-Tuwunel era / superseded / scratch):
+      `deploy/docker/init-matrix.sh` (Conduit), `deploy/docker/start.sh`,
+      `scripts/update_readme*.py`, `scripts/run-e2e-tests.bat`,
+      `tests/e2e/debug_tc105.py`.
+    - **ECS diagnostic workflows made version-agnostic**: the TC-102 greps
+      in diagnose-ecs.yml / redeploy-ecs.yml now also match
+      `AGENTTEAMS_MATRIX_URL` / `AGENTTEAMS_*` env vars (additive — works
+      for the v1.1.2 cluster today and v1.2.2 after redeploy).
+    - **Stale READMEs refreshed**: `deploy/docker/README.md` (compose v2
+      syntax + env-file, real services table incl. Tuwunel :7167, AgentTeams
+      v1.2.2 topology + registry image tags) and `tests/e2e/README.md`
+      (test_10/test_11 rows, 130 total, marker table incl. context/routing/
+      smoke/requires_llm, .bat reference removed).
+    - **`run_pipeline.py` P2 TODO assessed, not implemented**: alerting here
+      is pull-based by design (Prometheus rules + Alertmanager); receivers
+      are still placeholder templates. Comment now documents the intended
+      Phase-2 path (quarantine gauge in ETLMetricsCollector +
+      ETLQuarantineHigh rule, mirroring ETLStale/ETLLagHigh).
+    - **MinIO 1.0 GiB cache junk root-caused and pruned**: the v1.2.2
+      manager image seeded `.codex/tmp/arg0/` (4 × 163 MiB codex binary
+      copies) + `.npm/_cacache` into `/root/manager-workspace/`, which
+      `start-manager-agent.sh` mirrors to MinIO `manager/` (initial push +
+      change-triggered) and pulls into `agentteams-fs/` at boot — three
+      copies of ~1 GiB. One-off deletes were re-uploaded twice before the
+      source-first order was found. New **Step 5** in
+      `manager-init-internal.sh` prunes all three (source → mirror →
+      bucket, with settle-poll + retry). Bucket: **1.1 GiB/1075 objects →
+      37 MiB/750 objects**; verified stable across two manager restarts,
+      login + Tuwunel healthy throughout. Also propagates to k8s via the
+      `hiclaw-init-scripts` ConfigMap on next `apply -k`.
 
 
 Also fixed a pre-existing quoting bug in `scripts/run-e2e-tests.sh:138`

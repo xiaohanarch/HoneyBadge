@@ -482,7 +482,14 @@ class ETLPipelineRunner:
                         quarantined=summary.quarantined,
                         threshold=self.config.quarantine_threshold,
                     )
-                    # TODO: Trigger P2 alert
+                    # TODO(Phase 2): Trigger P2 alert. This codebase alerts
+                    # pull-based (Prometheus rules + Alertmanager routing) —
+                    # do NOT push from here. When a real receiver exists, add
+                    # a `honeybadge_etl_quarantined_records` gauge to
+                    # ETLMetricsCollector (src/honeybadge/metrics/collectors.py)
+                    # plus an ETLQuarantineHigh rule in
+                    # deploy/observability/prometheus/rules/honeybadge.yml,
+                    # mirroring the existing ETLStale/ETLLagHigh rules.
 
             self.state.total_records = total_passed + total_failed + total_quarantined
             self.state.passed_records = total_passed

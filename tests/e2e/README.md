@@ -1,6 +1,6 @@
 # HoneyBadge E2E Test Suite
 
-自动化端到端测试套件，覆盖认证、聊天、会话管理、用户隔离、权限系统、反幻觉框架、MCP服务、基础设施和可观测性。
+自动化端到端测试套件，覆盖认证、聊天、会话管理、用户隔离、权限系统、反幻觉框架、MCP服务、基础设施、可观测性、上下文记忆与工作者路由。
 
 ## 测试覆盖
 
@@ -15,8 +15,10 @@
 | `test_07_mcp.py` | TC-601 ~ TC-608 | MCP 服务健康检查 |
 | `test_08_infra.py` | TC-701 ~ TC-712 | 基础设施健康检查 |
 | `test_09_observability.py` | TC-801 ~ TC-811 | 可观测性栈 (Prometheus/Grafana/Loki) |
+| `test_10_context_and_memory.py` | TC-1001 ~ TC-1010 | 上下文连续性与记忆（跨会话/跨用户隔离） |
+| `test_11_worker_routing.py` | TC-1101 ~ TC-1106 | 工作者路由 (graph-worker / analytics-worker / Manager) |
 
-**总计: 85+ 测试用例**
+**总计: 130 测试用例**（`pytest -c pytest.ini --collect-only -q`）
 
 ## 本地运行
 
@@ -37,12 +39,11 @@ docker ps
 ### 运行所有测试
 
 ```bash
-# Linux/macOS
+# Linux/macOS/Windows (Git Bash or WSL)
 ./scripts/run-e2e-tests.sh
-
-# Windows
-.\scripts\run-e2e-tests.bat
 ```
+
+Windows 没有独立的 `.bat` 包装脚本 — 用 Git Bash / WSL 运行上面的 shell 脚本，或直接用 pytest（见下）。
 
 ### 运行特定测试
 
@@ -56,9 +57,12 @@ pytest tests/e2e/test_01_auth.py -v
 pytest tests/e2e/test_02_chat.py tests/e2e/test_03_session.py -v
 
 # 使用脚本
-./scripts/run-e2e-tests.sh --filter auth    # 仅认证测试
-./scripts/run-e2e-tests.sh --filter chat   # 仅聊天测试
-./scripts/run-e2e-tests.sh --filter infra   # 仅基础设施测试
+./scripts/run-e2e-tests.sh --filter auth      # 仅认证测试
+./scripts/run-e2e-tests.sh --filter chat     # 仅聊天测试
+./scripts/run-e2e-tests.sh --filter infra     # 仅基础设施测试
+./scripts/run-e2e-tests.sh --filter context   # 仅上下文/记忆测试
+./scripts/run-e2e-tests.sh --filter routing   # 仅工作者路由测试
+./scripts/run-e2e-tests.sh --smoke            # 关键路径冒烟子集（~15 分钟）
 ```
 
 ### 仅启动/停止基础设施
@@ -109,6 +113,7 @@ E2E 测试在以下情况自动运行:
 | 标记 | 说明 |
 |-----|------|
 | `e2e` | 所有 E2E 测试 |
+| `smoke` | 关键路径冒烟子集（~15 分钟） |
 | `auth` | 认证相关测试 |
 | `chat` | 聊天功能测试 |
 | `session` | 会话管理测试 |
@@ -118,7 +123,14 @@ E2E 测试在以下情况自动运行:
 | `mcp` | MCP 服务测试 |
 | `infra` | 基础设施测试 |
 | `observability` | 可观测性测试 |
+| `context` | 上下文连续性与记忆测试 (test_10) |
+| `routing` | 工作者路由测试 (test_11) |
+| `requires_llm` | 需要真实 LLM API Key（未设置 `LLM_API_KEY` 时自动跳过） |
 | `slow` | 慢速测试 |
+
+标记在 `pytest.ini` 中统一注册（`--strict-markers`）。除 auth / infra /
+observability 外的分组大多同时标记 `requires_llm` — CI 中未配置
+`LLM_API_KEY` 的阶段会自动跳过这些用例。
 
 ## 调试
 
