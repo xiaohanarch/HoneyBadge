@@ -88,7 +88,10 @@ services:
       - USER=root
       - TZ=Asia/Shanghai
     volumes:
-      - ./data/storaged:/data/storage
+      # Named volume (NOT a ./data bind mount): WAL replay of ~1GB through the
+      # Windows bind-mount bridge took ~2h per engine crash; on the ext4-backed
+      # named volume it replays in minutes. See UPGRADE-NOTES item 18.
+      - storaged_data:/data/storage
       - ./logs/storaged:/logs
       - ./nebula-storaged.conf:/usr/local/nebula/etc/nebula-storaged.conf:ro
     command:
@@ -113,6 +116,12 @@ services:
     container_name: honeybadge-nebula-graphd
     hostname: nebula-graphd
     restart: unless-stopped
+    # Memory guardrail: graphd's healthy footprint on the seed dataset is
+    # single-digit MB, but under the E2E chat load on 2026-09-02 it ballooned
+    # to 7.2GiB in ~30s, which killed the WSL2 engine (see UPGRADE-NOTES
+    # item 20). The cap makes graphd OOM-restart itself instead of taking
+    # down the whole VM on 16GB dev machines.
+    mem_limit: 2g
     ports:
       - "9669:9669"      # Graph service port (main client connection)
       - "19669:19669"    # Graph HTTP status port
@@ -389,11 +398,11 @@ services:
       - AGENTTEAMS_LLM_API_KEY=${LLM_API_KEY}
       # Use openai-compat provider instead of built-in qwen.
       # Built-in qwen type hardcodes dashscope.aliyuncs.com (standard API, no /v1 path).
-      # openai-compat uses AGENTTEAMS_OPENAI_BASE_URL, allowing us to specify
-      # coding.dashscope.aliyuncs.com (OpenAI-compatible endpoint at /v1/).
+      # openai-compat uses AGENTTEAMS_OPENAI_BASE_URL, allowing us to point at any
+      # OpenAI-compatible endpoint (must expose /v1/chat/completions).
       # This is idempotent: setup-higress.sh does PUT on existing service sources.
       - AGENTTEAMS_LLM_PROVIDER=openai-compat
-      - AGENTTEAMS_OPENAI_BASE_URL=https://coding.dashscope.aliyuncs.com/v1
+      - AGENTTEAMS_OPENAI_BASE_URL=${AGENTTEAMS_OPENAI_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
       # AI Gateway template variables (v1.1.0 renames):
       #   AGENTTEAMS_AI_GATEWAY_SERVER (v1.0.8) → AGENTTEAMS_AI_GATEWAY_DOMAIN (template) +
       #   AGENTTEAMS_AI_GATEWAY_URL (k8s validation, full URL)
@@ -464,6 +473,11 @@ services:
       - TZ=Asia/Shanghai
     volumes:
       - ../hiclaw/worker-init-wrapper.sh:/opt/honeybadge/init/worker-init-wrapper.sh:ro
+      # HoneyBadge patch: deep-merge gateway in merge-openclaw-config.sh — the
+      # upstream v1.2.2 wholesale-replace makes every 5-min MinIO fallback pull
+      # flip gateway.controlUi and SIGUSR1-restart the gateway, killing
+      # in-flight runs (>5 min queries) and interrupting Matrix reply delivery.
+      - ../hiclaw/merge-openclaw-config.sh:/opt/agentteams/scripts/lib/merge-openclaw-config.sh:ro
     networks:
       - honeybadge-net
     depends_on:
@@ -986,6 +1000,9 @@ networks:
     name: honeybadge-network
 
 volumes:
+  storaged_data:
+    name: honeybadge-storaged-data               # Nebula storaged data — ext4 volume for fast WAL replay (was ./data/storaged bind mount)
+
   redis_data:
     name: honeybadge-redis-data
 

@@ -1,8 +1,14 @@
-"""TDD test: all three MCP servers must use streamable-http transport.
+"""MCP transport consistency tests.
 
-FastMCP >= 2.3.0 required on server side.
-mcporter on worker side must point to /mcp (not /sse).
+Source-side: all three MCP servers call mcp.run(transport="streamable-http").
+
+Runtime reality (verified 2026-09-01): the installed FastMCP 4.0.0 serves the
+classic SSE transport — GET /sse returns 200 and messages POST back to
+/messages/?session_id=... — while /mcp returns 404. The worker-side mcporter
+configs MUST therefore point at /sse; pointing at /mcp 404s every tool call.
+Empirically confirmed by the full chat E2E group (12/12) with /sse configs.
 """
+
 import pathlib
 
 SERVERS = [
@@ -14,14 +20,6 @@ SERVERS = [
 MCPORTER_SCRIPT = "deploy/hiclaw/init-workers.sh"
 
 
-def test_no_server_uses_sse_transport():
-    for rel_path in SERVERS:
-        content = pathlib.Path(rel_path).read_text(encoding="utf-8")
-        assert 'transport="sse"' not in content, (
-            f"{rel_path} still has transport=\"sse\" — change to streamable-http"
-        )
-
-
 def test_all_servers_use_streamable_http():
     for rel_path in SERVERS:
         content = pathlib.Path(rel_path).read_text(encoding="utf-8")
@@ -30,11 +28,11 @@ def test_all_servers_use_streamable_http():
         )
 
 
-def test_mcporter_init_script_uses_mcp_path():
+def test_mcporter_init_script_uses_sse_path():
     content = pathlib.Path(MCPORTER_SCRIPT).read_text(encoding="utf-8")
-    assert "honeybadge-nebula-mcp:8000/mcp" in content
-    assert "honeybadge-audit-mcp:8000/mcp" in content
-    assert "honeybadge-cache-mcp:8000/mcp" in content
-    assert "honeybadge-nebula-mcp:8000/sse" not in content
-    assert "honeybadge-audit-mcp:8000/sse" not in content
-    assert "honeybadge-cache-mcp:8000/sse" not in content
+    assert "honeybadge-nebula-mcp:8000/sse" in content
+    assert "honeybadge-audit-mcp:8000/sse" in content
+    assert "honeybadge-cache-mcp:8000/sse" in content
+    assert "honeybadge-nebula-mcp:8000/mcp" not in content
+    assert "honeybadge-audit-mcp:8000/mcp" not in content
+    assert "honeybadge-cache-mcp:8000/mcp" not in content

@@ -165,6 +165,35 @@ for worker in graph-worker analytics-worker; do
 done
 
 # ---------------------------------------------------------------------------
+# 1c'. Strip gateway.controlUi from worker openclaw.json in MinIO
+#
+#      generate-worker-config.sh emits gateway.controlUi.allowedOrigins, but
+#      the openclaw runtime drops the key again whenever it saves its config.
+#      The workers' 5-minute fallback pull (worker-entrypoint.sh) deep-merges
+#      the MinIO copy over the local one; with controlUi present remotely the
+#      pull re-adds it every cycle, the config watcher sees a gateway.controlUi
+#      change and SIGUSR1-restarts the gateway — killing any in-flight run
+#      longer than ~5 minutes (E2E tc310+ hit this). Stripping the key here
+#      (plus the deep-merge patch mounted over merge-openclaw-config.sh, see
+#      docker-compose.yaml hiclaw-graph-worker volumes) keeps pulls stable.
+#      NOTE: the strip must re-run after every Manager auto-init because the
+#      init regenerates and re-uploads the worker configs.
+# ---------------------------------------------------------------------------
+for worker in graph-worker analytics-worker; do
+    docker exec "$MANAGER_CONTAINER" bash -c '
+        p="agentteams/agentteams-storage/agents/'"${worker}"'/openclaw.json"
+        if mc cat "$p" 2>/dev/null | grep -q controlUi; then
+            mc cat "$p" > /tmp/hb-strip.json 2>/dev/null
+            jq "del(.gateway.controlUi)" /tmp/hb-strip.json > /tmp/hb-strip.new.json \
+                && mc cp /tmp/hb-strip.new.json "$p" >/dev/null \
+                && echo stripped
+        fi
+    ' 2>/dev/null | grep -q stripped \
+        && log "  → ${worker}: gateway.controlUi stripped from MinIO openclaw.json" \
+        || log "  → ${worker}: no gateway.controlUi in MinIO openclaw.json (ok)"
+done
+
+# ---------------------------------------------------------------------------
 # 1d. Inject Manager's custom SOUL.md and AGENTS.md into the Manager container
 #     HiClaw generates default SOUL.md/AGENTS.md with a <!-- hiclaw-builtin-end -->
 #     marker. Our custom routing logic goes AFTER that marker.
@@ -569,11 +598,16 @@ docker exec "$EMBEDDED_CONTAINER" bash -c \
 # ---------------------------------------------------------------------------
 log "Registering MCP servers in workers via mcporter..."
 
-# Map: server-name → streamable-http endpoint inside the Docker network
+# Map: server-name → SSE endpoint inside the Docker network.
+# The MCP containers start via `python -m honeybadge.__main__ <name>-mcp`,
+# which runs FastMCP with transport="sse" — the HTTP endpoint is /sse
+# (server.py's `transport="streamable-http"` block is dead code; the
+# Dockerfile CMD never executes it). Registering /mcp here yields 404s and
+# the workers burn turns repairing mcporter.json mid-query.
 declare -A MCP_SERVERS=(
-    [honeybadge-nebula]="http://honeybadge-nebula-mcp:8000/mcp"
-    [honeybadge-audit]="http://honeybadge-audit-mcp:8000/mcp"
-    [honeybadge-cache]="http://honeybadge-cache-mcp:8000/mcp"
+    [honeybadge-nebula]="http://honeybadge-nebula-mcp:8000/sse"
+    [honeybadge-audit]="http://honeybadge-audit-mcp:8000/sse"
+    [honeybadge-cache]="http://honeybadge-cache-mcp:8000/sse"
 )
 
 for worker in graph-worker analytics-worker; do
@@ -610,16 +644,16 @@ done
 #     the worker config (direct SSE to the MCP containers), we write the
 #     file ourselves and sync to MinIO.
 #
-#     Note: FastMCP exposes /mcp (streamable-http transport) on port 8000.
-#     mcporter detects transport from the URL path.
+#     Note: FastMCP serves /sse (SSE transport) on port 8000 — see the
+#     MCP_SERVERS note above. Keep these URLs in sync with the worker map.
 # ---------------------------------------------------------------------------
-log "Provisioning Manager mcporter.json (streamable-http, unprefixed names)..."
+log "Provisioning Manager mcporter.json (SSE, unprefixed names)..."
 
 MANAGER_MCPORTER_JSON='{
   "mcpServers": {
-    "honeybadge-nebula": { "baseUrl": "http://honeybadge-nebula-mcp:8000/mcp" },
-    "honeybadge-audit":  { "baseUrl": "http://honeybadge-audit-mcp:8000/mcp"  },
-    "honeybadge-cache":  { "baseUrl": "http://honeybadge-cache-mcp:8000/mcp"  }
+    "honeybadge-nebula": { "baseUrl": "http://honeybadge-nebula-mcp:8000/sse" },
+    "honeybadge-audit":  { "baseUrl": "http://honeybadge-audit-mcp:8000/sse"  },
+    "honeybadge-cache":  { "baseUrl": "http://honeybadge-cache-mcp:8000/sse"  }
   }
 }'
 
