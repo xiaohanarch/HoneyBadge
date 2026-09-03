@@ -525,6 +525,40 @@ fixed before the chat E2E could pass:
     1 skipped (tc705 WSL2) / 3.47 s. Rollback = revert the one compose
     volume line (old `./data/metad` bind-mount copy left untouched).
 
+22. **Post-rename CI repair + audit fixes (2026-09-03, from the v1.2.2
+    completeness re-audit)**:
+    - **CI MinIO cleanup silently no-op since the rename**: all 4 inter-stage
+      cleanup blocks + the log-dump `mc du` used the stale
+      `hiclaw/hiclaw-storage` alias/bucket (`|| true` hid the failure) → now
+      `agentteams/agentteams-storage` (verified live; the local bucket had
+      accumulated 1.1 GiB / 1071 objects of task artifacts too).
+    - **CI debug probes were dead**: worker containers are
+      `honeybadge-graph-worker` / `honeybadge-analytics-worker` (compose
+      `container_name:` overrides — not the `honeybadge-hiclaw-*` service
+      names); Manager `state.json` lives at
+      `/root/agentteams-fs/manager/state.json` (not under `agents/`); the
+      hermes `/root/.hermes/logs/*` paths exist on NO container — replaced
+      by an error/exception grep over `/tmp/openclaw/openclaw-*.log`, which
+      immediately surfaces real faults (e.g. the aigw-bypass 502 timeouts).
+    - **`pytest -m <group>` selected zero tests**: pytest.ini registered 9
+      group markers that no test applied, and the conftest copy of the list
+      had diverged. Every e2e file now carries
+      `pytestmark = [pytest.mark.<group>, ...]`; marker registration is
+      consolidated in pytest.ini only (added `context`, `routing`).
+      Verified: auth=8 chat=12 session=8 isolation=15 permission=18
+      antihal=13 mcp=10 infra=13 observability=11 context=10 routing=12
+      smoke=22 — the 11 groups sum to the 130 total, no overlap.
+    - **test_10/test_11 were orphans** (absent from CI and `--filter`):
+      added `context` / `routing` cases to `run-e2e-tests.sh` and a keyed
+      CI stage — worker routing is the core v1.2.2 regression risk.
+    - **tc208 burned an LLM query before skipping**: the export-button probe
+      now runs before `send_chat_query` (export remains a product gap).
+    - **Frontend XSS**: `MarkdownText.vue` / `StreamingText.vue` rendered
+      `marked` v15 output via `v-html` with no sanitizer — L4 raw-data
+      passthrough made this a live vector. New shared
+      `frontend/src/utils/markdown.ts` runs DOMPurify (3.4.14) over the
+      marked output; `vue-tsc` + build pass.
+
 
 Also fixed a pre-existing quoting bug in `scripts/run-e2e-tests.sh:138`
 (`--env-file "$ENV_FILE up -d` missing close-quote, broken since first
