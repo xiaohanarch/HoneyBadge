@@ -27,111 +27,101 @@ BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
 pytestmark = pytest.mark.requires_llm
 
+# The sidebar exposes rename/delete only through the per-session "⋯" dropdown
+# (el-dropdown, teleported to body) followed by an ElMessageBox dialog. There is
+# no direct rename/delete button in the session-item markup.
+
+
+def rename_session_in_ui(page, index: int, new_title: str) -> None:
+    """Rename the index-th sidebar session via ⋯ dropdown → 重命名 → prompt dialog."""
+    page.locator(".session-item .session-actions").nth(index).click()
+    # Element Plus teleports EVERY session's dropdown menu to <body> (hidden
+    # until opened), so ~1 per session matches a plain selector — scope to the
+    # visible one.
+    page.locator('.el-dropdown-menu__item:visible', has_text='重命名').first.click()
+    page.locator(".el-message-box__input input").fill(new_title)
+    page.locator('.el-message-box__btns button:has-text("确定")').first.click()
+    page.wait_for_timeout(500)
+
 
 class TestSessionManagement:
     """Test session management functionality."""
 
+    @pytest.mark.smoke
     def test_tc201_create_named_session(self, admin_logged_in, wait_for_chat_ready):
-        """TC-201: User can create a named session."""
+        """TC-201: User can create a named session.
+
+        The sidebar has no direct "session name" input; a session is named via
+        the ⋯ dropdown → 重命名 prompt after creation.
+        """
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Click new session button
-        new_session_btn = page.locator(NEW_CHAT_BUTTON)
-        if new_session_btn.count() > 0:
-            new_session_btn.first.click()
-            page.wait_for_timeout(500)
-
-        # Find session name input and rename
-        session_name_input = page.locator('input[placeholder*="会话名称"], input[class*="session-name"]')
-        if session_name_input.count() == 0:
-            pytest.skip("Session name input not available in UI")
-        session_name_input.first.fill("Test Session TC-201")
-        session_name_input.first.press("Enter")
+        # Create a fresh session (button text 新对话), newest = index 0
+        page.locator(NEW_CHAT_BUTTON).first.click()
         page.wait_for_timeout(500)
 
-        # Verify session appears in sidebar
-        session_item = page.locator('text="Test Session TC-201"')
-        expect(session_item.first).to_be_visible()
+        rename_session_in_ui(page, 0, "Test Session TC-201")
+        expect(
+            page.locator('.session-title', has_text="Test Session TC-201").first
+        ).to_be_visible()
 
-    def test_tc202_rename_session(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-202: User can rename an existing session."""
+    def test_tc202_rename_session(self, admin_logged_in, wait_for_chat_ready):
+        """TC-202: User can rename an existing session (⋯ dropdown → 重命名).
+
+        Sessions are created via the 新对话 button — rename does not require
+        message content, and this keeps the test off the LLM query path.
+        """
         page = admin_logged_in
         wait_for_chat_ready()
 
-        # Create a session first
-        send_chat_query("查询供应商", timeout=120000)
-        page.wait_for_timeout(1000)
-
-        # Right-click or hover to find rename option
-        session_item = page.locator('.session-item, [class*="session"]').first
-        session_item.hover()
-        page.wait_for_timeout(300)
-
-        # Look for edit/rename button
-        rename_btn = page.locator('[class*="edit"], [class*="rename"], button:has-text("编辑")')
-        if rename_btn.count() == 0:
-            pytest.skip("Rename button not available")
-        rename_btn.first.click()
-        page.wait_for_timeout(300)
-
-        # Clear and enter new name
-        name_input = page.locator('input[class*="session-name"], input[placeholder*="名称"]')
-        if name_input.count() == 0:
-            pytest.skip("Session name input not found after clicking rename")
-        name_input.first.fill("Renamed Session TC-202")
-        name_input.first.press("Enter")
+        # Create a session (newest = index 0)
+        page.locator(NEW_CHAT_BUTTON).first.click()
         page.wait_for_timeout(500)
 
-        # Verify new name
-        expect(page.locator('text="Renamed Session TC-202"').first).to_be_visible()
+        rename_session_in_ui(page, 0, "Renamed Session TC-202")
+        expect(
+            page.locator('.session-title', has_text="Renamed Session TC-202").first
+        ).to_be_visible()
 
-    def test_tc203_delete_session(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
-        """TC-203: User can delete a session."""
+    def test_tc203_delete_session(self, admin_logged_in, wait_for_chat_ready):
+        """TC-203: User can delete a session (⋯ dropdown → 删除 → confirm dialog).
+
+        Sessions are created via the 新对话 button — delete does not require
+        message content, and this keeps the test off the LLM query path.
+        """
         page = admin_logged_in
         wait_for_chat_ready()
 
         # Create a session to delete
-        send_chat_query("查询采购订单", timeout=120000)
-        page.wait_for_timeout(1000)
-
-        # Find the session in sidebar
-        initial_count = page.locator(SESSION_ITEM).count()
-
-        # Find delete button (may require hover or context menu)
-        delete_btn = page.locator('[class*="delete"], button:has-text("删除")')
-        if delete_btn.count() == 0:
-            pytest.skip("Delete button not available")
-        delete_btn.first.click()
+        page.locator(NEW_CHAT_BUTTON).first.click()
         page.wait_for_timeout(500)
 
-        # Confirm deletion if dialog appears
-        confirm_btn = page.locator('button:has-text("确认"), button:has-text("Confirm")')
-        if confirm_btn.count() > 0:
-            confirm_btn.first.click()
-            page.wait_for_timeout(500)
+        initial_count = page.locator(SESSION_ITEM).count()
+
+        page.locator(".session-item .session-actions").first.click()
+        page.locator('.el-dropdown-menu__item:visible', has_text='删除').first.click()
+        # Confirm deletion dialog
+        page.locator('.el-message-box__btns button:has-text("确定")').first.click()
+        page.wait_for_timeout(500)
 
         # Verify session count decreased
         new_count = page.locator(SESSION_ITEM).count()
         assert new_count < initial_count, f"Expected session count to decrease. Before: {initial_count}, After: {new_count}"
 
-    @pytest.mark.timeout(720)
-    def test_tc204_list_sessions(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
+    def test_tc204_list_sessions(self, admin_logged_in, wait_for_chat_ready):
         """TC-204: Sessions are listed in sidebar.
 
-        720s timeout: 3 sequential LLM queries (~3 min each via glm-5.2 +
-        MCP round-trips) cumulatively exceed the global 300s budget.
+        Sessions are created via the 新对话 button — listing does not require
+        message content, and this keeps the test off the LLM query path (3
+        sequential queries previously blew the per-test timeout budget).
         """
         page = admin_logged_in
         wait_for_chat_ready()
 
         # Create multiple sessions
-        for i in range(3):
-            new_session_btn = page.locator(NEW_CHAT_BUTTON)
-            if new_session_btn.count() > 0:
-                new_session_btn.first.click()
-                page.wait_for_timeout(500)
-            send_chat_query(f"查询供应商 {i}", timeout=120000)
+        for _ in range(3):
+            page.locator(NEW_CHAT_BUTTON).first.click()
             page.wait_for_timeout(500)
 
         # Verify session list in sidebar

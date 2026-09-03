@@ -72,6 +72,7 @@ class TestAntiHallucination:
         assert result["data_row_count"] == 0 or "不存在" in result["text"] or "无" in result["text"] or "没有" in result["text"] or "错误" in result["text"], \
             f"Expected no data or error indication for non-existent schema, got {result['data_row_count']} rows: {result['text'][:100]}"
 
+    @pytest.mark.smoke
     def test_tc503_l3_permission_filters_in_cypher(self, analyst_logged_in, wait_for_chat_ready, send_chat_query, expand_cypher_block):
         """TC-503: L3 - Generated Cypher includes permission/org filters for non-admin user."""
         page = analyst_logged_in

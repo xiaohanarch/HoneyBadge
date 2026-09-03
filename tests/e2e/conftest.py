@@ -29,18 +29,22 @@ from tests.e2e.selectors import (
 MANAGER_CONTAINER = "honeybadge-hiclaw-manager"
 GRAPH_WORKER_CONTAINER = "honeybadge-graph-worker"
 ANALYTICS_WORKER_CONTAINER = "honeybadge-analytics-worker"
-# Manager lives under /root/manager-workspace; workers (hiclaw-worker image)
-# live under /root/.openclaw.  Both share the same internal layout.
+# Manager lives under /root/manager-workspace; graph-worker (openclaw image)
+# lives under /root/.openclaw.  analytics-worker runs hermes-agent, which
+# keeps transcripts under /root/.hermes/sessions and has no sessions.json.
 MANAGER_SESSION_DIR = "/root/manager-workspace/.openclaw/agents/main/sessions"
 WORKER_SESSION_DIR = "/root/.openclaw/agents/main/sessions"
+ANALYTICS_WORKER_SESSION_DIR = "/root/.hermes/sessions"
 
 
-def _reset_openclaw_sessions(container, session_dir):
-    """Clear OpenClaw session transcripts in a container and restart it.
+def _reset_openclaw_sessions(container, session_dir, process_pattern="openclaw",
+                             write_store=True):
+    """Clear agent session transcripts in a container and restart it.
 
-    Deletes all *.jsonl transcripts, resets sessions.json to an empty store,
+    Deletes all *.jsonl transcripts, optionally resets sessions.json to an
+    empty store (openclaw runtimes only — hermes keeps no sessions.json),
     and restarts the container so in-memory session caches are freed.  Waits
-    for the openclaw process to come back up.  Used by reset_manager_sessions
+    for the agent process to come back up.  Used by reset_manager_sessions
     for the Manager and both worker containers.
     """
     # 1. Delete session transcript files
@@ -50,12 +54,13 @@ def _reset_openclaw_sessions(container, session_dir):
         capture_output=True, timeout=30,
     )
 
-    # 2. Reset sessions.json to empty
-    subprocess.run(
-        ["docker", "exec", container, "bash", "-c",
-         f'echo "{{}}" > {session_dir}/sessions.json'],
-        capture_output=True, timeout=30,
-    )
+    # 2. Reset sessions.json to empty (openclaw runtimes only)
+    if write_store:
+        subprocess.run(
+            ["docker", "exec", container, "bash", "-c",
+             f'echo "{{}}" > {session_dir}/sessions.json'],
+            capture_output=True, timeout=30,
+        )
 
     # 3. Restart the container
     subprocess.run(
@@ -69,7 +74,7 @@ def _reset_openclaw_sessions(container, session_dir):
     for _ in range(20):
         try:
             result = subprocess.run(
-                ["docker", "exec", container, "pgrep", "-f", "openclaw"],
+                ["docker", "exec", container, "pgrep", "-f", process_pattern],
                 capture_output=True, timeout=15,
             )
             if result.returncode == 0:
@@ -78,7 +83,7 @@ def _reset_openclaw_sessions(container, session_dir):
             pass  # Container still restarting, retry
         time.sleep(2)
     else:
-        print(f"[reset_sessions] WARNING: openclaw process not detected in {container} after 40s")
+        print(f"[reset_sessions] WARNING: {process_pattern} process not detected in {container} after 40s")
 
 
 def _wait_for_manager_ready(max_init_wait=90, retry_restarts=2):
@@ -86,7 +91,7 @@ def _wait_for_manager_ready(max_init_wait=90, retry_restarts=2):
 
     Verifies three readiness signals:
     1. Background init (manager-init-internal.sh) completed — the init log
-       at /var/log/hiclaw/honeybadge-init.log prints "HoneyBadge auto-init
+       at /var/log/agentteams/honeybadge-init.log prints "HoneyBadge auto-init
        complete!" when done. This guarantees the allowlist is patched,
        SOUL.md is injected, and worker configs are synced to MinIO.
     2. First heartbeat run — docker logs show "embedded run start" with
@@ -100,7 +105,7 @@ def _wait_for_manager_ready(max_init_wait=90, retry_restarts=2):
     handles transient failures where the Matrix client or background init
     gets stuck — a fresh restart often resolves the issue.
     """
-    INIT_LOG_PATH = "/var/log/hiclaw/honeybadge-init.log"
+    INIT_LOG_PATH = "/var/log/agentteams/honeybadge-init.log"
     INIT_COMPLETE_MARKER = "HoneyBadge auto-init complete!"
 
     for attempt in range(retry_restarts + 1):
@@ -110,7 +115,7 @@ def _wait_for_manager_ready(max_init_wait=90, retry_restarts=2):
             # Truncate init log before restart so we wait for a fresh marker
             subprocess.run(
                 ["docker", "exec", MANAGER_CONTAINER, "truncate", "-s", "0",
-                 "/var/log/hiclaw/honeybadge-init.log"],
+                 "/var/log/agentteams/honeybadge-init.log"],
                 capture_output=True, timeout=10,
             )
             subprocess.run(
@@ -238,7 +243,7 @@ def reset_manager_sessions():
     #    old marker immediately and proceeds before the new init runs.
     subprocess.run(
         ["docker", "exec", MANAGER_CONTAINER, "truncate", "-s", "0",
-         "/var/log/hiclaw/honeybadge-init.log"],
+         "/var/log/agentteams/honeybadge-init.log"],
         capture_output=True, timeout=10,
     )
     _reset_openclaw_sessions(MANAGER_CONTAINER, MANAGER_SESSION_DIR)
@@ -250,7 +255,10 @@ def reset_manager_sessions():
     #    servers being healthy.  Resetting both workers before tc310-tc314
     #    prevents this pollution from carrying over.
     _reset_openclaw_sessions(GRAPH_WORKER_CONTAINER, WORKER_SESSION_DIR)
-    _reset_openclaw_sessions(ANALYTICS_WORKER_CONTAINER, WORKER_SESSION_DIR)
+    _reset_openclaw_sessions(
+        ANALYTICS_WORKER_CONTAINER, ANALYTICS_WORKER_SESSION_DIR,
+        process_pattern="hermes", write_store=False,
+    )
 
     # 4. Wait for the Manager to be fully ready after restart.
     #    The background init (entrypoint-wrapper.sh → manager-init-internal.sh)

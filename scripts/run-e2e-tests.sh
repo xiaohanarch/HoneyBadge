@@ -5,6 +5,7 @@
 # This script runs E2E tests locally with the same setup as GitHub Actions.
 # Usage:
 #   ./scripts/run-e2e-tests.sh                    # Run all tests
+#   ./scripts/run-e2e-tests.sh --smoke            # Critical-path smoke tier (~15 min)
 #   ./scripts/run-e2e-tests.sh --filter auth      # Run only auth tests
 #   ./scripts/run-e2e-tests.sh --filter chat,session  # Run specific tests
 #   ./scripts/run-e2e-tests.sh --setup-only       # Only start infra, don't run tests
@@ -27,6 +28,7 @@ TIMEOUT_SECONDS=300
 
 # Parse arguments
 FILTER=""
+SMOKE=false
 SETUP_ONLY=false
 TEARDOWN_ONLY=false
 SKIP_SETUP=false
@@ -36,6 +38,10 @@ while [[ $# -gt 0 ]]; do
     --filter)
       FILTER="$2"
       shift 2
+      ;;
+    --smoke)
+      SMOKE=true
+      shift
       ;;
     --setup-only)
       SETUP_ONLY=true
@@ -53,6 +59,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [options]"
       echo ""
       echo "Options:"
+      echo "  --smoke              Run the critical-path smoke tier (~15 min, one sentinel per chain)"
       echo "  --filter <tests>     Run specific test groups (auth,chat,session,isolation,permission,antihal,mcp,infra,observability)"
       echo "  --setup-only         Only start infrastructure, don't run tests"
       echo "  --teardown-only       Only stop infrastructure"
@@ -135,7 +142,7 @@ setup_infrastructure() {
 
   # Start core services
   log_info "Starting core services..."
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE up -d
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
 
   # Start observability stack
   log_info "Starting observability stack..."
@@ -211,8 +218,33 @@ run_tests() {
   export API_BASE_URL="${API_BASE_URL:-http://localhost:8090}"
   export AUTH_BASE_URL="${AUTH_BASE_URL:-http://localhost:8091}"
 
-  # Build pytest command
-  PYTEST_CMD="pytest tests/e2e/ -v --tb=short --timeout=300 -x"
+  # Chat/LLM tests read LLM_API_KEY from the environment; source it from the
+  # compose env file so --smoke is self-contained.
+  if [ -z "$LLM_API_KEY" ] && [ -f "$ENV_FILE" ]; then
+    LLM_API_KEY="$(grep -E '^LLM_API_KEY=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
+    if [ -n "$LLM_API_KEY" ]; then
+      export LLM_API_KEY
+    fi
+  fi
+
+  # Build pytest command. Runner detection: bare `pytest` is not on PATH in
+  # Git Bash on Windows — use the py launcher there, python3 elsewhere.
+  if command -v pytest >/dev/null 2>&1; then
+    PYTEST_RUNNER="pytest"
+  elif command -v py >/dev/null 2>&1; then
+    PYTEST_RUNNER="py -3.12 -m pytest"
+  else
+    PYTEST_RUNNER="python3 -m pytest"
+  fi
+  PYTEST_CMD="$PYTEST_RUNNER tests/e2e/ -v --tb=short --timeout=300 -x"
+
+  # Smoke tier: marker-selected critical path across ALL groups
+  # (tc001 login + tc102 full chat chain + tc201 session + tc408 L3 org filter
+  #  + tc503 L3-in-cypher + tc601 MCP health + all 13 infra checks + tc1101 routing)
+  if [ "$SMOKE" = true ]; then
+    log_info "Running smoke tier (-m smoke)"
+    PYTEST_CMD="$PYTEST_CMD -m smoke"
+  fi
 
   # Add test filter if specified
   if [ -n "$FILTER" ]; then
@@ -292,9 +324,15 @@ main() {
     exit 0
   fi
 
-  # Setup infrastructure unless skipped
-  if [ "$SKIP_SETUP" = false ]; then
+  # Setup infrastructure unless skipped.
+  # Smoke runs skip setup by default: they target an already-running dev
+  # stack, and setup (worker restarts + seeding) costs minutes and disrupts
+  # the very stack the smoke tier is meant to check. Pass --setup-only first
+  # if you need a cold bring-up.
+  if [ "$SKIP_SETUP" = false ] && [ "$SMOKE" = false ]; then
     setup_infrastructure
+  elif [ "$SMOKE" = true ] && [ "$SKIP_SETUP" = false ]; then
+    log_info "Smoke mode: skipping infra setup (assumes stack is up; use --setup-only for cold bring-up)"
   fi
 
   echo ""

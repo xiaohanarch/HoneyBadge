@@ -25,6 +25,9 @@ API_BASE_URL = "http://localhost:8090"
 AUTH_BASE_URL = "http://localhost:8091"
 
 
+# The whole infra group is part of the smoke tier: all 13 checks are
+# LLM-free, run in ~5s, and instantly localize a broken component.
+@pytest.mark.smoke
 class TestInfrastructure:
     """Test infrastructure component health and connectivity."""
 
@@ -78,8 +81,24 @@ class TestInfrastructure:
             # Higress admin or health endpoint
             response = httpx.get("http://localhost:18001", timeout=10)
             assert response.status_code in [200, 301, 302, 404], f"Higress health check failed: {response.status_code}"
-        except httpx.ConnectError:
+        except httpx.TransportError:
+            # On the WSL2 dev stack Higress does not run (controller segfaults,
+            # exit 139) and the hiclaw-aigw-bypass nginx sidecar serves /v1/*
+            # instead — see CLAUDE.md "LLM / Higress Gateway gotchas". Skip only
+            # when that sidecar is up; real Higress (k3s/ECS) still gets checked.
+            # TransportError covers both ConnectError (nothing listening) and
+            # RemoteProtocolError (port mapped, listener dead inside container).
+            if self._aigw_bypass_running():
+                pytest.skip("Higress not present on WSL2 dev stack (aigw-bypass sidecar active)")
             pytest.fail("Cannot connect to Higress at localhost:18001")
+
+    @staticmethod
+    def _aigw_bypass_running() -> bool:
+        try:
+            client = docker.from_env()
+            return any(c.name == "honeybadge-hiclaw-aigw-bypass" for c in client.containers.list())
+        except Exception:
+            return False
 
     def test_tc706_tuwunel_matrix_healthy(self):
         """TC-706: Tuwunel (Matrix server) is healthy."""

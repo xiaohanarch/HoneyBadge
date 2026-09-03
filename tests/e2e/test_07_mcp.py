@@ -33,6 +33,7 @@ pytestmark = pytest.mark.requires_llm
 class TestMCPServices:
     """Test MCP (Model Context Protocol) server connectivity and functionality."""
 
+    @pytest.mark.smoke
     def test_tc601_nebula_mcp_healthy(self, api_client):
         """TC-601: NebulaGraph MCP server is healthy (verified via honeybadge-server health)."""
         # MCP servers are internal Docker services, not directly exposed to host.
