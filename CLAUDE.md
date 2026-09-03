@@ -134,11 +134,13 @@ docker compose -f deploy/docker/docker-compose.yaml restart hiclaw-graph-worker 
 
 ### E2E filter shortcuts
 ```bash
-./scripts/run-e2e-tests.sh --filter auth           # one group
-./scripts/run-e2e-tests.sh --filter chat           # auth|chat|session|isolation|permission|antihal|mcp|infra|observability
+./scripts/run-e2e-tests.sh --smoke             # Tier 1: critical path (~15 min, 22 tests, ~6 LLM queries) — run per change
+./scripts/run-e2e-tests.sh --filter auth       # Tier 2: one group
+./scripts/run-e2e-tests.sh --filter chat       # auth|chat|session|isolation|permission|antihal|mcp|infra|observability
 ./scripts/run-e2e-tests.sh --teardown-only
-./run-e2e-ecs.sh                                   # K8s/ECS variant (port-forward + Traefik)
+./run-e2e-ecs.sh                               # K8s/ECS variant (port-forward + Traefik)
 ```
+Tier 3 = full suite (release gate only). Smoke skips infra setup by default (assumes stack up); `--smoke -m smoke` with plain pytest also works. See UPGRADE-NOTES item 17 for the tier rationale.
 
 ### Default credentials (dev only)
 admin/admin123, analyst/analyst123, auditor/auditor123 (defined in `src/honeybadge/server/auth.py`).

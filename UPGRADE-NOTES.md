@@ -100,10 +100,11 @@ hermes-worker image lacks `hermes-agent` + `pip3` — self-built
 
 ### Phase 4 — E2E + cleanup 🟡 Partial (2026-08-17)
 
-- **4.1 E2E full regression** — NOT RUN. Requires `docker compose` stack
-  (`./scripts/run-e2e-tests.sh`, 9 groups: auth/chat/session/isolation/
-  permission/antihal/mcp/infra/observability). Static unit tests pass (687)
-  but E2E not executed since the v1.2.2 upgrade.
+- **4.1 E2E full regression** — IN PROGRESS (2026-09-01; see the
+  "2026-09-01 — Local E2E unblocking" section below for the full narrative).
+  Static unit tests pass (686; `test_mcp_transport.py` updated to assert the
+  empirically-verified `/sse` endpoints — the old test asserted `/mcp` per the
+  streamable-http aspiration, but the installed FastMCP 4.0.0 serves SSE).
 - **4.2 Workaround elimination grep** — PASS (runtime scope). Zero `HICLAW_` /
   `hiclaw.io` / `hiclaw-storage` / `hiclaw-fs` / `/opt/hiclaw/` residuals in
   `hiclaw/`, `deploy/docker/`, `deploy/hiclaw/`, `src/`, `frontend/`, `tests/`.
@@ -133,6 +134,398 @@ hermes-worker image lacks `hermes-agent` + `pip3` — self-built
 | Phase 4.1 — E2E full regression (9 groups) | `docker compose` stack | local run |
 | Phase 4.3 — push branch + open PR | GitHub PAT expired | `gh auth login` |
 | Phase 2 — QwenPaw switch + 3 workaround removals | upstream manager image missing `/opt/venv/qwenpaw/` + `copaw_worker` | wait for upstream fix |
+
+### 2026-09-01 — Local E2E unblocking (Phase 4.1 prep)
+
+Local environment: standalone `docker-compose` v5.1.4 (no `docker compose`
+plugin), pytest via `py -3.12 -m pytest`. Four stacked blockers were found and
+fixed before the chat E2E could pass:
+
+1. **LLM upstream switched to GLM-5.3** (Volcengine API gateway,
+   OpenAI-compat `/v1`). `.env` + `docker-compose.yaml` now parameterize
+   `AGENTTEAMS_OPENAI_BASE_URL` / `LLM_UPSTREAM_HOST` / `LLM_API_KEY` /
+   `MANAGER_LLM_MODEL=LLM_MODEL=glm-5.3`. The old `open.bigmodel.cn` upstream
+   was DNS-failing intermittently inside the aigw-bypass nginx.
+2. **Manager "pairing required"** (198k errors since Aug 20): stale
+   `/root/manager-workspace/.openclaw/devices/{paired,pending}.json` (device
+   capped at `operator.read`, unapproved `operator.approvals` upgrade) blocked
+   the manager's gateway connection. Deleted both + `docker restart` →
+   `[matrix] connected to gateway`. Manager workspace is ephemeral (overlay
+   FS), so recreation can re-poison; `init-workers.sh` cleanup TODO remains.
+3. **Stale Python images (root cause of chat timeouts)**: all 5 Python
+   service images were Jun/Apr builds with `@manager:matrix-local.hiclaw.io`
+   baked in (pre-rename). `honeybadge-auth` reused a DM room whose only
+   member is `@hb-admin` (invite went to the non-existent hiclaw-domain
+   manager), so chat messages reached nobody. Rebuilt images from branch
+   source → auth provisions a fresh DM room → manager auto-joins.
+   **Lesson: image rebuild is a required step after domain renames — env
+   overrides in compose don't cover defaults baked into code.**
+4. **`init-workers.sh` registered MCP endpoints as `/mcp`** (regression from
+   #145, which misread `server.py`'s `__main__` block): the Dockerfile CMD
+   runs `python -m honeybadge.__main__ <name>-mcp` → `transport="sse"` →
+   servers serve `/sse` (404 on `/mcp`). Workers burned entire runs repairing
+   `mcporter.json` mid-query. Fixed to `/sse` (worker registration + manager
+   mcporter.json).
+5. **Stale init-log path in the E2E harness** (v1.2.2 rename miss):
+   `tests/e2e/conftest.py` and `.github/workflows/e2e-tests.yml` (11 refs)
+   waited on `/var/log/hiclaw/honeybadge-init.log`; v1.2.2 writes
+   `/var/log/agentteams/honeybadge-init.log`. Every `reset_manager` fixture
+   call would burn 3×90s of retries plus 2 spurious manager restarts. Missed
+   by the Phase 1 residual grep because `/var/log/hiclaw/` was not in the
+   pattern list. Also fixed in conftest: the analytics-worker session reset
+   was a silent no-op — it assumed the openclaw layout
+   (`/root/.openclaw/agents/main/sessions`, `sessions.json`, `pgrep
+   openclaw`), but the hermes-worker image keeps transcripts in
+   `/root/.hermes/sessions` with no `sessions.json` and runs `hermes gateway`.
+6. **Build-context pollution** (no root `.dockerignore`): builds from the
+   repo root uploaded `deploy/docker/data/` (1.2GB live NebulaGraph data)
+   into every image build; WAL files also fail tar with
+   `archive/tar: write too long`. Added `.dockerignore` — the 3 MCP image
+   builds went from stuck 60+ min to ~7 min. The rebuilt images also picked
+   up fastmcp 4.0.0 (was 3.4.2); `/sse` verified working on all 3 MCP
+   servers.
+7. **5-minute gateway restart loop (upstream v1.2.2 bug, killed E2E tc310)**:
+   the worker image's `worker-entrypoint.sh` runs a MinIO fallback pull every
+   300s and merges via `/opt/agentteams/scripts/lib/merge-openclaw-config.sh`,
+   whose jq merge does `.gateway = $remote.gateway` — a wholesale replace of
+   the gateway section. The openclaw runtime itself oscillates
+   `gateway.controlUi.allowedOrigins` (adds it when the gateway boots, strips
+   it again on a later config save), so every pull flipped a restart-worthy
+   gateway key and the config watcher SIGUSR1'd the gateway:
+   `[reload] config change requires gateway restart (gateway.controlUi)`.
+   Restarts are deferred while embedded runs are active, but exec-event runs
+   and Matrix reply delivery are not protected — tc310's admin data-volume
+   query (>5 min) died with `[SETTLE] exception after 480000ms`. Only
+   graph-worker is affected (upstream agentteams-worker image); the
+   self-built hermes analytics-worker pulls once at boot, 0 restarts.
+   Two-part fix:
+   - `deploy/hiclaw/init-workers.sh` §1c' strips `gateway.controlUi` from
+     both workers' MinIO `openclaw.json` (must re-run after every Manager
+     auto-init, which regenerates configs).
+   - `deploy/hiclaw/merge-openclaw-config.sh` (patched copy of the upstream
+     script, mounted read-only over the original in docker-compose.yaml)
+     deep-merges gateway: `.gateway = (($local.gateway // {}) *
+     ($remote.gateway // {}))` — remote still wins on shared keys so
+     Manager-pushed changes propagate, but local-only runtime keys survive.
+   Verified: two consecutive pull cycles (22:55, 23:05) with zero SIGUSR1 /
+   config-change restarts (previously every cycle restarted).
+8. **analytics-worker never received Matrix dispatches (broken since image
+   build)**: `Dockerfile.hermes-worker` installed *unpinned*
+   `mautrix[encryption]` / `aiohttp-socks`, which resolved to versions newer
+   than hermes-agent's internal `platform.matrix` feature pins (mautrix
+   0.21.1 vs ==0.21.0, aiohttp-socks 0.12.0 vs ==0.11.0, aiohttp 3.14.3 vs
+   ==3.14.1). At every gateway boot hermes's version check failed
+   ("Platform 'matrix' is registered but adapter creation failed") and its
+   lazy pip-install self-heal is blocked by PEP 668 — so the hermes gateway
+   ran Matrix-less since the image was first built (agent.log shows the
+   failure from 2026-08-14). The erp-query-dispatch protocol delivers tasks
+   as Matrix @mentions to the worker room, so **every @analytics-worker
+   task hung forever** (spec.md + history.json synced to MinIO, no
+   result.json, no reply). @graph-worker tasks were unaffected. This killed
+   tc310 both times: "统计高风险的采购订单数量" routes to analytics-worker
+   per the routing table. Fixed by pinning the three packages in
+   `Dockerfile.hermes-worker` to hermes's feature pins (durable) and
+   `pip install --break-system-packages` of the same pins in the running
+   container + hermes restart (surgical; container writable layer survives
+   restarts but not recreation). After the fix: "✓ matrix connected" in the
+   hermes gateway log — first Matrix connection for this worker ever.
+   Also noted: `reset_manager` (conftest) killing hermes is what surfaced
+   the crash-looping SIGTERM exits; they are the entrypoint re-execs, not
+   crashes. The hermes kanban "reaped 1 zombie worker pids=[7]" 60s after
+   every gateway start predates tonight and is unrelated to task execution.
+9. **Session group (test_03) silently skipped 5/8 tests — masked a real
+   product bug**: the old tests probed for rename/delete buttons and a
+   session-name input that do not exist in the UI (sidebar uses a per-session
+   `el-dropdown` "⋯" menu → ElMessageBox dialog), so tc201/202/203 skipped
+   themselves. Once rewritten for the real flow, tc202 exposed that
+   **session rename never persisted**: `ChatView.vue` showed a success
+   toast but the API call was a placeholder comment. The endpoint existed
+   all along (`http.ts` `updateSession` → `PUT /sessions/{id}` →
+   `sessions.py`). Fixed in three places: added `updateSessionTitle` to
+   `stores/chat.ts`, added `renameSession` to `composables/useMatrixChat.ts`,
+   and wired the call into `ChatView.vue`. Test rewrites: rename/delete go
+   through the ⋯ dropdown (Element Plus teleports every session's dropdown
+   menu to `<body>`, so locators must scope with `:visible` — a plain
+   selector matched ~80 hidden menus and blew up Playwright strict mode);
+   tc201–204 now create sessions via the 新对话 button and stay entirely
+   off the LLM query path (each runs in seconds; the old tc204 fired 3 LLM
+   queries and hit a 720 s thread-method timeout that aborted the whole
+   pytest process). tc201–204 now pass; tc206/207/208 legitimately skip —
+   session search, pagination, and export do not exist in the UI (product
+   gaps, not test gaps).
+10. **Docker Desktop port-forwarding wedge (WSL2)**: after a hard engine
+    collapse, all published ports return HTTP 000 ("Empty reply from
+    server") even though containers are healthy and `docker exec` works —
+    com.docker.backend's TCP proxies are wedged. `wsl -t docker-desktop`
+    does NOT fix this (tried twice; it reliably re-wedges forwarding). The
+    only fix is a full Docker Desktop restart: taskkill all "Docker
+    Desktop.exe" + backend processes, then relaunch (via PowerShell
+    Start-Process — `cmd //c start` hangs from Git Bash). Second gotcha: if
+    the relaunched Desktop reuses a still-running docker-desktop distro, the
+    engine hangs forever on "still waiting for init control API". Clean
+    procedure: kill Desktop + backend → `wsl -t docker-desktop` → verify
+    all distros Stopped → relaunch → engine ready in ~11 s.
+11. **nebula-storaged WAL replay crisis (data-recovery mode)**: the hard VM
+    kills during the earlier port fight left the entire live dataset
+    (1.1 GB) in raft WALs (`/data/storage/nebula/61/wal/<part>/`, ~10.6 MB
+    × 100 parts, all written at the collapse moment) with rocksdb SSTs
+    nearly empty. Every storaged boot must replay all 100 parts at ~5 min
+    each (≈8 h serial). **The dataset is unreproducible**: the Postgres
+    `honeybadge_ods` database is empty (0 rows in all ODS tables) and the
+    cached CSVs in `deploy/test-data/usaspending_csv/` are an older,
+    different dataset (10k POs vs the live 24,327). A full backup of the
+    storage volume is at `.backups/nebula-storage-20260901-1205.tar`
+    (1.17 GB, gitignored). **RULE: do not restart storaged or Docker while
+    it is replaying** — each unclean kill resets progress and deepens the
+    dirty state. All remaining E2E groups that touch the graph (tc205,
+    permission, antihal, mcp) are blocked until replay completes.
+12. **honeybadge-server Nebula pool startup race**: after the clean Docker
+    Desktop restart, honeybadge-server started before nebula-graphd was
+    accepting connections. `app.py` initializes `app.state.nebula` at
+    startup with only ~30 s of connect retries (`db/nebula.py` `connect()`:
+    5 attempts, 2-16 s backoff); on failure `app.state.nebula` stays `None`
+    **forever** — the health endpoint then reports `nebula: down / not
+    connected` and nothing retriggers init (lazy reconnect exists only in
+    `execute()`, not on the health path). Surfaced as a tc601 failure with
+    graphd demonstrably up (tc701 socket + tc713 schema queries passed).
+    Fixed by restarting honeybadge-server once graphd was up. **Follow-up
+    implemented**: the health endpoint now lazily reconnects —
+    `server/health.py::_ensure_nebula` retries `connect()` when
+    `app.state.nebula` is None/unpooled, at most once per 30 s cooldown and
+    capped at 15 s per attempt, storing the recovered client on `app.state`
+    (which also unblocks the WebSocket path). Covered by 4 unit tests in
+    `tests/test_graceful_degradation.py::TestHealthLazyNebulaReconnect`.
+13. **Frontend `npm run build` was broken (pre-existing)**: PR #200 (unified
+    response envelope) introduced `vue-tsc` errors in `frontend/src/api/http.ts`
+    — the response-interceptor error path accessed `body.success` /
+    `body.error.message` on an inferred `{}` type, and since `"build"` runs
+    `vue-tsc && vite build`, production builds failed. Fixed with an explicit
+    envelope type cast + truthiness guard (no behavior change). Also updated
+    stale `tests/test_mcp_transport.py` (see 4.1 above) and fixed the
+    frontend type-check, ruff, mypy, and full unit suite are now green.
+14. **Second Docker Desktop engine collapse under sustained E2E load**:
+    ~17 min into the permission group run (dual-browser `create_user_page`
+    tests + LLM queries), the engine API started returning 500s and all
+    ports died — tc409–414 errored on `docker exec` timeouts, tc415/416 on
+    `Page.goto` timeouts. Recovery required the full clean-slate restart
+    (kill processes FIRST, then `wsl -t docker-desktop`, verify Stopped,
+    relaunch → engine up in 10 s). NOTE the order matters: stopping the
+    distro while backend processes still run lets them respawn/reuse a
+    stale VM, and the relaunched engine then hangs forever on "still
+    waiting for init control API" (hit this once; 16 min stuck). The
+    collapse hard-killed storaged again **after** it had completed its WAL
+    replay — raft WALs were not truncated by ~40 min of service, so the
+    full ~1.5 h replay had to run a second time. Follow-up risk: consider
+    taking a post-recovery clean backup of the storage volume and/or
+    batching the remaining groups to reduce peak memory load.
+15. **tc408 absolute bounds were calibrated to the old 10k-PO dataset**:
+    the live graph (24,327 POs, 58 orgs) has org 1000 = 1,578 POs, so the
+    old `200 < analyst_count < 500` bound failed even though the L3 org
+    filter worked perfectly (the query returned exactly 1,578).
+    **Correction of the first recalibration**: the test docstring claimed
+    subsidiary_lead = org 1011 (436 POs), but the RUNNING
+    honeybadge-permissions service (probed via
+    `GET /permissions/subsidiary_lead`) returns `org_ids=[1021]` — matching
+    repo config (`permission_service/config.py`, `deploy/config/*.yaml`),
+    conftest.py, and test_04's comments. Live org 1021 = 14 POs. Final
+    bounds: `1000 < analyst < 2500` / `0 < subsidiary < 100`; the ×10
+    admin-vs-single-org assertions pass with margin (15× and ~1,700×).
+    tc409–414 use relative assertions only and needed no changes; stale
+    "org 1011" comments in test_04/test_05 docstrings also corrected.
+    Permission group pre-collapse result: 9 passed (tc401–408b), 1
+    stale-bound failure (tc408, now fixed), tc409–416 to re-run after
+    storaged recovery.
+16. **Fourth engine collapse (spontaneous) + post-replay index settling**:
+    ~35 min after replay #3 completed, a simple `docker restart
+    honeybadge-nebula-graphd` triggered collapse #4 — engine API 500s
+    (`no route to host` for 192.168.65.7:2376), vmmem at 0 GB (zombie VM).
+    No E2E load was running; the host had been memory-thrashed all day.
+    Same clean-slate recovery worked (kill processes → `wsl -t
+    docker-desktop` → verify Stopped + no Docker processes → relaunch →
+    engine up in seconds, all 17 containers back). Cost: storaged hard-killed
+    again → WAL replay #4. Two operational findings from the replay #3
+    aftermath: (a) **post-replay index settling** — for ~25 min after
+    "healthy", storage RPCs time out (E_RPC_FAILURE storms in graphd), then
+    indexes progressively come back: `LOOKUP ON PurchaseOrder WHERE
+    PurchaseOrder.org_id == 1000` returned the correct 1,578 while
+    `MATCH (p:PurchaseOrder) WHERE p.org_id == 1000 RETURN count(p)` still
+    returned 0 — graphd's executor state appears poisoned by the RPC-failure
+    storm (hypothesis; the planned graphd restart to confirm triggered the
+    collapse, so it is unverified). Wait ~30 min after healthy before
+    declaring the graph degraded. (b) The dataset itself survived every
+    replay: 24,327 POs / 10,994 suppliers / org 1000 = 1,578 verified via
+    LOOKUP after replay #3.
+17. **Fifth engine collapse (spontaneous, zero load) + tiered E2E strategy**:
+    ~35 min after replay #4 completed, a plain read-only connection attempt
+    (nebula3 pool init to :9669) hit `Socket read failed: timed out`, and the
+    engine API was already returning 500s — collapse #5, with NO test load
+    running and not even a `docker` write command involved. Conclusion: the
+    collapses are not E2E-load-triggered; the WSL2 engine is unstable under
+    the sustained memory pressure of this 17-container stack regardless of
+    what we do. Consequences adopted: (a) treat engine recovery + WAL replay
+    (~2h + ~30 min settling) as an environment fact, not a test failure;
+    (b) the full-suite regression cannot be the day-to-day verification
+    loop. Implemented a **three-tier E2E regression strategy** (marker
+    `smoke`, registered in pytest.ini):
+    - **Tier 1 — smoke (~15 min, ~6 LLM queries, 22/130 tests)**: one
+      sentinel per chain — tc001 login ×3 users, tc102 full chat chain
+      (frontend→Matrix→Manager→worker→LLM→MCP→Nebula), tc201 session,
+      tc408 L3 org-filter bounds (recalibrated, item 15), tc503
+      permission-filter-in-Cypher, tc601 MCP/Nebula health, tc1101
+      graph-worker routing, plus ALL 13 infra checks (LLM-free, ~5 s, they
+      instantly localize a broken component). Run on every change:
+      `./scripts/run-e2e-tests.sh --smoke` (skips infra setup by default —
+      setup's worker restarts + seeding cost minutes and disrupt the very
+      stack the smoke tier checks; use `--setup-only` first for cold
+      bring-up).
+    - **Tier 2 — group runs**: `--filter chat|auth|session|…` when touching
+      a related area (~15 min per group).
+    - **Tier 3 — full suite**: release gate only.
+    A stub-LLM approach (replace GLM with a canned-responses server for
+    chat-path tests) was considered and deferred: the OpenClaw agent-loop
+    protocol (Manager dispatch, worker ack, DM back) is too easy to stub
+    incorrectly — a green-but-meaningless test is worse than a slow one.
+18. **Root cause of the ~2h WAL replays fixed — storaged data moved from
+    Windows bind mount to a named volume (23:18, boot 2h05m → 37s)**: the
+    compose file bind-mounted `./data/storaged` from the Windows filesystem,
+    so every unclean engine kill forced a ~1.1 GB raft-WAL replay through
+    Docker Desktop's 9p/FUSE bridge — RocksDB's small synchronous I/O
+    pattern is pathologically slow there (~2h05m per replay, 5 collapses
+    experienced). Migration while replay #5 was only at part 7/100 (replay
+    is idempotent; aborting it is free): `docker stop -t 60` → `tar | tar`
+    copy into named volume `honeybadge-storaged-data` (1.1 GB in **18 s** —
+    the bridge's sequential throughput is fine; only the I/O *pattern* was
+    the problem) → compose now mounts `storaged_data:/data/storage` (redis/
+    postgres already used named volumes — that's why they always recovered
+    fast; only Nebula was on the slow path). Result: storaged healthy in
+    **37 s** with all 100 parts loaded vs ~2h05m. Rollback = revert one
+    compose line (the old bind-mount copy is left in place untouched).
+    Two experiment findings along the way: (a) a graceful `docker stop` does
+    NOT truncate the raft WAL (1.1 GB before and after, all 100 partition
+    dirs intact) — every cold start replays the full WAL, which the volume
+    now makes cheap; (b) `deploy/docker/nebula_seed.py` generates only
+    3,720 POs / 12 orgs — the live dataset (24,327 POs / 58 orgs) came from
+    a different load process, so re-seeding is NOT a recovery path; the
+    volume copy (exact data) was the only safe migration.
+    Post-cold-start quirk observed both on the bridge and on the volume:
+    for a warmup window, property-filtered `MATCH ... WHERE` returns 0
+    (even `MATCH ... WHERE id(p) == "PO:10007"` returns `__NULL__`
+    properties) while `LOOKUP ON ... WHERE` is immediately correct
+    (org 1000 = 1,578 / org 1021 = 14 / FROZEN = 2) and `FETCH PROP` works.
+    The earlier "graphd executor poisoning" hypothesis (item 16) is dead —
+    graphd was freshly restarted and shows the same window. This healed by
+    itself after replay #1 (permission group passed later that day); a
+    heal-probe loop is quantifying the window now. Practical rule: after
+    any storaged cold start, wait for `MATCH`+WHERE to return non-zero
+    before running graph-count assertions.
+19. **Collapse pattern root cause + operational guidance**: collapses #5–#7
+    hit with zero E2E load (one during a plain read-only connect, two during
+    `docker restart`), at 49/17/8-min intervals — a death spiral late in a
+    memory-thrashed day. Machine has **15.7 GB total RAM**; `.wslconfig`
+    caps the WSL2 VM at **12 GB**, leaving ~2.7–2.9 GB free for Windows +
+    `com.docker.backend` + Playwright's Chromium (Chromium runs Windows-
+    side, ~1 GB per browser). vmmem itself sits at only ~4 GB (ballooning
+    works; container total ~3.2–5 GB, no leak — graph-worker/manager/
+    analytics steady, hiclaw-embedded churns 0.7–1.6 GB page cache). So the
+    machine is simply overcommitted at the Windows layer; E2E browser
+    launches tip it over. Mitigations: (a) the named-volume migration
+    (item 18) makes collapse RECOVERY cheap (engine restart ~3 min +
+    storaged healthy ~40 s vs ~2.5 h) — collapses are now an annoyance,
+    not a schedule-killer; (b) recommended but not applied: lower the
+    `.wslconfig` VM cap 12 GB → 8–10 GB (stack peaks ~6 GB) to widen the
+    Windows-side margin, and close heavy Windows apps during E2E runs;
+    (c) avoid `docker restart <container>` — 2 of 7 collapses coincided
+    exactly with it; prefer `docker stop` + `docker start`. Also note: the
+    engine's `docker compose` CLI plugin registration breaks after some
+    crashes (`unknown command: docker compose`) — invoke
+    `"/c/Program Files/Docker/Docker/resources/cli-plugins/docker-compose.exe"`
+    directly, or restart Docker Desktop to re-register.
+    **End-of-night verdict (00:30)**: collapses #5–#8 in ~2 h (49/17/14-min
+    intervals); after applying `.wslconfig` 12 GB → 8 GB + a full clean
+    `wsl --shutdown`, the cold boot itself ballooned vmmem to ~7 GB (17
+    containers cold-starting + WAL-replay page cache on the new volume)
+    and Windows-side free RAM stayed at 0.3–0.7 GB. Windows baseline
+    breakdown (top): Defender MsMpEng 0.9 GB, svchost 0.7 GB, Docker
+    Desktop + backend ~0.8 GB, user's Chrome ~0.4 GB + proxy tools, this
+    Claude session 0.9 GB — nothing reclaimable. Conclusion: **a 16 GB
+    machine cannot run this 17-container stack + Windows baseline +
+    Playwright Chromium simultaneously**; browser E2E is only viable on a
+    fresh boot with heavy apps closed (or more RAM). The browser-free
+    smoke subset (13 infra checks + tc601) was attempted at 00:25 and also
+    failed — the VM was network-catatonic (every localhost port timed out
+    while the named-pipe engine API still answered). Morning runbook:
+    reboot host (or close Chrome etc.) → standard recovery if the engine
+    died overnight (kill Docker processes → `wsl -t docker-desktop` →
+    relaunch → storaged healthy in ~40 s) → wait ~10–25 min for the MATCH
+    warmup window to close (`.backups/probe_lookup_vs_match.py`; LOOKUP is
+    correct immediately) → `./scripts/run-e2e-tests.sh --smoke`.
+    `.wslconfig` backup: `.backups/wslconfig.orig` (revert to 12 GB if the
+    8 GB cap ever OOMs the VM).
+
+20. **Collapse root cause FOUND (graphd memory balloon) + smoke tier fully
+    validated (2026-09-02 morning session)**: with the chat stack up,
+    collapses #11–#15 hit at 75 s–12 min intervals even at idle. A
+    per-container `docker stats` tracer finally caught the killer:
+    **nebula-graphd ballooned from ~9 MB to 7.23 GiB in ~30 s** under E2E
+    chat load (healthy footprint is single-digit MB on the seed dataset).
+    The balloon is anonymous (persists after `drop_caches`), and the Docker
+    named-pipe API dies with 500s while container ports keep serving —
+    "engine dead" ≠ "containers down".
+    **Fix applied**: `mem_limit: 2g` on `nebula-graphd` in
+    `docker-compose.yaml` (graphd OOM-restarts itself instead of killing the
+    WSL2 VM; recreate with `docker-compose up -d --no-deps --force-recreate
+    nebula-graphd`). After the cap: graphd stayed at ~25–30 MB through two
+    full test runs and the engine never collapsed again.
+    Also fixed this session:
+    - **metad still on the Windows bind mount** (`.\data\metad`) — after
+      unclean deaths its WAL replay through the 9p bridge takes 4–5 min, and
+      storaged can hang at `Waiting for the metad to be ready!` with a stale
+      MetaClient (log frozen, 0 `Load part` lines). Fix: `docker stop` +
+      `docker start honeybadge-nebula-storaged` — healthy again in <1 min.
+      **Follow-up: migrate metad data to a named volume like item 18.**
+    - **Bare vs tag-prefixed property MATCH**: after unclean-death WAL
+      replays, `MATCH (p:PurchaseOrder) WHERE p.org_id == 1000` (bare)
+      returns 0/`__NULL__` while `p.PurchaseOrder.org_id` (tag-prefixed)
+      serves correctly (1,578 for org 1000). The LLM generates tag-prefixed
+      nGQL exclusively (audit_logs evidence), so the chat path is unaffected.
+      Probe: `.backups/probe_prefix.py`.
+    - **`scripts/run-e2e-tests.sh` portability**: bare `pytest` is not on
+      PATH in Git Bash — runner now auto-detects (`pytest` → `py -3.12 -m
+      pytest` → `python3 -m pytest`); `LLM_API_KEY` is auto-sourced from
+      `deploy/docker/.env` so `--smoke` is self-contained.
+    - **tc601 exposed a stale image**: the running honeybadge-server
+      predated the health.py lazy-reconnect fix (lifespan connect failed
+      while graphd was mid-recreation → "down" forever). Lesson: after
+      changing `src/`, `docker compose build honeybadge-server` before E2E.
+    - **tc705 (Higress console) is WSL2-impossible**: no Higress processes
+      run inside hiclaw-embedded on this platform (documented controller
+      segfault); the test now skips with a clear reason when the
+      `hiclaw-aigw-bypass` sidecar is active, and still enforces real
+      Higress on k3s/ECS.
+    **Final one-shot smoke validation (08:14–08:26)**:
+    `./scripts/run-e2e-tests.sh --smoke` → **21 passed, 1 skipped
+    (tc705 WSL2 platform), 0 failed, 11 min 34 s**, engine green throughout
+    (freeRAM 2.1–3.3 GB, vmmem ≤7.3 GB, graphd ~30 MB under its 2 GiB cap).
+    The smoke tier (item 17) is now the working per-change verification:
+    one command, ~12 min, ~6 LLM queries.
+
+
+Also fixed a pre-existing quoting bug in `scripts/run-e2e-tests.sh:138`
+(`--env-file "$ENV_FILE up -d` missing close-quote, broken since first
+commit). Smoke test result: `tc101 + tc102 PASSED` (202s) — full chain
+frontend → Tuwunel → Manager → worker → GLM-5.3 → MCP(/sse) → NebulaGraph →
+contract-002 reply with trace_id verified.
+
+Full chat group result (2026-09-01): **12/12 passed in 868s** (tc101–tc112,
+`py -3.12 -m pytest -c pytest.ini tests/e2e/test_02_chat.py -v --tb=short
+--timeout=300`). Includes all 4 `reset_manager` fixture tests — the
+init-log path fix (item 5) cut the run from an estimated 40-70 min to
+14.5 min.
+
+Full session group result (2026-09-01): **tc201–204 passed, tc206/207/208
+skipped (features absent from UI), tc205 blocked on storaged replay**
+(item 11). tc201–204 run entirely off the LLM path (~14 s for the three
+UI tests) after the rewrite described in item 9.
 
 ---
 
