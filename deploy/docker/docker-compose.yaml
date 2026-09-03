@@ -59,7 +59,11 @@ services:
       - USER=root
       - TZ=Asia/Shanghai
     volumes:
-      - ./data/metad:/data/meta
+      # Named volume (NOT a ./data bind mount): metad's WAL replay through the
+      # Windows bind-mount bridge took 4-5 min after every unclean engine death
+      # and kept storaged stuck at "Waiting for the metad to be ready!" (see
+      # UPGRADE-NOTES item 20; mirrors the storaged migration in item 18).
+      - metad_data:/data/meta
       - ./logs/metad:/logs
       - ./nebula-metad.conf:/usr/local/nebula/etc/nebula-metad.conf:ro
     command:
@@ -1000,6 +1004,9 @@ networks:
     name: honeybadge-network
 
 volumes:
+  metad_data:
+    name: honeybadge-metad-data                   # Nebula metad data — ext4 volume for fast WAL replay (was ./data/metad bind mount)
+
   storaged_data:
     name: honeybadge-storaged-data               # Nebula storaged data — ext4 volume for fast WAL replay (was ./data/storaged bind mount)
 

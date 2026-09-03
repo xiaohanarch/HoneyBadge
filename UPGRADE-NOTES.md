@@ -482,7 +482,7 @@ fixed before the chat E2E could pass:
       storaged can hang at `Waiting for the metad to be ready!` with a stale
       MetaClient (log frozen, 0 `Load part` lines). Fix: `docker stop` +
       `docker start honeybadge-nebula-storaged` — healthy again in <1 min.
-      **Follow-up: migrate metad data to a named volume like item 18.**
+      **Follow-up DONE — see item 21.**
     - **Bare vs tag-prefixed property MATCH**: after unclean-death WAL
       replays, `MATCH (p:PurchaseOrder) WHERE p.org_id == 1000` (bare)
       returns 0/`__NULL__` while `p.PurchaseOrder.org_id` (tag-prefixed)
@@ -508,6 +508,22 @@ fixed before the chat E2E could pass:
     (freeRAM 2.1–3.3 GB, vmmem ≤7.3 GB, graphd ~30 MB under its 2 GiB cap).
     The smoke tier (item 17) is now the working per-change verification:
     one command, ~12 min, ~6 LLM queries.
+
+21. **metad migrated to a named volume (2026-09-02, closes the item-20
+    follow-up)**: mirrored the storaged migration (item 18) — `docker stop
+    -t 30/60` graphd → storaged → metad → `tar | tar` copy of the 42.5 MB
+    bind-mount data into new volume `honeybadge-metad-data` (instant) →
+    compose now mounts `metad_data:/data/meta`. Verification: metad healthy
+    immediately on the volume (no 9p-bridge WAL replay), storaged/graphd
+    back healthy in ~20 s each, `SHOW HOSTS` = 1 storaged ONLINE (100
+    parts), 57 tags / 82 edges intact, total POs 24,327, tag-prefixed
+    `MATCH ... org_id == 1000` = **1,578** (identical to pre-migration;
+    note `org_id` is an INT — comparing against string `"1000"` silently
+    returns 0 and is NOT the warmup quirk). honeybadge-server reported
+    nebula `up` throughout recovery without a restart — first real-world
+    pass of the item-19 lazy reconnect. Infra smoke group: 12 passed /
+    1 skipped (tc705 WSL2) / 3.47 s. Rollback = revert the one compose
+    volume line (old `./data/metad` bind-mount copy left untouched).
 
 
 Also fixed a pre-existing quoting bug in `scripts/run-e2e-tests.sh:138`
