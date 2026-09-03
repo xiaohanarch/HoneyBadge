@@ -869,6 +869,72 @@ mc cp "$MANAGER_WORKSPACE/openclaw.json" \
 # WS-14 (v1.0.9 hot-reload deadlock comment) — removed in v1.1.2 upgrade.
 
 # =========================================================================
+# Step 5: Prune codex arg0 / npm cache junk (background)
+#
+# The v1.2.2 manager image seeded ~1.0GiB of regenerable cache into
+# /root/manager-workspace/ on its first boot:
+#   .codex/tmp/arg0/ — 4 x 163MiB hardlink copies of the codex binary
+#                      (apply_patch, applypatch, codex-execve-wrapper,
+#                      codex-linux-sandbox); the running runtime is
+#                      openclaw, nothing reads these
+#   .npm/            — an npm _cacache copy (the live cache is /root/.npm)
+#
+# start-manager-agent.sh mirrors /root/manager-workspace/ -> MinIO
+# manager/ at boot (initial push) and on local changes (change-triggered
+# sync), and pulls the whole bucket prefix into /root/agentteams-fs/ at
+# boot. So the junk exists in THREE places and the workspace copy is the
+# SOURCE — deleting only the bucket or only the agentteams-fs mirror gets
+# re-uploaded/re-pulled on the next boot or change trigger (verified the
+# hard way 2026-09-03: bucket cleaned twice, 651MiB reappeared twice).
+#
+# Order matters: kill the source FIRST (a mirror can only upload files
+# that still exist locally), wait for the boot-time initial push to stop
+# growing, then remove the persisted bucket copies and retry until the
+# prefix is actually clean (multipart uploads of 163MiB files can land
+# after an mc rm). Best-effort — failures never block init.
+# =========================================================================
+log "Step 5: Scheduling codex arg0 / npm cache prune (background)..."
+
+(
+    # 1. Kill the source + the pulled mirror. Doing this first means the
+    #    change-triggered sync has nothing left to re-upload.
+    rm -rf /root/manager-workspace/.codex/tmp /root/manager-workspace/.npm
+    rm -rf /root/agentteams-fs/manager/.codex/tmp /root/agentteams-fs/manager/.npm
+
+    # 2. Wait (up to 15 min) for the boot-time initial push to settle:
+    #    poll the bucket prefix size until it stops changing.
+    last_size=""
+    for _ in $(seq 1 90); do
+        cur_size=$(mc du agentteams/agentteams-storage/manager/ 2>/dev/null | awk '{print $1}')
+        [ -z "$cur_size" ] && cur_size="none"
+        if [ -n "$last_size" ] && [ "$cur_size" = "$last_size" ] && [ "$cur_size" != "none" ]; then
+            break
+        fi
+        last_size="$cur_size"
+        sleep 10
+    done
+
+    # 3. Remove the persisted copies from the bucket.
+    mc rm --recursive --force agentteams/agentteams-storage/manager/.codex/tmp/ >/dev/null 2>&1 || true
+    mc rm --recursive --force agentteams/agentteams-storage/manager/.npm/ >/dev/null 2>&1 || true
+
+    # 4. Verify + retry: stragglers from a slow multipart upload may land
+    #    after the rm. Loop (up to 6 x 30s) until actually clean.
+    for _ in $(seq 1 6); do
+        sleep 30
+        if mc stat agentteams/agentteams-storage/manager/.codex/tmp/ >/dev/null 2>&1 \
+           || mc stat agentteams/agentteams-storage/manager/.npm/ >/dev/null 2>&1; then
+            mc rm --recursive --force agentteams/agentteams-storage/manager/.codex/tmp/ >/dev/null 2>&1 || true
+            mc rm --recursive --force agentteams/agentteams-storage/manager/.npm/ >/dev/null 2>&1 || true
+        else
+            break
+        fi
+    done
+    echo "[init-bg] Step 5: codex arg0 / npm cache pruned (workspace + agentteams-fs + MinIO)" \
+        >> /var/log/agentteams/honeybadge-init.log
+) &
+
+# =========================================================================
 # Done
 # =========================================================================
 log "HoneyBadge auto-init complete!"
