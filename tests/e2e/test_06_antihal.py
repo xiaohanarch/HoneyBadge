@@ -40,7 +40,7 @@ from tests.e2e.selectors import (
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8090")
 
-pytestmark = pytest.mark.requires_llm
+pytestmark = [pytest.mark.antihal, pytest.mark.requires_llm]
 
 
 class TestAntiHallucination:

@@ -83,7 +83,7 @@ pytest tests/test_validator.py::test_specific_case -v
 
 # E2E tests (pytest.ini overrides testpaths to tests/e2e/)
 pytest -c pytest.ini                  # all e2e
-pytest -c pytest.ini -m auth          # by marker (auth, chat, session, isolation, permission, antihal, mcp, infra, observability)
+pytest -c pytest.ini -m auth          # by marker (auth, chat, session, isolation, permission, antihal, mcp, infra, observability, context, routing)
 pytest -c pytest.ini tests/e2e/test_02_chat.py --timeout=180
 
 # Eval suite — CI layer (zero LLM, rule-based, runs in CI)
@@ -136,7 +136,7 @@ docker compose -f deploy/docker/docker-compose.yaml restart hiclaw-graph-worker 
 ```bash
 ./scripts/run-e2e-tests.sh --smoke             # Tier 1: critical path (~15 min, 22 tests, ~6 LLM queries) — run per change
 ./scripts/run-e2e-tests.sh --filter auth       # Tier 2: one group
-./scripts/run-e2e-tests.sh --filter chat       # auth|chat|session|isolation|permission|antihal|mcp|infra|observability
+./scripts/run-e2e-tests.sh --filter chat       # auth|chat|session|isolation|permission|antihal|mcp|infra|observability|context|routing
 ./scripts/run-e2e-tests.sh --teardown-only
 ./run-e2e-ecs.sh                               # K8s/ECS variant (port-forward + Traefik)
 ```

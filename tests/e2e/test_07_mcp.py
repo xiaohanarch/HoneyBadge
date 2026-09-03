@@ -27,7 +27,7 @@ API_BASE_URL = "http://localhost:8090"
 #   2. Redis password reconciled (redis123 in both secrets.yaml and test)
 #   3. Two-stage harness wait in conftest.py handles mid-stream LLM preamble
 
-pytestmark = pytest.mark.requires_llm
+pytestmark = [pytest.mark.mcp, pytest.mark.requires_llm]
 
 
 class TestMCPServices:

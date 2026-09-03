@@ -25,7 +25,7 @@ from tests.e2e.selectors import (
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
-pytestmark = pytest.mark.requires_llm
+pytestmark = [pytest.mark.session, pytest.mark.requires_llm]
 
 # The sidebar exposes rename/delete only through the per-session "⋯" dropdown
 # (el-dropdown, teleported to body) followed by an ElMessageBox dialog. There is
@@ -194,14 +194,17 @@ class TestSessionManagement:
         page = admin_logged_in
         wait_for_chat_ready()
 
+        # Probe the export button BEFORE burning an LLM query — export is not
+        # implemented in the UI yet (product gap), so this test currently
+        # skips, and a chat round-trip first would be pure waste.
+        export_btn = page.locator('button:has-text("导出"), button:has-text("Export")')
+        if export_btn.count() == 0:
+            pytest.skip("Export button not available")
+
         # Create session with content
         send_chat_query("查询供应商", timeout=120000)
         page.wait_for_timeout(1000)
 
-        # Look for export button
-        export_btn = page.locator('button:has-text("导出"), button:has-text("Export")')
-        if export_btn.count() == 0:
-            pytest.skip("Export button not available")
         export_btn.first.click()
         page.wait_for_timeout(500)
 

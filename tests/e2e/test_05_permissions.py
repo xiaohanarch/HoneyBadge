@@ -30,7 +30,7 @@ from tests.e2e.selectors import (
     MSG_ASSISTANT,
 )
 
-pytestmark = pytest.mark.requires_llm
+pytestmark = [pytest.mark.permission, pytest.mark.requires_llm]
 
 
 class TestPermissions:

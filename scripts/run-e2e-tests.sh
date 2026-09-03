@@ -74,7 +74,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --smoke              Run the critical-path smoke tier (~15 min, one sentinel per chain)"
-      echo "  --filter <tests>     Run specific test groups (auth,chat,session,isolation,permission,antihal,mcp,infra,observability)"
+      echo "  --filter <tests>     Run specific test groups (auth,chat,session,isolation,permission,antihal,mcp,infra,observability,context,routing)"
       echo "  --setup-only         Only start infrastructure, don't run tests"
       echo "  --teardown-only       Only stop infrastructure"
       echo "  --skip-setup         Skip infrastructure setup (assume services are running)"
@@ -293,9 +293,15 @@ run_tests() {
       observability)
         PYTEST_CMD="$PYTEST_CMD tests/e2e/test_09_observability.py"
         ;;
+      context)
+        PYTEST_CMD="$PYTEST_CMD tests/e2e/test_10_context_and_memory.py"
+        ;;
+      routing)
+        PYTEST_CMD="$PYTEST_CMD tests/e2e/test_11_worker_routing.py"
+        ;;
       *)
         log_error "Unknown filter: $FILTER"
-        log_info "Available filters: auth, chat, session, isolation, permission, antihal, mcp, infra, observability"
+        log_info "Available filters: auth, chat, session, isolation, permission, antihal, mcp, infra, observability, context, routing"
         exit 1
         ;;
     esac

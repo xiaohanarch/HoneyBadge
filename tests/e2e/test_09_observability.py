@@ -20,6 +20,8 @@ from playwright.sync_api import expect
 
 BASE_URL = "http://localhost:3000"
 
+pytestmark = pytest.mark.observability
+
 
 class TestObservability:
     """Test observability stack components."""

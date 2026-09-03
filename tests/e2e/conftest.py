@@ -624,20 +624,9 @@ DEMO_USERS = {
 }
 
 
-def pytest_configure(config):
-    """Register custom markers."""
-    config.addinivalue_line("markers", "e2e: end-to-end tests")
-    config.addinivalue_line("markers", "auth: authentication tests")
-    config.addinivalue_line("markers", "chat: chat functionality tests")
-    config.addinivalue_line("markers", "isolation: user isolation tests")
-    config.addinivalue_line("markers", "permission: permission tests")
-    config.addinivalue_line("markers", "infra: infrastructure tests")
-    config.addinivalue_line("markers", "observability: observability tests")
-    config.addinivalue_line("markers", "slow: slow running tests")
-    config.addinivalue_line("markers", "routing: worker routing tests")
-    config.addinivalue_line(
-        "markers", "requires_llm: tests that require a real LLM API key"
-    )
+# NOTE: marker registration lives in pytest.ini (single source of truth).
+# Previously this file duplicated the list via pytest_configure, and the two
+# copies diverged (routing/context were missing from pytest.ini).
 
 
 def pytest_collection_modifyitems(config, items):
