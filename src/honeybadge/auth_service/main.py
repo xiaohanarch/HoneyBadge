@@ -47,7 +47,7 @@ logger = structlog.get_logger()
 # Environment configuration (with defaults)
 # ---------------------------------------------------------------------------
 
-TUWUNEL_URL: str = os.getenv("TUWUNEL_URL", "http://hiclaw-manager:6167")
+TUWUNEL_URL: str = os.getenv("TUWUNEL_URL", "http://matrix-local.agentteams.io:6167")
 MATRIX_DOMAIN: str = os.getenv("MATRIX_DOMAIN", "matrix-local.agentteams.io")
 
 # SECURITY: registration token has no default — must be set explicitly.
