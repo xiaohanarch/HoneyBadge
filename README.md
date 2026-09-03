@@ -127,9 +127,9 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| NebulaGraph Schema | ✅ | 34 Tags, 38 Edges + 测试数据 57 实体类型 |
+| NebulaGraph Schema | ✅ | 57 Tags, 82 Edges（v2.0，Oracle EBS R12 ETRM 扩展）+ 12 种欺诈模式测试数据 |
 | AgentTeams Manager-Worker | ✅ | Matrix 协议通信，Manager + graph-worker + analytics-worker |
-| AgentTeams v1.1.2 升级 | ✅ | v1.1.0 → v1.1.2，6 个死代码 workaround 已删，observe-recovery 禁用 |
+| AgentTeams v1.2.2 升级 | ✅ | v1.1.2 → v1.2.2：AGENTTEAMS_* 环境变量、agentteams.io 域名、/opt/agentteams 路径；observe-recovery 已禁用 |
 | 五层防幻觉框架 | ✅ | L1-L5 全部实现；L3 权限通过 route-and-execute.sh 强制执行；L4 原始数据前端直传；L5 审计日志写入 PostgreSQL |
 | honeybadge-auth 服务 | ✅ | 每用户 Matrix 账号 + JWT |
 | matrix-js-sdk 前端 | ✅ | 浏览器直连 Tuwunel |
@@ -278,7 +278,7 @@
 
 > **架构说明**：
 > - 图中所有带 `:xxxx` 端口的组件名称均对应实际运行的 Docker 容器名
-> - honeybadge-hiclaw-manager 为 **all-in-one 有状态容器**，内置 Tuwunel/MinIO/Higress/Element Web
+> - honeybadge-hiclaw-embedded 为**基础设施容器**（Tuwunel/MinIO/Higress/Element Web，v1.1.0 拆分自 all-in-one）；honeybadge-hiclaw-manager 为**精简 Agent 容器**（v1.2.2 起仅承载 Manager Agent）
 > - honeybadge-graph-worker 和 honeybadge-analytics-worker 为**独立容器**，通过 Matrix 协议与 Manager 通信
 
 **Approach B 的核心设计**：
@@ -1547,8 +1547,8 @@ HoneyBadge/
 │   │   ├── docker-compose.yaml  # 完整服务编排
 │   │   ├── .env                 # 环境变量
 │   │   ├── init-nebula.sh       # NebulaGraph Schema 初始化
-│   │   ├── nebula-schema.ngql   # 34 Tags + 索引
-│   │   └── nebula-edges.ngql    # 38 Edges + 索引
+│   │   ├── nebula-schema.ngql   # 57 Tags + 索引（v2.0）
+│   │   └── nebula-edges.ngql    # 82 Edges + 索引
 │   ├── hiclaw/
 │   │   └── init-workers.sh      # Worker 注册脚本
 │   └── test-data/csv/           # 测试数据（~228K 顶点, ~390K 边）
@@ -1791,6 +1791,7 @@ docker compose -f deploy/docker/docker-compose.yaml --env-file deploy/docker/.en
 | v3.3 | 2026-04-23 | 新增第十二章「Agent 框架架构深度对比」：HoneyBadge vs OpenClaw / DeerFlow / AgentTeams / HermesClaw，覆盖性能、智能性、开放度、健壮性四维度分析 |
 | v3.4 | 2026-06-27 | 第十二章新增 12.7「HoneyBadge vs DeerFlow 企业 ERP 审计场景专题对比」（定位差异、五项不可替代能力、DeerFlow 长板、共存定位）与 12.8「向上汇报核心口径」（技术能力→业务/合规价值映射） |
 | v3.5 | 2026-06-27 | 第十二章新增 12.9「Worker Runtime 选型：OpenClaw vs Hermes」：核实 openclaw 实际版本 2026.4.14（非 v1.1.2）、两者对比表、短期继续 OpenClaw / 长期评估 Hermes 推荐及渐进切换路径 |
+| v3.6 | 2026-09-02 | 同步 AgentTeams v1.2.2 升级状态：Schema 计数更新为 57 Tags + 82 Edges（v2.0）、架构说明修正（embedded 基础设施容器 / manager 精简 Agent 容器拆分）、升级表更新至 v1.2.2 |
 
 ---
 

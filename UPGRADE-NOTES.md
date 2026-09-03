@@ -742,10 +742,14 @@ docker exec honeybadge-graph-worker sh -c 'echo $MINIO_ENDPOINT'
 
 ### 2.2 文档同步
 
-- [ ] `README.md:84,354` 版本号 v1.0.9 → v1.1.2
-- [ ] `CLAUDE.md` "容器重建后 DM allowlist 重置"段落修正
-- [ ] `CLAUDE.md` MinIO endpoint 端口修正
-- [ ] `CLAUDE.md` "aigw-local.hiclaw.io:8080" 适用性确认
+- [x] `README.md:84,354` 版本号 v1.0.9 → v1.1.2（已被 v1.2.2 升级超越；2026-09-02
+  同步至 v3.6：升级表 v1.2.2、Schema 计数 57 Tags + 82 Edges、embedded/manager
+  容器拆分说明）
+- [x] `CLAUDE.md` "容器重建后 DM allowlist 重置"段落修正（v1.2.2 已禁用
+  observe-recovery，重建不再重置 allowlist）
+- [x] `CLAUDE.md` MinIO endpoint 端口修正（Console :19001，:9000 不暴露宿主机）
+- [x] `CLAUDE.md` "aigw-local.hiclaw.io:8080" 适用性确认（v1.2.2 重命名为
+  aigw-local.agentteams.io:8080，workers 必须走该别名）
 
 ---
 
