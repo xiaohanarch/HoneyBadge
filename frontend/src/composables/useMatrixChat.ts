@@ -399,6 +399,17 @@ export function useMatrixChat() {
     }
   }
 
+  async function renameSession(sessionId: string, title: string) {
+    try {
+      await sessionApi.updateSession(sessionId, title)
+      chatStore.updateSessionTitle(sessionId, title)
+      ElMessage.success('会话已重命名')
+    } catch (error) {
+      console.error('Failed to rename session:', error)
+      ElMessage.error('重命名会话失败')
+    }
+  }
+
   async function connect() {
     await ensureInitialized()
   }
@@ -426,6 +437,7 @@ export function useMatrixChat() {
     createSession,
     loadMessages,
     deleteSession,
+    renameSession,
     connect,
     disconnect,
   }

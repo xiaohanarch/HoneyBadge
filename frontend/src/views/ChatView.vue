@@ -135,7 +135,7 @@ import ChatMessage from '@/components/chat/ChatMessage.vue';
 
 const router = useRouter();
 const { logout, currentUser, fetchCurrentUser } = useAuth();
-const { connected, loading, loadSessions, createSession, loadMessages, sendQuery, deleteSession, connect } = useMatrixChat();
+const { connected, loading, loadSessions, createSession, loadMessages, sendQuery, deleteSession, renameSession, connect } = useMatrixChat();
 const chatStore = useChatStore();
 
 const question = ref('');
@@ -183,8 +183,7 @@ async function handleSessionCommand(command: string, sessionId: string) {
         cancelButtonText: '取消',
         inputValue: session.title,
       });
-      // 调用 API 更新会话标题
-      ElMessage.success('会话已重命名');
+      await renameSession(sessionId, newTitle);
     } catch {
       // 用户取消
     }
