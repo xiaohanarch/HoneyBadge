@@ -529,6 +529,54 @@ UI tests) after the rewrite described in item 9.
 
 ---
 
+## AgentTeams v1.2.3 评估（2026-09-02，结论：暂不升级）
+
+上游 2026-08-22 发布 v1.2.3（v1.2.2 构建于 08-08）。三个镜像（manager / worker /
+embedded）均拉取到本地，做了文件级 sha256 对比 + 运行时 build-info 校验。
+
+**变更内容（实证检查，非 changelog 转述）：**
+
+1. **Manager**：仅 `agent/` 技能层有实质变更 —— worker-management 技能新增
+   `install-worker-skill.sh`（导入 ZIP 技能包并分配给 worker）+
+   `safe-extract-worker-skill.py`（zip-slip 防护、条目数/解压大小上限），
+   配套 SKILL.md / AGENTS.md / TOOLS.md 文档更新。`scripts/`、`configs/`、
+   supervisord 配置全部字节级一致。
+2. **Worker**：`/opt/agentteams` 全部 8 个文件一致；OpenClaw 运行时为同一
+   commit（`2f35b6fa`，version 2026.4.14）的重构建，代码零差异（仅 16 个
+   build-stamp 元数据文件不同）。
+   **`merge-openclaw-config.sh` 未动 —— 网关 5 分钟重启循环 bug（item 7）
+   上游未修复**，本地深合并补丁继续必需。
+3. **Embedded**：MinIO（RELEASE.2025-09-07）/ mc（RELEASE.2025-08-13）/
+   Tuwunel start 脚本全部一致；仅 `agentteams-controller`（101MB→108MB）与
+   `agt` 两个二进制更新。该 controller 在 HoneyBadge 部署中未运行（未配置
+   `AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN`，AppService 模式关闭）。
+
+**两个核心阻塞点均未解决：**
+
+- **QwenPaw**：manager v1.2.3 仍缺 `/opt/venv/qwenpaw/` + `copaw_worker` ——
+  Phase 2 依旧 BLOCKED。
+- **网关重启循环**：worker 侧脚本字节级未变。
+
+**结论：暂不升级。** 收益（worker 技能 ZIP 导入 —— 我们用 init-workers.sh 分发，
+用不到）≈ 0；成本 = 4 个本地镜像重建 + 全量 E2E 重跑 + 3 个本地补丁全部仍需
+保留。三个 v1.2.3 镜像已留在本地（增量层 ~1GB+，总标签含共享层），供未来升级
+对比复用；不需要时可 `docker rmi` 三个 v1.2.3 tag 回收。
+
+**重新评估触发条件**（任一满足即可重查）：
+
+1. `merge-openclaw-config.sh` 上游改为 gateway 深合并 → 本地补丁可移除
+2. manager 镜像补齐 `/opt/venv/qwenpaw/` + `copaw_worker` → QwenPaw 解锁
+3. Higress controller WSL2 segfault 修复
+
+版本探测（匿名 token 流程，无需登录）：
+
+```bash
+TOKEN=$(curl -s "https://dockerauth.cn-hangzhou.aliyuncs.com/auth?service=registry.aliyuncs.com:cn-hangzhou:china:cri-r0xfyoxudmtseqq7&scope=repository:agentteams/agentteams-manager:pull" | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
+curl -s -H "Authorization: Bearer $TOKEN" "https://higress-registry.cn-hangzhou.cr.aliyuncs.com/v2/agentteams/agentteams-manager/tags/list"
+```
+
+---
+
 ## v1.1.0 → v1.1.2 (2026-06-25)
 
 > 以下为 v1.1.0 → v1.1.2 升级记录。
