@@ -140,23 +140,23 @@ jobs:
               echo "--- dispatch-to-worker.sh ---"
               kubectl -n $NS exec "$MGR_POD" -- sh -c '
                 f=$(find / -name dispatch-to-worker.sh 2>/dev/null | head -1)
-                [ -n "$f" ] && grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" "$f" || echo "(not found)"
+                [ -n "$f" ] && grep -nHE "HICLAW_MATRIX_URL|AGENTTEAMS_MATRIX_URL|TUWUNEL_URL.*6167" "$f" || echo "(not found)"
               ' 2>&1 | head -10
               echo ""
               echo "--- forward-to-user.sh ---"
               kubectl -n $NS exec "$MGR_POD" -- sh -c '
                 f=$(find / -name forward-to-user.sh 2>/dev/null | head -1)
-                [ -n "$f" ] && grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" "$f" || echo "(not found)"
+                [ -n "$f" ] && grep -nHE "HICLAW_MATRIX_URL|AGENTTEAMS_MATRIX_URL|TUWUNEL_URL.*6167" "$f" || echo "(not found)"
               ' 2>&1 | head -10
               echo ""
               echo "--- fast-forward.sh ---"
               kubectl -n $NS exec "$MGR_POD" -- sh -c '
                 f=$(find / -name fast-forward.sh 2>/dev/null | head -1)
-                [ -n "$f" ] && grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" "$f" || echo "(not found)"
+                [ -n "$f" ] && grep -nHE "HICLAW_MATRIX_URL|AGENTTEAMS_MATRIX_URL|TUWUNEL_URL.*6167" "$f" || echo "(not found)"
               ' 2>&1 | head -10
               echo ""
               echo "--- Manager env (HICLAW_*|MATRIX_*|TUWUNEL_*) ---"
-              kubectl -n $NS exec "$MGR_POD" -- sh -c 'env | grep -E "HICLAW_|MATRIX_|TUWUNEL_" | sort' 2>&1 | head -20
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'env | grep -E "HICLAW_|AGENTTEAMS_|MATRIX_|TUWUNEL_" | sort' 2>&1 | head -20
             else
               echo "(no hiclaw-manager pod found post-restart)"
             fi
