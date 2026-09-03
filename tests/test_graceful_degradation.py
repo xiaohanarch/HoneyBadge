@@ -312,6 +312,111 @@ class TestHealthEndpointBreakers:
 
 
 # ---------------------------------------------------------------------------
+# Health endpoint: lazy Nebula reconnect
+# ---------------------------------------------------------------------------
+
+
+class TestHealthLazyNebulaReconnect:
+    """Verify the health endpoint recovers from the startup race.
+
+    If lifespan ran before graphd was ready, app.state.nebula stays None and
+    the health check must attempt a lazy reconnect (E2E tc601 regression).
+    """
+
+    def _make_request(self, state: Any) -> MagicMock:
+        request = MagicMock()
+        request.app.state = state
+        return request
+
+    async def test_health_lazily_reconnects_nebula(self) -> None:
+        """A None app.state.nebula triggers reconnect; health then reports up."""
+        from types import SimpleNamespace
+
+        from honeybadge.server.health import health_check
+
+        mock_client = MagicMock()
+        mock_client._pool = MagicMock()
+        mock_client.connect = AsyncMock()
+
+        state = SimpleNamespace(
+            nebula=None,
+            pg=None,
+            redis=None,
+            config=SimpleNamespace(
+                nebula_host="graphd", nebula_port=9669,
+                nebula_user="root", nebula_password="nebula",
+            ),
+        )
+
+        with patch("honeybadge.db.nebula.NebulaGraphClient", return_value=mock_client):
+            result = await health_check(self._make_request(state))
+
+        assert state.nebula is mock_client
+        mock_client.connect.assert_awaited_once()
+        assert result["services"]["nebula"]["status"] == "up"
+
+    async def test_health_reconnect_respects_cooldown(self) -> None:
+        """Failed reconnects are not retried within the cooldown window."""
+        from types import SimpleNamespace
+
+        from honeybadge.server.health import health_check
+
+        mock_client = MagicMock()
+        mock_client._pool = None
+        mock_client.connect = AsyncMock(side_effect=Exception("graphd down"))
+
+        state = SimpleNamespace(
+            nebula=None,
+            pg=None,
+            redis=None,
+            config=SimpleNamespace(
+                nebula_host="graphd", nebula_port=9669,
+                nebula_user="root", nebula_password="nebula",
+            ),
+        )
+
+        with patch("honeybadge.db.nebula.NebulaGraphClient", return_value=mock_client):
+            first = await health_check(self._make_request(state))
+            second = await health_check(self._make_request(state))
+
+        mock_client.connect.assert_awaited_once()  # second call hit the cooldown
+        assert first["services"]["nebula"]["status"] == "down"
+        assert second["services"]["nebula"]["status"] == "down"
+
+    async def test_health_without_config_stays_down(self) -> None:
+        """No config on app.state → report down without raising."""
+        from types import SimpleNamespace
+
+        from honeybadge.server.health import health_check
+
+        state = SimpleNamespace(nebula=None, pg=None, redis=None)
+
+        result = await health_check(self._make_request(state))
+
+        assert state.nebula is None
+        assert result["services"]["nebula"]["status"] == "down"
+        assert result["services"]["nebula"]["error"] == "not connected"
+
+    async def test_health_does_not_touch_connected_client(self) -> None:
+        """An already-connected client is returned as-is (no reconnect)."""
+        from types import SimpleNamespace
+
+        from honeybadge.server.health import health_check
+
+        connected = MagicMock()
+        connected._pool = MagicMock()
+
+        state = SimpleNamespace(nebula=connected, pg=None, redis=None)
+
+        with patch("honeybadge.db.nebula.NebulaGraphClient") as mock_cls:
+            result = await health_check(self._make_request(state))
+
+        mock_cls.assert_not_called()
+        assert state.nebula is connected
+        assert result["services"]["nebula"]["status"] == "up"
+
+
+# ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
 
