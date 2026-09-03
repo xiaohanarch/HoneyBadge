@@ -4,21 +4,13 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { marked } from 'marked';
+import { renderMarkdown } from '../../utils/markdown';
 
 const props = defineProps<{
   content: string;
 }>();
 
-// 配置 marked
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-});
-
-const renderedContent = computed(() => {
-  return marked.parse(props.content, { async: false }) as string;
-});
+const renderedContent = computed(() => renderMarkdown(props.content));
 </script>
 
 <style scoped lang="scss">
