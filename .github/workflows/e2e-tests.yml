@@ -66,6 +66,8 @@ jobs:
       - name: Materialize deploy/docker/.env from template + CI secrets
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_UPSTREAM_HOST: ${{ secrets.LLM_UPSTREAM_HOST }}
+          LLM_UPSTREAM_PATH_PREFIX: ${{ secrets.LLM_UPSTREAM_PATH_PREFIX }}
         run: |
           set -euo pipefail
           cd deploy/docker
@@ -86,12 +88,19 @@ jobs:
           # glm-4-flash is an order of magnitude faster, keeping per-query
           # MCP latency well under the test timeout budget.
           export LLM_MODEL="glm-4-flash"
+          # Route LLM traffic through the gateway configured in secrets (e.g. a
+          # Volcengine API gateway fronting GLM). Both secrets must be set
+          # together — the host is useless with the wrong path prefix. Fall back
+          # to the compose defaults (open.bigmodel.cn + /api/paas/v4) when unset.
+          export LLM_UPSTREAM_HOST="${LLM_UPSTREAM_HOST:-open.bigmodel.cn}"
+          export LLM_UPSTREAM_PATH_PREFIX="${LLM_UPSTREAM_PATH_PREFIX:-/api/paas/v4}"
           python3 <<'PY'
           import os, pathlib
           p = pathlib.Path('.env')
           overrides = {k: os.environ[k] for k in (
               'LLM_API_KEY', 'LLM_MODEL', 'JWT_SECRET',
               'HICLAW_MANAGER_PASSWORD', 'HICLAW_MANAGER_GATEWAY_KEY',
+              'LLM_UPSTREAM_HOST', 'LLM_UPSTREAM_PATH_PREFIX',
           )}
           out, seen = [], set()
           for line in p.read_text().splitlines():
