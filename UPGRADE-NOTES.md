@@ -122,18 +122,25 @@ hermes-worker image lacks `hermes-agent` + `pip3` — self-built
     historical data) and out of scope for this upgrade.
   - `docs/baselines/v1.1.{0,2}/`, `docs/superpowers/{plans,specs}/` —
     historical snapshots, out of scope
-- **4.3 Docs + commit + PR** — partial. Docs updated (CLAUDE.md, README.md,
-  UPGRADE-NOTES.md). Commits local on `ralph/agentteams-v1.2.2-upgrade`.
-  **PR not pushed** — GitHub PAT in remote URL expired; `gh` keyring token
-  invalid. Needs `gh auth login` or new PAT.
+- **4.3 Docs + commit + PR** — **DONE (2026-09-18)**. Docs updated (CLAUDE.md,
+  README.md, UPGRADE-NOTES.md). PR #208 squash-merged to master (d47b41d)
+  with all CI checks green, including the full E2E suite.
 
 ### Remaining Work
 
 | Item | Blocker | Action |
 |------|---------|--------|
-| Phase 4.1 — E2E full regression (9 groups) | `docker compose` stack | local run |
-| Phase 4.3 — push branch + open PR | GitHub PAT expired | `gh auth login` |
 | Phase 2 — QwenPaw switch + 3 workaround removals | upstream manager image missing `/opt/venv/qwenpaw/` + `copaw_worker` | wait for upstream fix |
+
+**Closed 2026-09-18**:
+- Phase 4.1 — E2E full regression: **DONE**. All 9 groups green in CI
+  (run 35367024483, 42m40s) after routing LLM traffic through the
+  Volcengine GLM gateway (`LLM_API_KEY` / `LLM_UPSTREAM_HOST` /
+  `LLM_UPSTREAM_PATH_PREFIX` secrets; see e2e-tests.yml materialize step).
+  Previously-failing chat tests tc102/tc105/tc107 (401) and tc109
+  (timeout) all passed.
+- Phase 4.3 — push branch + open PR: **DONE**. PR #208 squash-merged to
+  master (d47b41d) after `gh auth login` replaced the expired PAT.
 
 ### 2026-09-01 — Local E2E unblocking (Phase 4.1 prep)
 
