@@ -33,7 +33,7 @@ import urllib.parse
 import urllib.request
 
 CHAR_BUDGET = 8000  # If history exceeds this, reduce rounds.
-MANAGER_MXID = "@manager:matrix-local.hiclaw.io"
+MANAGER_MXID = "@manager:matrix-local.agentteams.io"
 
 
 def _load_manager_token() -> tuple[str, str]:
@@ -47,9 +47,9 @@ def _load_manager_token() -> tuple[str, str]:
     token = matrix.get("accessToken", "")
     if not token:
         raise RuntimeError("Manager Matrix accessToken not found in openclaw.json")
-    # homeserver base URL; HICLAW_MATRIX_URL wins (split topology), else network alias.
+    # homeserver base URL; AGENTTEAMS_MATRIX_URL wins (split topology), else network alias.
     base = os.environ.get(
-        "HICLAW_MATRIX_URL", "http://matrix-local.hiclaw.io:6167"
+        "AGENTTEAMS_MATRIX_URL", "http://matrix-local.agentteams.io:6167"
     )
     return token, base
 
@@ -186,7 +186,7 @@ def main() -> int:
     try:
         token, base = _load_manager_token()
         matrix_domain = os.environ.get(
-            "HICLAW_MATRIX_DOMAIN", "matrix-local.hiclaw.io"
+            "AGENTTEAMS_MATRIX_DOMAIN", "matrix-local.agentteams.io"
         )
         # Strip hb- prefix to avoid @hb-hb-admin:...
         uid_clean = args.user_id.removeprefix("hb-")

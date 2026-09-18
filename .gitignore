@@ -121,3 +121,4 @@ nebula-test/
 
 # One-off ETL fix scripts (already applied, kept locally for reference)
 scripts/apply_etl_fixes.py
+.backups/

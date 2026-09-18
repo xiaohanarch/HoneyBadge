@@ -13,7 +13,7 @@ import {
 import type { ChatMessage, ChatSession } from '@/types'
 
 const MANAGER_USER_ID =
-  import.meta.env.VITE_MANAGER_USER_ID || '@manager:matrix-local.hiclaw.io'
+  import.meta.env.VITE_MANAGER_USER_ID || '@manager:matrix-local.agentteams.io'
 
 // Converts a Matrix room message event to a ChatMessage for history restore.
 // Returns null for non-message events, worker progress updates, and empty bodies.
@@ -399,6 +399,17 @@ export function useMatrixChat() {
     }
   }
 
+  async function renameSession(sessionId: string, title: string) {
+    try {
+      await sessionApi.updateSession(sessionId, title)
+      chatStore.updateSessionTitle(sessionId, title)
+      ElMessage.success('会话已重命名')
+    } catch (error) {
+      console.error('Failed to rename session:', error)
+      ElMessage.error('重命名会话失败')
+    }
+  }
+
   async function connect() {
     await ensureInitialized()
   }
@@ -426,6 +437,7 @@ export function useMatrixChat() {
     createSession,
     loadMessages,
     deleteSession,
+    renameSession,
     connect,
     disconnect,
   }

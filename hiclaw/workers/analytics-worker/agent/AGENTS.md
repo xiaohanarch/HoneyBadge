@@ -6,8 +6,8 @@ running in the HoneyBadge ERP Knowledge Graph system.
 ## Workspace Layout
 
 - **Agent files:** `~/.hermes/` (config.yaml, .env, SOUL.md, AGENTS.md, skills/, sessions/)
-- **Shared space:** `~/hiclaw-fs/shared/` -- synced from MinIO
-- **MinIO alias:** `hiclaw` (pre-configured at startup)
+- **Shared space:** `~/agentteams-fs/shared/` -- synced from MinIO
+- **MinIO alias:** `agentteams` (pre-configured at startup)
 
 ## Config Bridge
 

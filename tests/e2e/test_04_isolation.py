@@ -5,26 +5,33 @@ HoneyBadge - Enterprise Knowledge Graph Assistant
 Test Coverage:
 - TC-301: Admin sessions invisible to analyst
 - TC-302: Analyst sessions invisible to admin
-- TC-303: Cross-org data isolation (admin:ALL vs analyst:1000 vs subsidiary:1011)
+- TC-303: Cross-org data isolation (admin:ALL vs analyst:1000 vs subsidiary:1021)
 - TC-304: Subsidiary user cannot see parent org data
 - TC-305: Session data isolated by user
 - TC-306: Cache isolation between users
 - TC-307: Query results filtered by org_id
 - TC-308: Matrix room isolation per user
 
-Data实际情况:
-- PurchaseOrder: org_id 1000-1039 各约320-350条
-- SalesOrder: org_id 1000-1039 各约170-230条
-- admin: org_ids=None, data_scope=ALL → sees ALL (~13000 PO)
-- analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (~320 PO)
-- subsidiary_lead: org_ids=[1011], data_scope=ORG → sees ONLY org 1011 (~337 PO)
+Data实际情况 (2026-09-01 dataset):
+- PurchaseOrder total: ~24300 条
+- admin: org_ids=None, data_scope=ALL → sees ALL (~24300 PO)
+- analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (~1578 PO)
+- subsidiary_lead: org_ids=[1021], data_scope=ORG → sees ONLY org 1021 (~14 PO)
+- Supplier "problem" signals (2026-09-01 dataset): 2 FROZEN suppliers (both
+  org 1000, deliberately injected as an ETL data-quality issue — see
+  scripts/fetch_usaspending_ptp.py); 0 BLOCKED, 0 C/D credit ratings,
+  0 expired qualifications. So "problem supplier" volume tests can only
+  verify admin=2 vs subsidiary=0, not a volume ratio.
+- POs placed with FROZEN suppliers: 10 total (org1001=8, org1000=1, org1004=1;
+  org1021=0). No three-way-match amount deviations exist (all invoice/PO
+  amount ratios are exactly 1.0), so generic "高风险" analyses return 0.
 """
 import pytest
 
 from tests.e2e.conftest import send_query_on_page
 from tests.e2e.selectors import MSG_ASSISTANT
 
-pytestmark = pytest.mark.requires_llm
+pytestmark = [pytest.mark.isolation, pytest.mark.requires_llm]
 
 
 class TestUserIsolation:
@@ -80,16 +87,16 @@ class TestUserIsolation:
 
         admin (org_ids=None) sees ALL data
         analyst (org_ids=[1000]) sees ONLY org 1000 data
-        subsidiary_lead (org_ids=[1011]) sees ONLY org 1011 data
+        subsidiary_lead (org_ids=[1021]) sees ONLY org 1021 data
 
         # reset_manager: TC-303 is the 3rd test in the file; by this point the
         # Manager session has ~4 accumulated turns from TC-301/302, and glm-5.2
         # enters repetition loops at 5-10 turns, causing the 240s Stage-1 timeout.
 
         Key assertion: counts should differ significantly
-        - admin sees ~13000 records (all 40 orgs)
-        - analyst sees ~320 records (only org 1000)
-        - subsidiary sees ~337 records (only org 1011)
+        - admin sees ~24,327 records (all 58 orgs)
+        - analyst sees ~1,578 records (only org 1000)
+        - subsidiary sees ~14 records (only org 1021)
         """
         # Admin query
         admin_page = create_user_page("admin", "admin123")
@@ -113,21 +120,24 @@ class TestUserIsolation:
     def test_tc304_subsidiary_cannot_see_parent_org(self, create_user_page):
         """TC-304: Subsidiary user cannot see parent org (other orgs) data.
 
-        subsidiary_lead org_ids=[1011] should ONLY see org 1011 data.
+        subsidiary_lead org_ids=[1021] should ONLY see org 1021 data.
         Should NOT see data from org 1000, 1001, etc.
         """
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
 
-        # Query采购订单 - should return ONLY org 1011's data
+        # Query采购订单 - should return ONLY org 1021's data
         subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
-        # subsidiary_lead with org_id=1011 should see ~337 records
-        assert 200 < subsidiary_count < 500, \
-            f"Subsidiary (org 1011) should see ~337 records. Got: {subsidiary_count}. " \
+        # subsidiary_lead with org_id=1021 sees only org 1021's POs
+        # (14 in the 2026-09-01 dataset; the count varies with ETL refreshes,
+        # so assert a loose range — the key property is "some data, but far
+        # below the ~24k total").
+        assert 0 < subsidiary_count < 500, \
+            f"Subsidiary (org 1021) should see only org 1021 records. Got: {subsidiary_count}. " \
             f"Response: {subsidiary_text[:200]}"
 
-        # Should NOT see all records (would be ~13000 if no org filtering)
+        # Should NOT see all records (would be ~24300 if no org filtering)
         assert subsidiary_count < 1000, \
             f"Subsidiary should NOT see all orgs data. Got: {subsidiary_count}. " \
             f"org_id filter not working properly."
@@ -179,7 +189,7 @@ class TestUserIsolation:
     def test_tc307_query_results_filtered_by_org_id(self, create_user_page):
         """TC-307: Query results respect org_id filtering.
 
-        analyst (org=1000) vs subsidiary (org=1011) should see DIFFERENT data.
+        analyst (org=1000) vs subsidiary (org=1021) should see DIFFERENT data.
         This is the KEY data isolation test.
         """
         # Admin query - baseline (all data)
@@ -192,7 +202,7 @@ class TestUserIsolation:
         analyst_text = send_query_on_page(analyst_page, "统计采购订单数量", timeout=120000)
         analyst_count = self._extract_count(analyst_text)
 
-        # Subsidiary query (org_id=1011)
+        # Subsidiary query (org_id=1021)
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
         subsidiary_count = self._extract_count(subsidiary_text)
@@ -207,16 +217,18 @@ class TestUserIsolation:
         assert admin_count > analyst_count * 10, \
             f"Admin ({admin_count}) should see >> analyst ({analyst_count})"
 
-        # 3. admin >> subsidiary (admin all orgs, subsidiary only org 1011)
+        # 3. admin >> subsidiary (admin all orgs, subsidiary only org 1021)
         assert admin_count > subsidiary_count * 10, \
             f"Admin ({admin_count}) should see >> subsidiary ({subsidiary_count})"
 
-        # 4. Verify analyst and subsidiary see limited data (~300-650 each)
-        # L3 enforces org_id IN [1000] for analyst (639 POs) and org_id IN [1021]
-        # for subsidiary_lead (310 POs). Upper bound raised from 500→700 to
-        # accommodate the actual org 1000 dataset size.
-        assert 200 < analyst_count < 700, f"Analyst should see ~640 records. Got: {analyst_count}"
-        assert 200 < subsidiary_count < 500, f"Subsidiary should see ~337 records. Got: {subsidiary_count}"
+        # 4. Verify analyst and subsidiary see limited data
+        # L3 enforces org_id IN [1000] for analyst and org_id IN [1021]
+        # for subsidiary_lead. 2026-09-01 dataset: org 1000 = 1578 POs,
+        # org 1021 = 14 POs. Bounds are loose because the ETL dataset
+        # drifts over time; the key property is org-filtered counts far
+        # below the ~24k total.
+        assert 200 < analyst_count < 2000, f"Analyst should see ~1578 records. Got: {analyst_count}"
+        assert 0 < subsidiary_count < 500, f"Subsidiary should see ~14 records. Got: {subsidiary_count}"
 
     def test_tc308_matrix_room_isolation(self, create_user_page):
         """TC-308: Matrix rooms are isolated per user.
@@ -244,13 +256,13 @@ class TestUserIsolation:
         """
         # PO numbers by org (from test data analysis):
         # org 1000: PO00000001, PO00000002, etc.
-        # org 1011: PO00000002, PO00000004, etc. (different set)
+        # org 1021: a different, disjoint PO set
 
         # Analyst (org=1000) queries for PO00000001
         analyst_page = create_user_page("analyst", "analyst123")
         analyst_text = send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=120000)
 
-        # Subsidiary (org=1011) queries for PO00000002
+        # Subsidiary (org=1021) queries for PO00000002
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         subsidiary_text = send_query_on_page(subsidiary_page, "查询采购订单PO00000002", timeout=120000)
 
@@ -266,7 +278,10 @@ class TestUserIsolation:
     # 大领导(admin)权限大，可以看到全公司问题(万级数据)
     # 小领导(subsidiary/analyst)权限小，只能看到本组织问题(百级数据)
 
-    @pytest.mark.timeout(600)
+    # 2×480s settles + 2 logins; observed ~6.5 min per query via the
+    # manager → graph-worker → analytics-worker delegation chain (2026-09-01),
+    # so 600s was structurally impossible.
+    @pytest.mark.timeout(1200)
     def test_tc310_high_risk_po_data_volume_isolation(self, reset_manager, create_user_page):
         """TC-310: 高风险采购订单数据量差异 - 体现权限视野差异
 
@@ -276,33 +291,35 @@ class TestUserIsolation:
 
         断言: admin >> subsidiary (体现权限差距)
 
-        Note: org 1021 may have 0 high-risk POs (no BLOCKED suppliers or
-        C/D credit ratings in that org). This is correct L3 behavior —
-        subsidiary only sees their org's data. The test verifies admin
-        sees strictly more high-risk POs than subsidiary.
+        2026-09-01 dataset: 原"统计高风险的采购订单数量"会被
+        analytics-worker 的 anomaly-detection 技能按"三单匹配金额偏离"分析,
+        而当前数据集所有发票/PO金额比率恰好为 1.0 → 高风险数恒为 0(真实结果,
+        非查询缺陷)。数据集中实际存在的高风险信号是"向 FROZEN 供应商下的
+        采购订单"共 10 笔 (org1001=8, org1000=1, org1004=1), 与旧数据集的
+        "89笔BLOCKED供应商采购"对应。故改用显式 FROZEN 查询:
+        admin=10, subsidiary(org1021)=0。
 
         reset_manager clears Manager + graph-worker + analytics-worker
         sessions to prevent stale worker context (e.g. "MCP服务不可用"
         hallucinations from forceFlushByTranscriptSize) from polluting
         the dispatch.
         """
-        # admin查询 — analytics-worker takes ~6 min, use 480s settle
+        # admin查询 — may route to analytics-worker (统计 keyword), use 480s settle
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计高风险的采购订单数量",
+        admin_text = send_query_on_page(admin_page, "统计向状态为FROZEN的供应商下的采购订单数量",
                                         timeout=120000, settle_timeout_ms=480000)
         admin_count = self._extract_count(admin_text)
 
         # subsidiary查询
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计高风险的采购订单数量",
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计向状态为FROZEN的供应商下的采购订单数量",
                                              timeout=120000, settle_timeout_ms=480000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         # 断言: 体现权限差距
-        # admin应找到高风险PO (全公司89笔BLOCKED供应商采购)
+        # admin应找到高风险PO (全公司10笔FROZEN供应商采购, 2026-09-01 dataset)
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
-        # subsidiary可能有0笔高风险PO (org 1021无BLOCKED供应商)
-        # 关键是admin看到的高风险PO严格多于subsidiary
+        # org 1021无FROZEN供应商采购, subsidiary必须看到更少(0)
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count}) should > Subsidiary({subsidiary_count}). " \
             f"权限差距: admin看全公司，subsidiary只看org1021。" \
@@ -313,7 +330,7 @@ class TestUserIsolation:
         """TC-311: 大额采购订单数据量差异
 
         - admin: 全org大额PO
-        - subsidiary: org1011大额PO
+        - subsidiary: org1021大额PO
         """
         admin_page = create_user_page("admin", "admin123")
         admin_text = send_query_on_page(admin_page, "统计金额超过10万的采购订单数量", timeout=120000, settle_timeout_ms=180000)
@@ -357,18 +374,32 @@ class TestUserIsolation:
         """TC-313: 供应商问题数据量差异
 
         体现: 大领导可发现跨多个org的供应商问题，小领导只能看到本org
+
+        2026-09-01 dataset: 唯一"问题供应商"信号是 2 家 FROZEN 供应商
+        (均为 org 1000，ETL 数据质量测试故意注入)。无 BLOCKED / C/D 评级 /
+        过期资质。原查询"统计有问题的供应商数量"让 LLM 按 ontology 生成
+        status=="BLOCKED" OR credit_rating IN ["C","D"] → 0 条(数据不支持)。
+        改为显式 FROZEN 查询: admin=2, subsidiary=0 (org 1021 无 FROZEN) —
+        仍验证 L3 隔离，只是无法验证数量级差距。
+        注意: ontology supplier.md 将"冻结"映射为 BLOCKED，所以查询里直接
+        用字面值 FROZEN，避免 LLM 翻译成 BLOCKED。
         """
         admin_page = create_user_page("admin", "admin123")
-        admin_text = send_query_on_page(admin_page, "统计有问题的供应商数量", timeout=120000, settle_timeout_ms=180000)
+        admin_text = send_query_on_page(admin_page, "统计状态为FROZEN的供应商数量",
+                                        timeout=120000, settle_timeout_ms=180000)
         admin_count = self._extract_count(admin_text)
 
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
-        subsidiary_text = send_query_on_page(subsidiary_page, "统计有问题的供应商数量", timeout=120000, settle_timeout_ms=180000)
+        subsidiary_text = send_query_on_page(subsidiary_page, "统计状态为FROZEN的供应商数量",
+                                             timeout=120000, settle_timeout_ms=180000)
         subsidiary_count = self._extract_count(subsidiary_text)
 
         assert admin_count > 0, f"Admin应有数据. Response: {admin_text[:500]}"
-        assert subsidiary_count > 0, f"Subsidiary应有数据. Response: {subsidiary_text[:500]}"
-        assert admin_count > subsidiary_count * 2, \
+        # Both FROZEN suppliers are org 1000; subsidiary (org 1021) must see 0.
+        assert subsidiary_count == 0, \
+            f"Subsidiary(org1021)不应看到org1000的FROZEN供应商. " \
+            f"Subsidiary响应: {subsidiary_text[:300]}"
+        assert admin_count > subsidiary_count, \
             f"Admin({admin_count})>>Subsidiary({subsidiary_count}). " \
             f"RBP权限差异体现在数据可见量上。" \
             f"Admin响应: {admin_text[:300]}; Subsidiary响应: {subsidiary_text[:300]}"
@@ -377,9 +408,9 @@ class TestUserIsolation:
     def test_tc314_payment_issues_isolation(self, reset_manager, create_user_page):
         """TC-314: 已批准采购订单数据量差异
 
-        admin看到所有org的已批准采购订单，subsidiary只看到org1011的。
+        admin看到所有org的已批准采购订单，subsidiary只看到org1021的。
         用"统计已批准的采购订单数量"——APPROVED是最常见状态(7181/8297)，
-        确保subsidiary在org_id=1011范围内有数据。
+        确保subsidiary在org_id=1021范围内有数据。
         PO查询的L3过滤最为稳定。
         """
         admin_page = create_user_page("admin", "admin123")
@@ -397,6 +428,9 @@ class TestUserIsolation:
             f"体现权限层级决定数据视野。" \
             f"Admin响应: {admin_text[:300]}; Subsidiary响应: {subsidiary_text[:300]}"
 
+    # No marker → falls back to pytest.ini global timeout=300s, which cannot
+    # fit the 2×480s settles below.
+    @pytest.mark.timeout(1200)
     def test_tc315_cross_org_fraud_detection_ability(self, create_user_page):
         """TC-315: 跨org欺诈检测能力差异
 

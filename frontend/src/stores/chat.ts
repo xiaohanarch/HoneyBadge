@@ -51,6 +51,12 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function updateSessionTitle(sessionId: string, title: string) {
+    sessions.value = sessions.value.map((s) =>
+      s.id === sessionId ? { ...s, title } : s
+    );
+  }
+
   function setCurrentSession(sessionId: string) {
     currentSessionId.value = sessionId;
   }
@@ -182,6 +188,7 @@ export const useChatStore = defineStore('chat', () => {
     setSessions,
     addSession,
     removeSession,
+    updateSessionTitle,
     setCurrentSession,
     setMessages,
     addMessage,

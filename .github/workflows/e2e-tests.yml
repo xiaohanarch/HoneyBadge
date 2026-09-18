@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       test_filter:
-        description: 'Run specific test marker (e.g., auth, chat, session, infra, observability)'
+        description: 'Run specific test marker (e.g., auth, chat, session, infra, observability, context, routing)'
         required: false
         default: ''
 
@@ -66,6 +66,8 @@ jobs:
       - name: Materialize deploy/docker/.env from template + CI secrets
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_UPSTREAM_HOST: ${{ secrets.LLM_UPSTREAM_HOST }}
+          LLM_UPSTREAM_PATH_PREFIX: ${{ secrets.LLM_UPSTREAM_PATH_PREFIX }}
         run: |
           set -euo pipefail
           cd deploy/docker
@@ -86,12 +88,19 @@ jobs:
           # glm-4-flash is an order of magnitude faster, keeping per-query
           # MCP latency well under the test timeout budget.
           export LLM_MODEL="glm-4-flash"
+          # Route LLM traffic through the gateway configured in secrets (e.g. a
+          # Volcengine API gateway fronting GLM). Both secrets must be set
+          # together — the host is useless with the wrong path prefix. Fall back
+          # to the compose defaults (open.bigmodel.cn + /api/paas/v4) when unset.
+          export LLM_UPSTREAM_HOST="${LLM_UPSTREAM_HOST:-open.bigmodel.cn}"
+          export LLM_UPSTREAM_PATH_PREFIX="${LLM_UPSTREAM_PATH_PREFIX:-/api/paas/v4}"
           python3 <<'PY'
           import os, pathlib
           p = pathlib.Path('.env')
           overrides = {k: os.environ[k] for k in (
               'LLM_API_KEY', 'LLM_MODEL', 'JWT_SECRET',
               'HICLAW_MANAGER_PASSWORD', 'HICLAW_MANAGER_GATEWAY_KEY',
+              'LLM_UPSTREAM_HOST', 'LLM_UPSTREAM_PATH_PREFIX',
           )}
           out, seen = [], set()
           for line in p.read_text().splitlines():
@@ -185,7 +194,7 @@ jobs:
         run: |
           # Truncate the init log so the readiness check waits for a FRESH
           # "auto-init complete" marker, not the stale one from the first boot.
-          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/agentteams/honeybadge-init.log 2>/dev/null || true
           cd deploy/docker
           docker compose restart hiclaw-manager hiclaw-graph-worker hiclaw-analytics-worker
         timeout-minutes: 5
@@ -197,7 +206,7 @@ jobs:
         # 20s for the Matrix client to connect to Tuwunel and sync rooms.
         run: |
           echo "Waiting for Manager background init..."
-          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          INIT_LOG="/var/log/agentteams/honeybadge-init.log"
           MARKER="HoneyBadge auto-init complete!"
           for i in {1..30}; do
             CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
@@ -258,7 +267,7 @@ jobs:
           echo "=== Manager openclaw process ==="
           timeout 10 docker exec honeybadge-hiclaw-manager pgrep -fa openclaw 2>/dev/null || echo "(openclaw not running)"
           echo "=== Manager init log tail ==="
-          timeout 10 docker exec honeybadge-hiclaw-manager tail -20 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || echo "(no init log)"
+          timeout 10 docker exec honeybadge-hiclaw-manager tail -20 /var/log/agentteams/honeybadge-init.log 2>/dev/null || echo "(no init log)"
         timeout-minutes: 5
 
       - name: Run E2E Tests - Auth & Chat
@@ -284,17 +293,17 @@ jobs:
         run: |
           echo "=== Cleaning MinIO shared/tasks/ ==="
           timeout 10 docker exec honeybadge-hiclaw-embedded \
-            mc rm --recursive --force hiclaw/hiclaw-storage/shared/tasks/ 2>/dev/null || true
+            mc rm --recursive --force agentteams/agentteams-storage/shared/tasks/ 2>/dev/null || true
           echo "=== Disk usage ==="
           df -h / | tail -1
           timeout 10 docker exec honeybadge-hiclaw-embedded \
-            mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+            mc admin info agentteams 2>/dev/null | grep -i "disk\|drive\|usage" || true
           echo "=== Restarting Manager after cleanup ==="
-          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/agentteams/honeybadge-init.log 2>/dev/null || true
           cd deploy/docker
           docker compose restart hiclaw-manager
           echo "Waiting for Manager background init..."
-          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          INIT_LOG="/var/log/agentteams/honeybadge-init.log"
           MARKER="HoneyBadge auto-init complete!"
           for i in {1..30}; do
             CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
@@ -325,17 +334,17 @@ jobs:
         run: |
           echo "=== Cleaning MinIO shared/tasks/ ==="
           timeout 10 docker exec honeybadge-hiclaw-embedded \
-            mc rm --recursive --force hiclaw/hiclaw-storage/shared/tasks/ 2>/dev/null || true
+            mc rm --recursive --force agentteams/agentteams-storage/shared/tasks/ 2>/dev/null || true
           echo "=== Disk usage ==="
           df -h / | tail -1
           timeout 10 docker exec honeybadge-hiclaw-embedded \
-            mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+            mc admin info agentteams 2>/dev/null | grep -i "disk\|drive\|usage" || true
           echo "=== Restarting Manager after cleanup ==="
-          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/agentteams/honeybadge-init.log 2>/dev/null || true
           cd deploy/docker
           docker compose restart hiclaw-manager
           echo "Waiting for Manager background init..."
-          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          INIT_LOG="/var/log/agentteams/honeybadge-init.log"
           MARKER="HoneyBadge auto-init complete!"
           for i in {1..30}; do
             CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
@@ -366,17 +375,17 @@ jobs:
         run: |
           echo "=== Cleaning MinIO shared/tasks/ ==="
           timeout 10 docker exec honeybadge-hiclaw-embedded \
-            mc rm --recursive --force hiclaw/hiclaw-storage/shared/tasks/ 2>/dev/null || true
+            mc rm --recursive --force agentteams/agentteams-storage/shared/tasks/ 2>/dev/null || true
           echo "=== Disk usage ==="
           df -h / | tail -1
           timeout 10 docker exec honeybadge-hiclaw-embedded \
-            mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+            mc admin info agentteams 2>/dev/null | grep -i "disk\|drive\|usage" || true
           echo "=== Restarting Manager after cleanup ==="
-          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/agentteams/honeybadge-init.log 2>/dev/null || true
           cd deploy/docker
           docker compose restart hiclaw-manager
           echo "Waiting for Manager background init..."
-          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          INIT_LOG="/var/log/agentteams/honeybadge-init.log"
           MARKER="HoneyBadge auto-init complete!"
           for i in {1..30}; do
             CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
@@ -407,17 +416,17 @@ jobs:
         run: |
           echo "=== Cleaning MinIO shared/tasks/ ==="
           timeout 10 docker exec honeybadge-hiclaw-embedded \
-            mc rm --recursive --force hiclaw/hiclaw-storage/shared/tasks/ 2>/dev/null || true
+            mc rm --recursive --force agentteams/agentteams-storage/shared/tasks/ 2>/dev/null || true
           echo "=== Disk usage ==="
           df -h / | tail -1
           timeout 10 docker exec honeybadge-hiclaw-embedded \
-            mc admin info hiclaw 2>/dev/null | grep -i "disk\|drive\|usage" || true
+            mc admin info agentteams 2>/dev/null | grep -i "disk\|drive\|usage" || true
           echo "=== Restarting Manager after cleanup ==="
-          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/hiclaw/honeybadge-init.log 2>/dev/null || true
+          docker exec honeybadge-hiclaw-manager truncate -s 0 /var/log/agentteams/honeybadge-init.log 2>/dev/null || true
           cd deploy/docker
           docker compose restart hiclaw-manager
           echo "Waiting for Manager background init..."
-          INIT_LOG="/var/log/hiclaw/honeybadge-init.log"
+          INIT_LOG="/var/log/agentteams/honeybadge-init.log"
           MARKER="HoneyBadge auto-init complete!"
           for i in {1..30}; do
             CONTENT=$(timeout 10 docker exec honeybadge-hiclaw-manager cat "$INIT_LOG" 2>/dev/null || echo "")
@@ -434,6 +443,20 @@ jobs:
           echo "Waiting 15s for Matrix client to reconnect..."
           sleep 15
         timeout-minutes: 5
+
+      - name: Run E2E Tests - Context & Routing
+        # test_10/test_11 are requires_llm tests. Unlike the session/isolation/
+        # permission/antihal/mcp stages (which omit the key and skip), this
+        # stage runs them for real: worker routing is the core regression
+        # risk of the AgentTeams v1.2.2 upgrade.
+        if: github.event.inputs.test_filter == '' || contains('context,routing', github.event.inputs.test_filter)
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          echo "=== Running Context & Routing Tests ==="
+          pytest tests/e2e/test_10_context_and_memory.py tests/e2e/test_11_worker_routing.py \
+            -v --tb=short --junitxml=test-results/context-routing.xml \
+            --timeout=300 2>&1 | tee -a test-output.txt || true
 
       - name: Run E2E Tests - Observability
         if: false  # skipped — observability tests disabled to fit CI time budget
@@ -475,35 +498,29 @@ jobs:
           docker system df
           echo "=== MinIO bucket size ==="
           timeout 10 docker exec honeybadge-hiclaw-embedded \
-            mc du hiclaw/hiclaw-storage 2>/dev/null || echo "(mc du failed)"
+            mc du agentteams/agentteams-storage 2>/dev/null || echo "(mc du failed)"
           echo "=== Docker ps ==="
           docker ps -a
           echo "=== Compose logs (tail=2000) ==="
           docker compose -f deploy/docker/docker-compose.yaml logs --tail=2000 || true
           echo "=== Manager init log (background init — invisible in compose logs) ==="
-          timeout 10 docker exec honeybadge-hiclaw-manager cat /var/log/hiclaw/honeybadge-init.log 2>/dev/null || echo "(init log not available)"
+          timeout 10 docker exec honeybadge-hiclaw-manager cat /var/log/agentteams/honeybadge-init.log 2>/dev/null || echo "(init log not available)"
           echo "=== aigw-bypass access log (last 50 lines) ==="
           timeout 10 docker exec honeybadge-hiclaw-aigw-bypass tail -50 /var/log/nginx/access.log 2>/dev/null || echo "(access log not available)"
           echo "=== aigw-bypass error log (last 50 lines) ==="
           timeout 10 docker exec honeybadge-hiclaw-aigw-bypass tail -50 /var/log/nginx/error.log 2>/dev/null || echo "(error log not available)"
           echo "=== Worker openclaw.json (graph-worker) ==="
-          timeout 10 docker exec honeybadge-hiclaw-graph-worker cat /root/hiclaw-fs/agents/graph-worker/openclaw.json 2>/dev/null || echo "(openclaw.json not available)"
+          timeout 10 docker exec honeybadge-graph-worker cat /root/agentteams-fs/agents/graph-worker/openclaw.json 2>/dev/null || echo "(openclaw.json not available)"
           echo "=== Manager state.json ==="
-          timeout 10 docker exec honeybadge-hiclaw-manager cat /root/hiclaw-fs/agents/manager/state.json 2>/dev/null || echo "(state.json not available)"
-          echo "=== Hermes errors.log (Manager, last 100 lines) ==="
-          timeout 10 docker exec honeybadge-hiclaw-manager tail -100 /root/.hermes/logs/errors.log 2>/dev/null || echo "(hermes errors.log not available on manager)"
-          echo "=== Hermes agent.log (Manager, last 100 lines) ==="
-          timeout 10 docker exec honeybadge-hiclaw-manager tail -100 /root/.hermes/logs/agent.log 2>/dev/null || echo "(hermes agent.log not available on manager)"
-          echo "=== Hermes errors.log (graph-worker, last 100 lines) ==="
-          timeout 10 docker exec honeybadge-hiclaw-graph-worker tail -100 /root/.hermes/logs/errors.log 2>/dev/null || echo "(hermes errors.log not available on graph-worker)"
-          echo "=== Hermes errors.log (analytics-worker, last 100 lines) ==="
-          timeout 10 docker exec honeybadge-hiclaw-analytics-worker tail -100 /root/.hermes/logs/errors.log 2>/dev/null || echo "(hermes errors.log not available on analytics-worker)"
+          timeout 10 docker exec honeybadge-hiclaw-manager cat /root/agentteams-fs/manager/state.json 2>/dev/null || echo "(state.json not available)"
+          echo "=== Openclaw error lines (Manager, last 50) ==="
+          timeout 10 docker exec honeybadge-hiclaw-manager bash -c 'grep -hiE "error|exception" /tmp/openclaw/openclaw-*.log 2>/dev/null | tail -50' || echo "(no error lines on manager)"
           echo "=== Openclaw logs (Manager, last 100 lines) ==="
           timeout 10 docker exec honeybadge-hiclaw-manager bash -c 'tail -100 /tmp/openclaw/openclaw-*.log 2>/dev/null' || echo "(openclaw logs not available on manager)"
           echo "=== Openclaw logs (graph-worker, last 100 lines) ==="
-          timeout 10 docker exec honeybadge-hiclaw-graph-worker bash -c 'tail -100 /tmp/openclaw/openclaw-*.log 2>/dev/null' || echo "(openclaw logs not available on graph-worker)"
+          timeout 10 docker exec honeybadge-graph-worker bash -c 'tail -100 /tmp/openclaw/openclaw-*.log 2>/dev/null' || echo "(openclaw logs not available on graph-worker)"
           echo "=== Openclaw logs (analytics-worker, last 100 lines) ==="
-          timeout 10 docker exec honeybadge-hiclaw-analytics-worker bash -c 'tail -100 /tmp/openclaw/openclaw-*.log 2>/dev/null' || echo "(openclaw logs not available on analytics-worker)"
+          timeout 10 docker exec honeybadge-analytics-worker bash -c 'tail -100 /tmp/openclaw/openclaw-*.log 2>/dev/null' || echo "(openclaw logs not available on analytics-worker)"
         timeout-minutes: 10
 
   # ===========================================================================

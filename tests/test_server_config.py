@@ -67,7 +67,7 @@ class TestDefaultConfig:
         """Should have reserved URL defaults."""
         config = ServerConfig()
         assert config.matrix_url == ""
-        assert config.hiclaw_manager_url == ""
+        assert config.agentteams_manager_url == ""
 
     def test_default_config(self):
         """test_default_config: verify all defaults are correct types."""
@@ -107,7 +107,7 @@ class TestConfigFromEnv:
         monkeypatch.setenv("MILVUS_HOST", "milvus-server")
         monkeypatch.setenv("MILVUS_PORT", "19531")
         monkeypatch.setenv("MATRIX_URL", "http://matrix.example.com")
-        monkeypatch.setenv("HICLAW_MANAGER_URL", "http://hiclaw.example.com")
+        monkeypatch.setenv("AGENTTEAMS_MANAGER_URL", "http://agentteams.example.com")
 
         config = ServerConfig.from_env()
 
@@ -135,7 +135,7 @@ class TestConfigFromEnv:
         assert config.milvus_host == "milvus-server"
         assert config.milvus_port == 19531
         assert config.matrix_url == "http://matrix.example.com"
-        assert config.hiclaw_manager_url == "http://hiclaw.example.com"
+        assert config.agentteams_manager_url == "http://agentteams.example.com"
 
     def test_partial_env_override(self, monkeypatch):
         """Partial env vars should override only those fields."""

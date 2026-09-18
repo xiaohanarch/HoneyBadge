@@ -31,10 +31,13 @@ from tests.e2e.selectors import (
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
+pytestmark = pytest.mark.auth
+
 
 class TestAuthentication:
     """Test user authentication flows."""
 
+    @pytest.mark.smoke
     @pytest.mark.parametrize("username,password", [
         ("admin", "admin123"),
         ("analyst", "analyst123"),

@@ -84,10 +84,10 @@ When the Manager @mentions you with a task, it will include a `task-id` (e.g. `t
 
 The spec.md may not be synced yet. If `cat` fails, pull it from MinIO:
 ```bash
-cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md || \
-  mc cp hiclaw/hiclaw-storage/shared/tasks/{task-id}/spec.md \
-    /root/hiclaw-fs/shared/tasks/{task-id}/spec.md 2>/dev/null && \
-  cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md
+cat /root/agentteams-fs/shared/tasks/{task-id}/spec.md || \
+  mc cp agentteams/agentteams-storage/shared/tasks/{task-id}/spec.md \
+    /root/agentteams-fs/shared/tasks/{task-id}/spec.md 2>/dev/null && \
+  cat /root/agentteams-fs/shared/tasks/{task-id}/spec.md
 ```
 
 ## Step 2 — Execute the analysis
@@ -99,7 +99,7 @@ cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md || \
 **Use `python3 -c` to extract fields from MCP responses** — it is always available and reliable for JSON parsing.
 
 ```bash
-TASK_DIR="/root/hiclaw-fs/shared/tasks/{task-id}"
+TASK_DIR="/root/agentteams-fs/shared/tasks/{task-id}"
 mkdir -p "$TASK_DIR"
 
 # Extract user_id from spec.md (written deterministically by dispatch-to-worker.sh).
@@ -147,7 +147,7 @@ This prevents re-flagging the same anomaly in subsequent rounds.
 
 ### 3a — Write result.md (human-readable)
 ```bash
-RESULT_FILE="/root/hiclaw-fs/shared/tasks/{task-id}/result.md"
+RESULT_FILE="/root/agentteams-fs/shared/tasks/{task-id}/result.md"
 mkdir -p "$(dirname "$RESULT_FILE")"
 cat > "$RESULT_FILE" << EOF
 # Task Result: {task-id}
@@ -185,8 +185,8 @@ python3 -m common.result_builder \
 
 ## Step 4 — Sync result files to MinIO (MANDATORY — without this, the user sees nothing)
 ```bash
-mc cp "$TASK_DIR/result.md"   hiclaw/hiclaw-storage/shared/tasks/{task-id}/result.md
-mc cp "$TASK_DIR/result.json" hiclaw/hiclaw-storage/shared/tasks/{task-id}/result.json
+mc cp "$TASK_DIR/result.md"   agentteams/agentteams-storage/shared/tasks/{task-id}/result.md
+mc cp "$TASK_DIR/result.json" agentteams/agentteams-storage/shared/tasks/{task-id}/result.json
 ```
 
 ## Step 5 — Notify completion in the Worker Room

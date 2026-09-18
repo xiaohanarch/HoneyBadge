@@ -45,7 +45,7 @@ field entirely (single-turn).
 
 ```bash
 # Example: read history.json from task dir and inline into --args
-HISTORY=$(cat /root/hiclaw-fs/shared/tasks/$TASK_ID/history.json 2>/dev/null || echo '[]')
+HISTORY=$(cat /root/agentteams-fs/shared/tasks/$TASK_ID/history.json 2>/dev/null || echo '[]')
 mcporter call honeybadge-nebula.generate_query --args \
   "$(python3 -c "import json,sys; print(json.dumps({'question':sys.argv[1],'conversation_history':json.loads(sys.argv[2])}))" "$QUESTION" "$HISTORY")"
 ```

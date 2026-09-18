@@ -66,7 +66,7 @@ When the Manager @mentions you with a task, it will include a `task-id` (e.g. `t
 
 ## Step 1 — Read the task spec
 ```bash
-cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md
+cat /root/agentteams-fs/shared/tasks/{task-id}/spec.md
 ```
 
 ## Step 2 — Execute the query
@@ -74,7 +74,7 @@ cat /root/hiclaw-fs/shared/tasks/{task-id}/spec.md
 **Save every MCP response to /tmp so Step 3b can parse it without LLM guessing.**
 
 ```bash
-TASK_DIR="/root/hiclaw-fs/shared/tasks/{task-id}"
+TASK_DIR="/root/agentteams-fs/shared/tasks/{task-id}"
 mkdir -p "$TASK_DIR"
 
 # Extract user_id from spec.md (written deterministically by dispatch-to-worker.sh).
@@ -134,7 +134,7 @@ python3 - << 'JSONEOF'
 import json, re, os, sys
 
 task_id  = "{task-id}"
-task_dir = f"/root/hiclaw-fs/shared/tasks/{task_id}"
+task_dir = f"/root/agentteams-fs/shared/tasks/{task_id}"
 
 # Load MCP responses saved in Step 2
 try:
@@ -178,8 +178,8 @@ JSONEOF
 
 ## Step 4 — Sync result files to MinIO
 ```bash
-mc cp "$TASK_DIR/result.md"   hiclaw/hiclaw-storage/shared/tasks/{task-id}/result.md
-mc cp "$TASK_DIR/result.json" hiclaw/hiclaw-storage/shared/tasks/{task-id}/result.json
+mc cp "$TASK_DIR/result.md"   agentteams/agentteams-storage/shared/tasks/{task-id}/result.md
+mc cp "$TASK_DIR/result.json" agentteams/agentteams-storage/shared/tasks/{task-id}/result.json
 ```
 
 ## Step 5 — Notify completion in the Worker Room

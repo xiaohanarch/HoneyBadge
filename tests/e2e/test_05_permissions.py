@@ -10,13 +10,13 @@ Test Coverage:
 - TC-405: Role-based UI element visibility
 - TC-406: Permission denied error display
 - TC-407: API returns 403 for unauthorized access
-- TC-408: org_id filter applied - analyst sees ~320, subsidiary sees ~337, admin sees all ~13000
+- TC-408: org_id filter applied - analyst sees ~1,578 (org 1000), subsidiary sees ~14 (org 1021), admin sees all 24,327
 
-Data实际情况:
-- PurchaseOrder: org_id 1000-1039 各约320-350条
-- SalesOrder: org_id 1000-1039 各约170-230条
+Data实际情况 (live dataset, 2026-09-01; org mapping verified against the
+RUNNING honeybadge-permissions service — the live config is authoritative):
+- PurchaseOrder: 24,327 total across 58 orgs; org 1000 = 1,578, org 1021 = 14
 - analyst: org_ids=[1000], allowed_processes=[PTP]
-- subsidiary_lead: org_ids=[1011], allowed_processes=[PTP, OTC]
+- subsidiary_lead: org_ids=[1021], allowed_processes=[PTP, OTC]
 - admin: org_ids=None, data_scope=ALL
 """
 import re
@@ -30,7 +30,7 @@ from tests.e2e.selectors import (
     MSG_ASSISTANT,
 )
 
-pytestmark = pytest.mark.requires_llm
+pytestmark = [pytest.mark.permission, pytest.mark.requires_llm]
 
 
 class TestPermissions:
@@ -66,7 +66,7 @@ class TestPermissions:
         page = analyst_logged_in
         wait_for_chat_ready()
 
-        # Query PTP - should succeed with data (analyst org_id=1000 has ~320 PO)
+        # Query PTP - should succeed with data (analyst org_id=1000 has ~1,578 PO)
         send_chat_query("统计采购订单数量", timeout=120000)
         response = page.locator(MSG_ASSISTANT)
         assert response.count() > 0, "Analyst should access PTP (PurchaseOrder)"
@@ -245,14 +245,15 @@ class TestPermissions:
         assert admin_response.status_code == 403, \
             f"Analyst accessing /api/admin/users should get 403, got {admin_response.status_code}"
 
+    @pytest.mark.smoke
     @pytest.mark.timeout(600)
     def test_tc408_org_id_filter_verification(self, reset_manager, create_user_page):
         """TC-408: Verify org_id filter is correctly applied to queries.
 
-        Data实际情况:
-        - admin: org_ids=None, data_scope=ALL → sees ALL (~4577 PO across 15 orgs)
-        - analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (~329 PO)
-        - subsidiary_lead: org_ids=[1011], data_scope=ORG → sees ONLY org 1011 (~280 PO)
+        Data实际情况 (live dataset, 2026-09-01):
+        - admin: org_ids=None, data_scope=ALL → sees ALL (24,327 PO across 58 orgs)
+        - analyst: org_ids=[1000], data_scope=ORG → sees ONLY org 1000 (1,578 PO)
+        - subsidiary_lead: org_ids=[1021], data_scope=ORG → sees ONLY org 1021 (14 PO)
 
         CORRECT assertion: admin看到的数据量 >> analyst看到的数据量
         """
@@ -274,7 +275,7 @@ class TestPermissions:
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         subsidiary_text = send_query_on_page(subsidiary_page, "统计采购订单数量", timeout=120000)
 
-        # Extract subsidiary PO count (subsidiary sees ONLY org 1011)
+        # Extract subsidiary PO count (subsidiary sees ONLY org 1021)
         subsidiary_count = self._extract_count_from_response(subsidiary_text)
 
         # CORRECT ASSERTIONS
@@ -283,47 +284,48 @@ class TestPermissions:
         assert analyst_count > 0, f"Analyst should see PO data. Response: {analyst_text[:200]}"
         assert subsidiary_count > 0, f"Subsidiary should see PO data. Response: {subsidiary_text[:200]}"
 
-        # 2. admin sees MUCH MORE than analyst (admin: all 40 orgs, analyst: only org 1000)
-        # admin ~13000 records, analyst ~320 records
+        # 2. admin sees MUCH MORE than analyst (admin: all 58 orgs, analyst: only org 1000)
+        # admin ~24,327 records, analyst ~1,578 records (~15x)
         assert admin_count > analyst_count * 10, \
             f"Admin ({admin_count}) should see way more data than analyst ({analyst_count}). " \
             f"Admin has ALL orgs, analyst has only org 1000."
 
-        # 3. admin sees MUCH MORE than subsidiary (admin: all, subsidiary: only org 1011)
+        # 3. admin sees MUCH MORE than subsidiary (admin: all, subsidiary: only org 1021)
+        # admin ~24,327 records, subsidiary ~14 records
         assert admin_count > subsidiary_count * 10, \
             f"Admin ({admin_count}) should see way more data than subsidiary ({subsidiary_count}). " \
-            f"Admin has ALL orgs, subsidiary has only org 1011."
+            f"Admin has ALL orgs, subsidiary has only org 1021."
 
-        # 4. analyst and subsidiary should see similar amounts (~300-350 each)
-        # Both are limited to single org, data_scope=ORG
-        assert 200 < analyst_count < 500, \
-            f"Analyst should see ~320 records from org 1000. Got: {analyst_count}"
-        assert 200 < subsidiary_count < 500, \
-            f"Subsidiary should see ~280 records from org 1011. Got: {subsidiary_count}"
+        # 4. analyst and subsidiary should see single-org scale data
+        # analyst: org 1000 = 1,578 POs; subsidiary: org 1021 = 14 POs
+        assert 1000 < analyst_count < 2500, \
+            f"Analyst should see ~1,578 records from org 1000. Got: {analyst_count}"
+        assert 0 < subsidiary_count < 100, \
+            f"Subsidiary should see ~14 records from org 1021. Got: {subsidiary_count}"
 
     @pytest.mark.timeout(600)
     def test_tc408b_analyst_vs_subsidiary_data_different(self, reset_manager, create_user_page):
         """TC-408b: Verify analyst and subsidiary see DIFFERENT org data.
 
-        Critical isolation test: analyst(org=1000) vs subsidiary(org=1011)
+        Critical isolation test: analyst(org=1000) vs subsidiary(org=1021)
         They should NOT see each other's data.
         """
         # Analyst (org_id=1000) query
         analyst_page = create_user_page("analyst", "analyst123")
         analyst_text = send_query_on_page(analyst_page, "查询采购订单PO00000001", timeout=120000)
 
-        # Subsidiary (org_id=1011) query same PO
+        # Subsidiary (org_id=1021) query same PO
         subsidiary_page = create_user_page("subsidiary_lead", "lead123")
         subsidiary_text = send_query_on_page(subsidiary_page, "查询采购订单PO00000001", timeout=120000)
 
-        # PO00000001 belongs to org 1000 (not 1011)
-        # analyst(org=1000) should see it, subsidiary(org=1011) should NOT
+        # PO00000001 belongs to org 1000 (not 1021)
+        # analyst(org=1000) should see it, subsidiary(org=1021) should NOT
 
         # Verify data isolation
         analyst_sees_po1 = "PO00000001" in analyst_text or "采购订单" in analyst_text
         subsidiary_sees_po1 = "PO00000001" in subsidiary_text or "采购订单" in subsidiary_text
 
-        # analyst (org 1000) owns PO00000001, subsidiary (org 1011) does not
+        # analyst (org 1000) owns PO00000001, subsidiary (org 1021) does not
         # This is context-dependent - the exact PO numbers may vary by org
         # Key assertion: they should see DIFFERENT data subsets
 
@@ -336,9 +338,9 @@ class TestPermissions:
     def test_tc409_high_risk_procurement_admin_vs_subsidiary(self, reset_manager, create_user_page):
         """TC-409: 采购订单org过滤验证 - admin看全量，subsidiary只能看本org
 
-        数据基础:
-        - admin: org_ids=None, data_scope=ALL → 看到全部(~13000)
-        - subsidiary_lead: org_ids=[1011], data_scope=ORG → 只看到org1011(~337)
+        数据基础 (live dataset 2026-09-01):
+        - admin: org_ids=None, data_scope=ALL → 看到全部(24,327)
+        - subsidiary_lead: org_ids=[1021], data_scope=ORG → 只看到org1021(~14)
 
         预期: admin返回数量 >> subsidiary返回数量
         """
@@ -356,18 +358,18 @@ class TestPermissions:
         assert admin_count > 0, f"Admin应看到采购数据. Response: {admin_text[:200]}"
         assert subsidiary_count > 0, f"Subsidiary应看到本org数据. Response: {subsidiary_text[:200]}"
 
-        # admin看全部org，subsidiary只看org1011
+        # admin看全部org，subsidiary只看org1021
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
-            f"admin有全部org权限，subsidiary只有org1011权限。"
+            f"admin有全部org权限，subsidiary只有org1021权限。"
 
     @pytest.mark.timeout(600)
     def test_tc410_large_amount_po_admin_vs_analyst(self, reset_manager, create_user_page):
         """TC-410: 采购订单org过滤验证 - admin看全量，analyst只能看本org
 
-        数据基础:
-        - admin: ~13000条PO总量
-        - analyst(org=1000): ~320条PO
+        数据基础 (live dataset 2026-09-01):
+        - admin: 24,327条PO总量
+        - analyst(org=1000): 1,578条PO
 
         预期: admin返回数量 > analyst
         """
@@ -413,7 +415,7 @@ class TestPermissions:
         # 验证org权限过滤生效
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count})应看到>subsidiary({subsidiary_count})。" \
-            f"admin看全公司，subsidiary只看org1011。"
+            f"admin看全公司，subsidiary只看org1021。"
 
     @pytest.mark.timeout(600)
     def test_tc412_recent_po_admin_vs_analyst(self, reset_manager, create_user_page):
@@ -462,7 +464,7 @@ class TestPermissions:
 
         assert admin_count > subsidiary_count, \
             f"Admin({admin_count})应>subsidiary({subsidiary_count})。" \
-            f"admin无org限制，subsidiary只有org1011。"
+            f"admin无org限制，subsidiary只有org1021。"
 
     @pytest.mark.timeout(600)
     def test_tc414_supplier_qualifications_admin_vs_analyst(self, reset_manager, create_user_page):

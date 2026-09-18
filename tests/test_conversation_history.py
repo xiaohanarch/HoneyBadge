@@ -38,8 +38,8 @@ CHAR_BUDGET = _hist.CHAR_BUDGET
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-USER_MXID = "@hb-admin:matrix-local.hiclaw.io"
-MGR_MXID = "@manager:matrix-local.hiclaw.io"
+USER_MXID = "@hb-admin:matrix-local.agentteams.io"
+MGR_MXID = "@manager:matrix-local.agentteams.io"
 
 
 def _user_event(text: str, ts: int = 0) -> dict:

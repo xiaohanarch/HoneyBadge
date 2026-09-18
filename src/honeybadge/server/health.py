@@ -1,7 +1,10 @@
 """Health check router."""
 
+import asyncio
+import time
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Request
 
 from honeybadge.core.constants import VERSION
@@ -9,11 +12,59 @@ from honeybadge.resilience.breakers import get_breaker_states, sync_breaker_metr
 
 router = APIRouter(prefix="/api", tags=["system"])
 
+logger = structlog.get_logger()
+
+# Lazy Nebula reconnect (guards against the startup race where graphd was not
+# ready yet): retry at most once per cooldown window so Prometheus scrapes
+# cannot hammer a down graphd, and cap each attempt so health stays responsive.
+NEBULA_RECONNECT_COOLDOWN_S = 30.0
+NEBULA_RECONNECT_TIMEOUT_S = 15.0
+
 
 # NOTE: /api/health is intentionally exempt from the unified response envelope.
 # Monitoring tools (Prometheus, k8s liveness probes, etc.) expect the raw
 # {"status", "version", "services"} shape and would break if it were wrapped
 # in {success, data, ...}. Do not wrap health responses.
+
+
+async def _ensure_nebula(app: Any) -> Any:
+    """Return a connected Nebula client, lazily reconnecting after startup races.
+
+    Lifespan connects exactly once; if graphd was not up yet, ``app.state.nebula``
+    stays None forever and health would report "down" until a manual container
+    restart (observed as E2E tc601). Retry from the health path instead, at
+    most once per cooldown window.
+    """
+    nebula = getattr(app.state, "nebula", None)
+    if nebula is not None and getattr(nebula, "_pool", None) is not None:
+        return nebula
+
+    now = time.monotonic()
+    if now < getattr(app.state, "nebula_next_reconnect", 0.0):
+        return nebula
+
+    app.state.nebula_next_reconnect = now + NEBULA_RECONNECT_COOLDOWN_S
+    config = getattr(app.state, "config", None)
+    if config is None:
+        return nebula
+
+    from honeybadge.db.nebula import NebulaGraphClient
+
+    try:
+        client = NebulaGraphClient(
+            host=config.nebula_host, port=config.nebula_port,
+            user=config.nebula_user, password=config.nebula_password,
+        )
+        await asyncio.wait_for(client.connect(), timeout=NEBULA_RECONNECT_TIMEOUT_S)
+        app.state.nebula = client
+        logger.info(
+            "nebula_health_reconnect_ok",
+            host=config.nebula_host, port=config.nebula_port,
+        )
+        return client
+    except Exception as e:
+        logger.warning("nebula_health_reconnect_failed", error=str(e))
+        return nebula
 
 
 @router.get("/health")
@@ -43,9 +94,9 @@ async def health_check(request: Request) -> dict[str, Any]:
     except Exception as e:
         services["postgres"] = {"status": "down", "error": str(e)}
 
-    # Check NebulaGraph
+    # Check NebulaGraph (with lazy reconnect for the startup race)
     try:
-        nebula = request.app.state.nebula
+        nebula = await _ensure_nebula(request.app)
         if nebula and hasattr(nebula, '_pool') and nebula._pool:
             services["nebula"] = {"status": "up"}
         else:

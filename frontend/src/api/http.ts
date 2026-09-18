@@ -39,8 +39,10 @@ http.interceptors.response.use(
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
     // Error: extract safe message from the envelope if present.
-    const body = error.response?.data;
-    if (body && body.success === false && body.error) {
+    const body = error.response?.data as
+      | { success?: boolean; error?: { message?: string } }
+      | undefined;
+    if (body && body.success === false && body.error?.message) {
       error.message = body.error.message;
     }
 

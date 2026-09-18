@@ -18,17 +18,17 @@ set -uo pipefail
 HB_CONFIG="/opt/honeybadge/config"
 MANAGER_WORKSPACE="/root/manager-workspace"
 MANAGER_OPENCLAW="${MANAGER_WORKSPACE}/openclaw.json"
-GENERATE_WORKER_CFG="/opt/hiclaw/agent/skills/worker-management/scripts/generate-worker-config.sh"
-MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
-MATRIX_URL="${HICLAW_MATRIX_URL:-http://${MATRIX_DOMAIN}:6167}"
-LLM_API_KEY="${HICLAW_LLM_API_KEY:-${LLM_API_KEY:-}}"
+GENERATE_WORKER_CFG="/opt/agentteams/agent/skills/worker-management/scripts/generate-worker-config.sh"
+MATRIX_DOMAIN="${AGENTTEAMS_MATRIX_DOMAIN:-matrix-local.agentteams.io}"
+MATRIX_URL="${AGENTTEAMS_MATRIX_URL:-http://${MATRIX_DOMAIN}:6167}"
+LLM_API_KEY="${AGENTTEAMS_LLM_API_KEY:-${LLM_API_KEY:-}}"
 REGISTRY_FILE="${MANAGER_WORKSPACE}/workers-registry.json"
 MANAGER_MXID="@manager:${MATRIX_DOMAIN}"
 
 # Dev gateway mode: in compose on WSL2, Higress segfaults so an nginx sidecar
 # (hiclaw-aigw-bypass) handles /v1/* instead. When set to "nginx-bypass" we
 # skip Higress consumer/route wiring; production k3s always uses real Higress.
-DEV_GATEWAY="${HICLAW_DEV_GATEWAY:-higress}"
+DEV_GATEWAY="${AGENTTEAMS_DEV_GATEWAY:-higress}"
 
 # ANSI colors
 GREEN='\033[0;32m'
@@ -74,19 +74,19 @@ inject_after_marker() {
 # (upstream may have pre-configured 'hiclaw' to localhost which is now empty)
 # ---------------------------------------------------------------------------
 if command -v mc >/dev/null 2>&1; then
-    mc alias set hiclaw \
+    mc alias set agentteams \
         "http://hiclaw-embedded:9000" \
-        "${HICLAW_ADMIN_USER:-admin}" \
-        "${HICLAW_ADMIN_PASSWORD:-admin1234}" \
-        --api S3v4 >/dev/null 2>&1 || warn "  mc alias set 'hiclaw' failed (will retry on first use)"
+        "${AGENTTEAMS_ADMIN_USER:-admin}" \
+        "${AGENTTEAMS_ADMIN_PASSWORD:-admin1234}" \
+        --api S3v4 >/dev/null 2>&1 || warn "  mc alias set 'agentteams' failed (will retry on first use)"
 
-    # Ensure hiclaw-storage bucket exists. v1.1.0 split moved MinIO from the
+    # Ensure agentteams-storage bucket exists. v1.1.0 split moved MinIO from the
     # manager Pod (where the bucket was pre-seeded by the upstream image) to
     # hiclaw-embedded, which boots with an empty MinIO. Step 1's `mc cp`
     # silently fails if the bucket is missing; create it idempotently here.
-    mc mb --ignore-existing hiclaw/hiclaw-storage >/dev/null 2>&1 \
-        && log "  hiclaw-storage bucket ready (created or already present)" \
-        || warn "  mc mb hiclaw/hiclaw-storage failed (MinIO may not be ready yet)"
+    mc mb --ignore-existing agentteams/agentteams-storage >/dev/null 2>&1 \
+        && log "  agentteams-storage bucket ready (created or already present)" \
+        || warn "  mc mb agentteams/agentteams-storage failed (MinIO may not be ready yet)"
 fi
 
 # =========================================================================
@@ -98,7 +98,7 @@ log "Step 1: Uploading worker configs to MinIO..."
 for worker in graph-worker analytics-worker; do
     SOUL_SRC="$HB_CONFIG/workers/$worker/agent/SOUL.md"
     if [ -f "$SOUL_SRC" ]; then
-        mc cp "$SOUL_SRC" "hiclaw/hiclaw-storage/agents/$worker/SOUL.md"
+        mc cp "$SOUL_SRC" "agentteams/agentteams-storage/agents/$worker/SOUL.md"
         log "  $worker/SOUL.md uploaded to MinIO"
     else
         warn "  $worker/SOUL.md not found at $SOUL_SRC"
@@ -107,7 +107,7 @@ for worker in graph-worker analytics-worker; do
     # Upload skills directory if it exists
     SKILLS_DIR="$HB_CONFIG/workers/$worker/agent/skills"
     if [ -d "$SKILLS_DIR" ]; then
-        mc mirror --overwrite "$SKILLS_DIR/" "hiclaw/hiclaw-storage/agents/$worker/skills/"
+        mc mirror --overwrite "$SKILLS_DIR/" "agentteams/agentteams-storage/agents/$worker/skills/"
         log "  $worker/skills/ uploaded to MinIO"
     fi
 
@@ -118,7 +118,7 @@ for worker in graph-worker analytics-worker; do
     # so generate a minimal placeholder if no source AGENTS.md is present.
     AGENTS_SRC="$HB_CONFIG/workers/$worker/agent/AGENTS.md"
     if [ -f "$AGENTS_SRC" ]; then
-        mc cp "$AGENTS_SRC" "hiclaw/hiclaw-storage/agents/$worker/AGENTS.md"
+        mc cp "$AGENTS_SRC" "agentteams/agentteams-storage/agents/$worker/AGENTS.md"
         log "  $worker/AGENTS.md uploaded to MinIO"
     else
         TMP_AGENTS=$(mktemp)
@@ -144,7 +144,7 @@ described in your skills under \`/root/skills/\`.
 - Push intermediate artifacts to MinIO under \`agents/${worker}/\`.
 - Report completion back to @manager with a summary + artifact location.
 AGENTS_EOF
-        mc cp "$TMP_AGENTS" "hiclaw/hiclaw-storage/agents/$worker/AGENTS.md" >/dev/null 2>&1 \
+        mc cp "$TMP_AGENTS" "agentteams/agentteams-storage/agents/$worker/AGENTS.md" >/dev/null 2>&1 \
             && log "  $worker/AGENTS.md (minimal placeholder) uploaded to MinIO" \
             || warn "  Failed to upload $worker/AGENTS.md to MinIO"
         rm -f "$TMP_AGENTS"
@@ -168,8 +168,8 @@ done
 # =========================================================================
 log "Step 2: Registering workers..."
 
-REG_TOKEN="${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}"
-DEFAULT_MODEL="${HICLAW_DEFAULT_MODEL:-glm-5}"
+REG_TOKEN="${AGENTTEAMS_REGISTRATION_TOKEN:-honeybadge-reg-token}"
+DEFAULT_MODEL="${AGENTTEAMS_DEFAULT_MODEL:-glm-5}"
 WORKER_CREDS_DIR="/data/worker-creds"
 mkdir -p "$WORKER_CREDS_DIR"
 
@@ -205,7 +205,7 @@ for worker in graph-worker analytics-worker; do
     # run on every boot, otherwise the registry stays {"workers": {}} after
     # the first successful provisioning and Manager forgets its team.
     NEEDS_FRESH_REGISTRATION=true
-    if mc stat "hiclaw/hiclaw-storage/agents/$worker/openclaw.json" >/dev/null 2>&1; then
+    if mc stat "agentteams/agentteams-storage/agents/$worker/openclaw.json" >/dev/null 2>&1; then
         log "  $worker openclaw.json already in MinIO — skipping fresh registration"
         NEEDS_FRESH_REGISTRATION=false
     fi
@@ -326,9 +326,9 @@ except Exception:
 
     # Upload the freshly-generated config to MinIO immediately so that
     # idempotency check passes on next boot even if Step 2b doesn't run.
-    GEN_CFG="/root/hiclaw-fs/agents/${worker}/openclaw.json"
+    GEN_CFG="/root/agentteams-fs/agents/${worker}/openclaw.json"
     if [ -f "$GEN_CFG" ]; then
-        mc cp "$GEN_CFG" "hiclaw/hiclaw-storage/agents/$worker/openclaw.json" >/dev/null 2>&1 \
+        mc cp "$GEN_CFG" "agentteams/agentteams-storage/agents/$worker/openclaw.json" >/dev/null 2>&1 \
             && log "  $worker openclaw.json uploaded to MinIO" \
             || warn "  Failed to upload $worker openclaw.json to MinIO"
     fi
@@ -342,7 +342,7 @@ except Exception:
         [ -n "$WORKER_ROOM_ID" ] && echo "WORKER_ROOM_ID=${WORKER_ROOM_ID}"
     } > "${WORKER_CREDS_DIR}/${worker}.env"
     chmod 600 "${WORKER_CREDS_DIR}/${worker}.env"
-    echo "${WORKER_PWD}" | mc pipe "hiclaw/hiclaw-storage/agents/$worker/credentials/matrix/password" >/dev/null 2>&1 \
+    echo "${WORKER_PWD}" | mc pipe "agentteams/agentteams-storage/agents/$worker/credentials/matrix/password" >/dev/null 2>&1 \
         && log "  $worker password persisted to MinIO" \
         || warn "  Failed to persist $worker password to MinIO"
 
@@ -447,7 +447,7 @@ done
 
 # Sync workers-registry.json back to MinIO so workers can see siblings
 if [ -f "$REGISTRY_FILE" ]; then
-    mc cp "$REGISTRY_FILE" "hiclaw/hiclaw-storage/agents/manager/workers-registry.json" 2>/dev/null \
+    mc cp "$REGISTRY_FILE" "agentteams/agentteams-storage/agents/manager/workers-registry.json" 2>/dev/null \
         && log "  workers-registry.json synced to MinIO" \
         || warn "  workers-registry.json MinIO sync skipped"
 fi
@@ -455,18 +455,18 @@ fi
 # =========================================================================
 # Step 2b: Fix worker LLM baseUrl and model
 #
-# v1.1.0 generate-worker-config.sh writes to /root/hiclaw-fs/agents/<w>/openclaw.json
+# v1.1.0 generate-worker-config.sh writes to /root/agentteams-fs/agents/<w>/openclaw.json
 # (the manager container's local filesystem). We patch in-place there, then
 # sync to MinIO — which is what workers actually read at startup.
 #
 # Worker baseUrl must end with /v1 (OpenAI JS SDK appends /chat/completions
-# directly). The host alias `aigw-local.hiclaw.io` resolves to the bypass
-# nginx in dev (HICLAW_DEV_GATEWAY=nginx-bypass) or real Higress in prod.
+# directly). The host alias `aigw-local.agentteams.io` resolves to the bypass
+# nginx in dev (AGENTTEAMS_DEV_GATEWAY=nginx-bypass) or real Higress in prod.
 # =========================================================================
 log "Step 2b: Patching worker LLM baseUrl and model..."
 
 for worker in graph-worker analytics-worker; do
-    LOCAL_CFG="/root/hiclaw-fs/agents/${worker}/openclaw.json"
+    LOCAL_CFG="/root/agentteams-fs/agents/${worker}/openclaw.json"
     if [ ! -f "$LOCAL_CFG" ]; then
         warn "  $worker openclaw.json not at $LOCAL_CFG — skipping patch"
         continue
@@ -483,14 +483,14 @@ if not os.path.exists(cfg_path):
 with open(cfg_path) as f:
     cfg = json.load(f)
 
-model_name = os.environ.get('HICLAW_DEFAULT_MODEL', 'glm-5')
+model_name = os.environ.get('AGENTTEAMS_DEFAULT_MODEL', 'glm-5')
 changed = False
 
 providers = cfg.get('models', {}).get('providers', {})
 for name, p in providers.items():
     old = p.get('baseUrl', '')
-    if 'aigw-local.hiclaw.io:8080/v1' not in old:
-        p['baseUrl'] = 'http://aigw-local.hiclaw.io:8080/v1'
+    if 'aigw-local.agentteams.io:8080/v1' not in old:
+        p['baseUrl'] = 'http://aigw-local.agentteams.io:8080/v1'
         print('Patched ' + name + ' baseUrl: ' + old + ' -> ' + p['baseUrl'])
         changed = True
     for model in p.get('models', []):
@@ -539,18 +539,18 @@ if model_name not in old_primary:
 # create-worker.sh may generate the wrong port; always enforce 6167 here.
 matrix_cfg = cfg.get('channels', {}).get('matrix', {})
 hs = matrix_cfg.get('homeserver', '')
-if hs and ':8080' in hs and 'matrix-local.hiclaw.io' in hs:
+if hs and ':8080' in hs and 'matrix-local.agentteams.io' in hs:
     fixed = hs.replace(':8080', ':6167')
     matrix_cfg['homeserver'] = fixed
     print('Fixed Matrix homeserver port: ' + hs + ' -> ' + fixed)
     changed = True
 
-# Allow plain http:// to matrix-local.hiclaw.io. The worker's matrix client
+# Allow plain http:// to matrix-local.agentteams.io. The worker's matrix client
 # (matrix-rust-sdk) rejects http:// unless the homeserver host is in private
 # or loopback space. It checks the hostname STRING, not the resolved IP,
 # so a private ClusterIP behind a .io hostname still fails the check.
 # HiClaw's manager template already sets this flag (see
-# /opt/hiclaw/configs/manager-openclaw.json.tmpl), but generate-worker-config.sh
+# /opt/agentteams/configs/manager-openclaw.json.tmpl), but generate-worker-config.sh
 # does not propagate it to workers. Mirror manager behavior here.
 if matrix_cfg:
     network = matrix_cfg.get('network')
@@ -604,7 +604,7 @@ else:
 
     # Sync patched config back to MinIO (canonical source in v1.1.0)
     mc cp "$LOCAL_CFG" \
-        "hiclaw/hiclaw-storage/agents/$worker/openclaw.json" 2>/dev/null \
+        "agentteams/agentteams-storage/agents/$worker/openclaw.json" 2>/dev/null \
         && log "  $worker openclaw.json synced to MinIO" \
         || warn "  MinIO sync skipped for $worker"
 done
@@ -618,21 +618,21 @@ done
 # (coding.dashscope.aliyuncs.com:443 per the default McpBridge registry)
 # accepts the request with the right vhost.
 #
-# DEV ONLY: skipped when HICLAW_DEV_GATEWAY=nginx-bypass — the bypass
+# DEV ONLY: skipped when AGENTTEAMS_DEV_GATEWAY=nginx-bypass — the bypass
 # nginx (hiclaw-aigw-bypass) handles /v1/* directly. Production k3s
 # always runs real Higress; this branch must execute on ECS.
 # =========================================================================
 if [ "$DEV_GATEWAY" = "nginx-bypass" ]; then
-    log "Step 2c: SKIPPED (HICLAW_DEV_GATEWAY=nginx-bypass — using hiclaw-aigw-bypass sidecar)"
+    log "Step 2c: SKIPPED (AGENTTEAMS_DEV_GATEWAY=nginx-bypass — using hiclaw-aigw-bypass sidecar)"
 else
     log "Step 2c: Ensuring Higress LLM route..."
 
-    HIGRESS_AUTH="$(echo -n "${HICLAW_ADMIN_USER:-admin}:${HICLAW_ADMIN_PASSWORD:-admin1234}" | base64)"
+    HIGRESS_AUTH="$(echo -n "${AGENTTEAMS_ADMIN_USER:-admin}:${AGENTTEAMS_ADMIN_PASSWORD:-admin1234}" | base64)"
 
     # Determine the LLM host for the Host header from the base URL.
     # Default falls back to Aliyun Bailian (DashScope) coding endpoint,
     # matching the McpBridge openai-compat upstream registered by Higress.
-    LLM_HOST="${HICLAW_OPENAI_BASE_URL:-https://coding.dashscope.aliyuncs.com/v1}"
+    LLM_HOST="${AGENTTEAMS_OPENAI_BASE_URL:-https://coding.dashscope.aliyuncs.com/v1}"
     # Extract hostname from URL (strip protocol and path)
     LLM_HOST=$(echo "$LLM_HOST" | sed -E 's|^https?://||; s|/.*||')
 
@@ -651,7 +651,7 @@ else
     done
 
     # Build route JSON
-    ROUTE_JSON="{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.hiclaw.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"${LLM_HOST}\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}"
+    ROUTE_JSON="{\"name\":\"llm-minimax-route\",\"domains\":[\"aigw-local.agentteams.io\"],\"path\":{\"matchType\":\"PRE\",\"matchValue\":\"/v1/\",\"caseSensitive\":false},\"services\":[{\"name\":\"openai-compat.dns\",\"port\":443,\"weight\":100}],\"proxyNextUpstream\":{\"enabled\":true,\"attempts\":3,\"timeout\":120000,\"conditions\":[\"error\",\"timeout\",\"non_idempotent\"]},\"headerControl\":{\"enabled\":true,\"request\":{\"add\":[{\"key\":\"user-agent\",\"value\":\"HiClaw/v1.0.9\"}],\"set\":[{\"key\":\"Authorization\",\"value\":\"Bearer ${LLM_API_KEY}\"},{\"key\":\"Host\",\"value\":\"${LLM_HOST}\"}],\"remove\":[]}},\"authConfig\":{\"enabled\":false}}"
 
     # PUT to update, fall back to POST to create
     RESULT=$(curl -sf -X PUT 'http://hiclaw-embedded:8001/v1/routes/llm-minimax-route' \
@@ -673,24 +673,24 @@ fi
 # Step 2d: Create/update Higress manager consumer (v1.1.0 k8s-mode parity)
 #
 # In real k8s, the controller registers the manager as a Higress consumer
-# with key-auth using HICLAW_MANAGER_GATEWAY_KEY. The slim manager-agent
+# with key-auth using AGENTTEAMS_MANAGER_GATEWAY_KEY. The slim manager-agent
 # uses this token to call MCP servers via the gateway.
 #
 # In Compose we simulate the controller by creating the consumer here.
 # Idempotent: PUT first, fall back to POST.
 #
-# DEV ONLY: skipped when HICLAW_DEV_GATEWAY=nginx-bypass — the bypass
+# DEV ONLY: skipped when AGENTTEAMS_DEV_GATEWAY=nginx-bypass — the bypass
 # nginx does not enforce key-auth (it strips inbound Authorization and
 # injects the upstream LLM key). Production k3s requires this branch.
 # =========================================================================
 if [ "$DEV_GATEWAY" = "nginx-bypass" ]; then
-    log "Step 2d: SKIPPED (HICLAW_DEV_GATEWAY=nginx-bypass — bypass nginx does not enforce key-auth)"
+    log "Step 2d: SKIPPED (AGENTTEAMS_DEV_GATEWAY=nginx-bypass — bypass nginx does not enforce key-auth)"
 else
     log "Step 2d: Ensuring Higress manager consumer..."
 
-    MGR_GW_KEY="${HICLAW_MANAGER_GATEWAY_KEY:-}"
+    MGR_GW_KEY="${AGENTTEAMS_MANAGER_GATEWAY_KEY:-}"
     if [ -z "$MGR_GW_KEY" ]; then
-        warn "  HICLAW_MANAGER_GATEWAY_KEY not set — skipping consumer registration"
+        warn "  AGENTTEAMS_MANAGER_GATEWAY_KEY not set — skipping consumer registration"
     else
         CONSUMER_JSON="{\"name\":\"manager\",\"credentials\":[{\"type\":\"key-auth\",\"source\":\"BEARER\",\"values\":[\"${MGR_GW_KEY}\"]}]}"
         RESULT=$(curl -sf -X PUT 'http://hiclaw-embedded:8001/v1/consumers/manager' \
@@ -741,9 +741,9 @@ if [ -f "$MANAGER_WORKSPACE/SOUL.md" ]; then
         "Manager AGENTS.md"
 
     # Sync Manager agent files to MinIO for persistence
-    mc cp "$MANAGER_WORKSPACE/SOUL.md" hiclaw/hiclaw-storage/agents/manager/SOUL.md 2>/dev/null \
+    mc cp "$MANAGER_WORKSPACE/SOUL.md" agentteams/agentteams-storage/agents/manager/SOUL.md 2>/dev/null \
         && log "  Manager SOUL.md synced to MinIO" || true
-    mc cp "$MANAGER_WORKSPACE/AGENTS.md" hiclaw/hiclaw-storage/agents/manager/AGENTS.md 2>/dev/null \
+    mc cp "$MANAGER_WORKSPACE/AGENTS.md" agentteams/agentteams-storage/agents/manager/AGENTS.md 2>/dev/null \
         && log "  Manager AGENTS.md synced to MinIO" || true
 
     # CRITICAL: The openclaw agent workspace is /root, so it reads /root/SOUL.md.
@@ -821,7 +821,7 @@ channels = cfg.setdefault('channels', {}).setdefault('matrix', {})
 channels['dm'] = {'policy': 'allowlist', 'allowFrom': hb_users}
 channels['groupAllowFrom'] = hb_users + workers
 
-# WS-04 removed in v1.1.2 upgrade: HICLAW_AI_GATEWAY_DOMAIN is now set in all
+# WS-04 removed in v1.1.2 upgrade: AGENTTEAMS_AI_GATEWAY_DOMAIN is now set in all
 # deployment targets (docker-compose.yaml + k8s manager.yaml), so the template
 # generates the correct baseUrl without this patch.
 
@@ -835,7 +835,7 @@ for p in cfg.get('models', {}).get('providers', {}).values():
             m['maxTokens'] = 8192
 
 # WS-02 (memorySearch pop) removed in v1.1.2 upgrade — was already a no-op comment.
-# HICLAW_EMBEDDING_MODEL="" in docker-compose.yaml prevents injection at the source.
+# AGENTTEAMS_EMBEDDING_MODEL="" in docker-compose.yaml prevents injection at the source.
 
 # Context pruning — prevents unbounded Manager context growth (mirrors Worker settings)
 mgr_defaults = cfg.setdefault('agents', {}).setdefault('defaults', {})
@@ -862,11 +862,77 @@ print('Manager allowlist patched, context pruning applied')
 
 # Sync Manager config to MinIO
 mc cp "$MANAGER_WORKSPACE/openclaw.json" \
-    hiclaw/hiclaw-storage/agents/manager/openclaw.json 2>/dev/null \
+    agentteams/agentteams-storage/agents/manager/openclaw.json 2>/dev/null \
     && log "  Manager openclaw.json synced to MinIO" \
     || warn "  MinIO sync skipped"
 
 # WS-14 (v1.0.9 hot-reload deadlock comment) — removed in v1.1.2 upgrade.
+
+# =========================================================================
+# Step 5: Prune codex arg0 / npm cache junk (background)
+#
+# The v1.2.2 manager image seeded ~1.0GiB of regenerable cache into
+# /root/manager-workspace/ on its first boot:
+#   .codex/tmp/arg0/ — 4 x 163MiB hardlink copies of the codex binary
+#                      (apply_patch, applypatch, codex-execve-wrapper,
+#                      codex-linux-sandbox); the running runtime is
+#                      openclaw, nothing reads these
+#   .npm/            — an npm _cacache copy (the live cache is /root/.npm)
+#
+# start-manager-agent.sh mirrors /root/manager-workspace/ -> MinIO
+# manager/ at boot (initial push) and on local changes (change-triggered
+# sync), and pulls the whole bucket prefix into /root/agentteams-fs/ at
+# boot. So the junk exists in THREE places and the workspace copy is the
+# SOURCE — deleting only the bucket or only the agentteams-fs mirror gets
+# re-uploaded/re-pulled on the next boot or change trigger (verified the
+# hard way 2026-09-03: bucket cleaned twice, 651MiB reappeared twice).
+#
+# Order matters: kill the source FIRST (a mirror can only upload files
+# that still exist locally), wait for the boot-time initial push to stop
+# growing, then remove the persisted bucket copies and retry until the
+# prefix is actually clean (multipart uploads of 163MiB files can land
+# after an mc rm). Best-effort — failures never block init.
+# =========================================================================
+log "Step 5: Scheduling codex arg0 / npm cache prune (background)..."
+
+(
+    # 1. Kill the source + the pulled mirror. Doing this first means the
+    #    change-triggered sync has nothing left to re-upload.
+    rm -rf /root/manager-workspace/.codex/tmp /root/manager-workspace/.npm
+    rm -rf /root/agentteams-fs/manager/.codex/tmp /root/agentteams-fs/manager/.npm
+
+    # 2. Wait (up to 15 min) for the boot-time initial push to settle:
+    #    poll the bucket prefix size until it stops changing.
+    last_size=""
+    for _ in $(seq 1 90); do
+        cur_size=$(mc du agentteams/agentteams-storage/manager/ 2>/dev/null | awk '{print $1}')
+        [ -z "$cur_size" ] && cur_size="none"
+        if [ -n "$last_size" ] && [ "$cur_size" = "$last_size" ] && [ "$cur_size" != "none" ]; then
+            break
+        fi
+        last_size="$cur_size"
+        sleep 10
+    done
+
+    # 3. Remove the persisted copies from the bucket.
+    mc rm --recursive --force agentteams/agentteams-storage/manager/.codex/tmp/ >/dev/null 2>&1 || true
+    mc rm --recursive --force agentteams/agentteams-storage/manager/.npm/ >/dev/null 2>&1 || true
+
+    # 4. Verify + retry: stragglers from a slow multipart upload may land
+    #    after the rm. Loop (up to 6 x 30s) until actually clean.
+    for _ in $(seq 1 6); do
+        sleep 30
+        if mc stat agentteams/agentteams-storage/manager/.codex/tmp/ >/dev/null 2>&1 \
+           || mc stat agentteams/agentteams-storage/manager/.npm/ >/dev/null 2>&1; then
+            mc rm --recursive --force agentteams/agentteams-storage/manager/.codex/tmp/ >/dev/null 2>&1 || true
+            mc rm --recursive --force agentteams/agentteams-storage/manager/.npm/ >/dev/null 2>&1 || true
+        else
+            break
+        fi
+    done
+    echo "[init-bg] Step 5: codex arg0 / npm cache pruned (workspace + agentteams-fs + MinIO)" \
+        >> /var/log/agentteams/honeybadge-init.log
+) &
 
 # =========================================================================
 # Done

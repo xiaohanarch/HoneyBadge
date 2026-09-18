@@ -2,7 +2,7 @@
 # HoneyBadge Worker Entrypoint Wrapper
 #
 # Registers MCP servers via mcporter and copies custom SOUL.md from
-# MinIO-synced hiclaw-fs to /root/ where openclaw reads it.
+# MinIO-synced agentteams-fs to /root/ where openclaw reads it.
 # Runs in background, then hands off to the real worker entrypoint as PID 1.
 #
 # Mounted into worker containers via docker-compose volume:
@@ -10,15 +10,15 @@
 
 set -u
 
-WORKER_NAME="${HICLAW_WORKER_NAME:-unknown}"
-WORKER_RUNTIME="${HICLAW_WORKER_RUNTIME:-openclaw}"
+WORKER_NAME="${AGENTTEAMS_WORKER_NAME:-unknown}"
+WORKER_RUNTIME="${AGENTTEAMS_WORKER_RUNTIME:-openclaw}"
 
 if [ "$WORKER_RUNTIME" = "hermes" ]; then
     WORKER_ENTRYPOINT="/opt/honeybadge/init/hermes-worker-entrypoint.sh"
     AGENT_HOME="/root/.hermes"
     SESSIONS_FILE="${AGENT_HOME}/sessions/sessions.json"
 else
-    WORKER_ENTRYPOINT="/opt/hiclaw/scripts/worker-entrypoint.sh"
+    WORKER_ENTRYPOINT="/opt/agentteams/scripts/worker-entrypoint.sh"
     AGENT_HOME="/root"
     SESSIONS_FILE="/root/.openclaw/agents/main/sessions/sessions.json"
 fi
@@ -30,8 +30,8 @@ echo "[worker-init] Starting background init for $WORKER_NAME..."
     # (file-sync runs after worker-entrypoint.sh starts openclaw)
     sleep 30
 
-    # --- Copy custom SOUL.md from hiclaw-fs to /root/ where openclaw reads it ---
-    HB_SOUL="/root/hiclaw-fs/agents/$WORKER_NAME/SOUL.md"
+    # --- Copy custom SOUL.md from agentteams-fs to /root/ where openclaw reads it ---
+    HB_SOUL="/root/agentteams-fs/agents/$WORKER_NAME/SOUL.md"
     if [ -f "$HB_SOUL" ]; then
         mkdir -p "$AGENT_HOME"
         cp "$HB_SOUL" "$AGENT_HOME/SOUL.md"
@@ -40,8 +40,8 @@ echo "[worker-init] Starting background init for $WORKER_NAME..."
         echo "[worker-init] WARNING: Custom SOUL.md not found at $HB_SOUL"
     fi
 
-    # --- Copy custom skills from hiclaw-fs ---
-    HB_SKILLS="/root/hiclaw-fs/agents/$WORKER_NAME/skills"
+    # --- Copy custom skills from agentteams-fs ---
+    HB_SKILLS="/root/agentteams-fs/agents/$WORKER_NAME/skills"
     if [ -d "$HB_SKILLS" ]; then
         mkdir -p "$AGENT_HOME/skills"
         cp -r "$HB_SKILLS"/* "$AGENT_HOME/skills/" 2>/dev/null \
@@ -61,7 +61,7 @@ echo "[worker-init] Starting background init for $WORKER_NAME..."
     # When the mcporter skill runs from /root/skills/mcporter/, it looks for
     # /root/skills/mcporter/config/mcporter.json.  Create that path if missing.
     SKILL_DIR="$AGENT_HOME/skills/mcporter"
-    MCP_CONFIG_SOURCE="/root/hiclaw-fs/config/mcporter.json"
+    MCP_CONFIG_SOURCE="/root/agentteams-fs/config/mcporter.json"
     MCP_CONFIG_DEST="$SKILL_DIR/config/mcporter.json"
     if [ -f "$MCP_CONFIG_SOURCE" ] && [ ! -f "$MCP_CONFIG_DEST" ]; then
         mkdir -p "$SKILL_DIR/config" \

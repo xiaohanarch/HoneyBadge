@@ -8,7 +8,7 @@
 # MinIO + Higress + agent under one supervisor tree). v1.1.0 split that
 # infra into hiclaw-embedded; the slim manager image no longer ships
 # supervisord. Its native entrypoint is start-manager-agent.sh, which
-# acts as container entrypoint when HICLAW_RUNTIME=k8s (set in compose).
+# acts as container entrypoint when AGENTTEAMS_RUNTIME=k8s (set in compose).
 #
 # Mounted into the Manager container via docker-compose volume:
 #   ../hiclaw/entrypoint-wrapper.sh:/opt/honeybadge/init/entrypoint-wrapper.sh:ro
@@ -16,7 +16,7 @@
 set -u
 
 INIT_SCRIPT="/opt/honeybadge/init/manager-init-internal.sh"
-LOG_DIR="/var/log/hiclaw"
+LOG_DIR="/var/log/agentteams"
 LOG_FILE="$LOG_DIR/honeybadge-init.log"
 
 mkdir -p "$LOG_DIR"
@@ -37,7 +37,7 @@ echo "[entrypoint] Starting HoneyBadge auto-init in background..." | tee -a "$LO
     # manager-agent container starts. Compose has no controller, so we must
     # register the @manager account ourselves before manager-agent attempts
     # to log in (otherwise it fails fast on M_FORBIDDEN).
-    MATRIX_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
+    MATRIX_URL="${AGENTTEAMS_MATRIX_URL:-http://matrix-local.agentteams.io:6167}"
     echo "[init-bg] Waiting for Tuwunel at $MATRIX_URL..."
     for _i in $(seq 1 60); do
         if curl -sf "$MATRIX_URL/_matrix/client/versions" >/dev/null 2>&1; then
@@ -47,13 +47,13 @@ echo "[entrypoint] Starting HoneyBadge auto-init in background..." | tee -a "$LO
         sleep 5
     done
 
-    # IMPORTANT: native start-manager-agent.sh sources /data/hiclaw-secrets.env
+    # IMPORTANT: native start-manager-agent.sh sources /data/agentteams-secrets.env
     # AFTER reading env vars, so the persisted file overrides compose env on
     # subsequent boots. We must register @manager with the SAME password the
     # native agent will use to log in. Mirror that precedence here:
-    #   - if /data/hiclaw-secrets.env exists, use its values
+    #   - if /data/agentteams-secrets.env exists, use its values
     #   - else fall back to env (first boot — native will persist these)
-    SECRETS_FILE="/data/hiclaw-secrets.env"
+    SECRETS_FILE="/data/agentteams-secrets.env"
     if [ -f "$SECRETS_FILE" ]; then
         # shellcheck disable=SC1090
         . "$SECRETS_FILE"
@@ -63,10 +63,10 @@ echo "[entrypoint] Starting HoneyBadge auto-init in background..." | tee -a "$LO
     # Idempotent @manager registration. v1 register endpoint returns:
     #   200 + access_token on success
     #   400 with errcode=M_USER_IN_USE if already registered (treat as success)
-    REG_TOKEN="${HICLAW_REGISTRATION_TOKEN:-honeybadge-reg-token}"
-    MGR_PWD="${HICLAW_MANAGER_PASSWORD:-}"
+    REG_TOKEN="${AGENTTEAMS_REGISTRATION_TOKEN:-honeybadge-reg-token}"
+    MGR_PWD="${AGENTTEAMS_MANAGER_PASSWORD:-}"
     if [ -z "$MGR_PWD" ]; then
-        echo "[init-bg] WARN: HICLAW_MANAGER_PASSWORD empty — skipping @manager registration"
+        echo "[init-bg] WARN: AGENTTEAMS_MANAGER_PASSWORD empty — skipping @manager registration"
     else
         REG_BODY="{\"username\":\"manager\",\"password\":\"${MGR_PWD}\",\"auth\":{\"type\":\"m.login.registration_token\",\"token\":\"${REG_TOKEN}\"}}"
         for _attempt in 1 2 3 4 5; do
@@ -103,7 +103,7 @@ echo "[entrypoint] Starting HoneyBadge auto-init in background..." | tee -a "$LO
 ) >> "$LOG_FILE" 2>&1 &
 
 # Hand off to the v1.1.0 native manager-agent entrypoint as PID 1.
-# Requires HICLAW_RUNTIME=k8s in the environment so start-manager-agent.sh
+# Requires AGENTTEAMS_RUNTIME=k8s in the environment so start-manager-agent.sh
 # runs in container-entrypoint mode (see slim image's start-manager-agent.sh
 # branches on this var; "k8s" is the documented container-entrypoint runtime).
-exec /opt/hiclaw/scripts/init/start-manager-agent.sh
+exec /opt/agentteams/scripts/init/start-manager-agent.sh

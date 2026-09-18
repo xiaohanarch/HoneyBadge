@@ -82,19 +82,19 @@ jobs:
               echo "Manager pod: $MGR_POD"
               echo ""
               echo "--- forward-to-user.sh ---"
-              kubectl -n $NS exec "$MGR_POD" -- sh -c 'grep -nE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" /usr/local/bin/forward-to-user.sh 2>/dev/null || find / -name forward-to-user.sh 2>/dev/null | head -3 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" {} 2>/dev/null' 2>&1 | head -20
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'grep -nE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" /usr/local/bin/forward-to-user.sh 2>/dev/null || find / -name forward-to-user.sh 2>/dev/null | head -3 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|AGENTTEAMS_MATRIX_URL|TUWUNEL_URL.*6167" {} 2>/dev/null' 2>&1 | head -20
               echo ""
               echo "--- dispatch-to-worker.sh ---"
-              kubectl -n $NS exec "$MGR_POD" -- sh -c 'find / -name dispatch-to-worker.sh 2>/dev/null | head -3 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" {} 2>/dev/null' 2>&1 | head -20
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'find / -name dispatch-to-worker.sh 2>/dev/null | head -3 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|AGENTTEAMS_MATRIX_URL|TUWUNEL_URL.*6167" {} 2>/dev/null' 2>&1 | head -20
               echo ""
               echo "--- fast-forward.sh ---"
-              kubectl -n $NS exec "$MGR_POD" -- sh -c 'find / -name fast-forward.sh 2>/dev/null | head -3 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|TUWUNEL_URL.*6167" {} 2>/dev/null' 2>&1 | head -20
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'find / -name fast-forward.sh 2>/dev/null | head -3 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|AGENTTEAMS_MATRIX_URL|TUWUNEL_URL.*6167" {} 2>/dev/null' 2>&1 | head -20
               echo ""
               echo "--- SKILL.md inline python ---"
-              kubectl -n $NS exec "$MGR_POD" -- sh -c 'find / -path "*erp-query-dispatch/SKILL.md" 2>/dev/null | head -1 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|127\.0\.0\.1:6167" {} 2>/dev/null' 2>&1 | head -20
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'find / -path "*erp-query-dispatch/SKILL.md" 2>/dev/null | head -1 | xargs -I{} grep -nHE "HICLAW_MATRIX_URL|AGENTTEAMS_MATRIX_URL|127\.0\.0\.1:6167" {} 2>/dev/null' 2>&1 | head -20
               echo ""
               echo "--- Manager env vars (HICLAW_* + MATRIX_*) ---"
-              kubectl -n $NS exec "$MGR_POD" -- sh -c 'env | grep -E "HICLAW_|MATRIX_|TUWUNEL_" | sort' 2>&1 | head -20
+              kubectl -n $NS exec "$MGR_POD" -- sh -c 'env | grep -E "HICLAW_|AGENTTEAMS_|MATRIX_|TUWUNEL_" | sort' 2>&1 | head -20
             else
               echo "(no hiclaw-manager pod found)"
             fi
@@ -428,7 +428,7 @@ jobs:
                   find / -maxdepth 6 \( -iname "*matrix*" -o -iname "*tuwunel*" -o -iname "*credential*" -o -iname "*session*" \) -not -path "/proc/*" -not -path "/sys/*" -not -path "*/node_modules/*" 2>/dev/null | head -15
                   echo ""
                   echo "env (Matrix/homeserver related):"
-                  env 2>/dev/null | grep -iE "MATRIX|TUWUNEL|HOMESERVER|HICLAW_MATRIX" | sort
+                  env 2>/dev/null | grep -iE "MATRIX|TUWUNEL|HOMESERVER|HICLAW_MATRIX|AGENTTEAMS_MATRIX" | sort
                 ' 2>&1 | head -30
               else
                 echo "(no $ROLE pod)"

@@ -47,12 +47,12 @@ logger = structlog.get_logger()
 # Environment configuration (with defaults)
 # ---------------------------------------------------------------------------
 
-TUWUNEL_URL: str = os.getenv("TUWUNEL_URL", "http://hiclaw-manager:6167")
-MATRIX_DOMAIN: str = os.getenv("MATRIX_DOMAIN", "matrix-local.hiclaw.io")
+TUWUNEL_URL: str = os.getenv("TUWUNEL_URL", "http://matrix-local.agentteams.io:6167")
+MATRIX_DOMAIN: str = os.getenv("MATRIX_DOMAIN", "matrix-local.agentteams.io")
 
 # SECURITY: registration token has no default — must be set explicitly.
-# In production, set HICLAW_REGISTRATION_TOKEN in the environment.
-HICLAW_REGISTRATION_TOKEN: str = os.getenv("HICLAW_REGISTRATION_TOKEN", "")
+# In production, set AGENTTEAMS_REGISTRATION_TOKEN in the environment.
+AGENTTEAMS_REGISTRATION_TOKEN: str = os.getenv("AGENTTEAMS_REGISTRATION_TOKEN", "")
 
 # SECURITY: user secret has no default — must be set explicitly.
 MATRIX_USER_SECRET: str = os.getenv("MATRIX_USER_SECRET", "")
@@ -65,7 +65,7 @@ MATRIX_HOMESERVER_PUBLIC: str = os.getenv(
     "MATRIX_HOMESERVER_PUBLIC", "http://localhost:6167"
 )
 MANAGER_USER_ID: str = os.getenv(
-    "MANAGER_USER_ID", "@manager:matrix-local.hiclaw.io"
+    "MANAGER_USER_ID", "@manager:matrix-local.agentteams.io"
 )
 
 # SECURITY: manager password has no default — must be set explicitly.
@@ -97,8 +97,8 @@ def _validate_production_secrets() -> None:
     errors: list[str] = []
     if JWT_SECRET in _INSECURE_JWT_DEFAULTS or len(JWT_SECRET) < 32:
         errors.append("JWT_SECRET must be set to a random value >= 32 chars in production.")
-    if not HICLAW_REGISTRATION_TOKEN:
-        errors.append("HICLAW_REGISTRATION_TOKEN must be set in production.")
+    if not AGENTTEAMS_REGISTRATION_TOKEN:
+        errors.append("AGENTTEAMS_REGISTRATION_TOKEN must be set in production.")
     if not MATRIX_USER_SECRET:
         errors.append("MATRIX_USER_SECRET must be set in production.")
     if not MANAGER_MATRIX_PASSWORD:
@@ -261,7 +261,7 @@ async def _provision_matrix_account(username: str, password: str) -> str:
         "password": password,
         "auth": {
             "type": "m.login.registration_token",
-            "token": HICLAW_REGISTRATION_TOKEN,
+            "token": AGENTTEAMS_REGISTRATION_TOKEN,
         },
     }
 

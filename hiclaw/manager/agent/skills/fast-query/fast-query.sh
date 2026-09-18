@@ -98,9 +98,9 @@ if [[ "$_SUCCESS" == "fail" ]]; then
   # L3 permission violation — do NOT retry, forward error to user, exit 4
   if [[ "$_ERR_CODE" == "L3_PERMISSION" ]]; then
     if [[ -n "$FORWARD_USER_ID" ]]; then
-      TASK_DIR="/root/hiclaw-fs/shared/tasks/${TASK_ID}"
+      TASK_DIR="/root/agentteams-fs/shared/tasks/${TASK_ID}"
       mkdir -p "$TASK_DIR"
-      MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
+      MATRIX_DOMAIN="${AGENTTEAMS_MATRIX_DOMAIN:-matrix-local.agentteams.io}"
       FUID_CLEAN="${FORWARD_USER_ID#hb-}"
       python3 -c "import json,sys; print(json.dumps({'user_mxid': '@hb-'+sys.argv[1]+':'+sys.argv[2]}))" \
         "$FUID_CLEAN" "$MATRIX_DOMAIN" > "$TASK_DIR/meta.json"
@@ -166,11 +166,11 @@ fi
 
 # When --forward-to-user-id is given, send structured contract 002 reply via forward-to-user.sh
 if [[ -n "$FORWARD_USER_ID" ]]; then
-  TASK_DIR="/root/hiclaw-fs/shared/tasks/${TASK_ID}"
+  TASK_DIR="/root/agentteams-fs/shared/tasks/${TASK_ID}"
   mkdir -p "$TASK_DIR"
 
   # Create meta.json so forward-to-user.sh can resolve the user's DM room
-  MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io}"
+  MATRIX_DOMAIN="${AGENTTEAMS_MATRIX_DOMAIN:-matrix-local.agentteams.io}"
   # Strip hb- prefix from FORWARD_USER_ID to avoid double-prefixing (@hb-hb-xxx).
   # The Manager LLM inconsistently adds hb- to --forward-to-user-id values.
   FUID_CLEAN="${FORWARD_USER_ID#hb-}"

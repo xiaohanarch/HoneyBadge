@@ -1,15 +1,15 @@
 #!/bin/bash
 # hermes-worker-entrypoint.sh — Hermes Worker Agent startup
 #
-# Parallel to /opt/hiclaw/scripts/worker-entrypoint.sh but for hermes-agent.
+# Parallel to /opt/agentteams/scripts/worker-entrypoint.sh but for hermes-agent.
 # Pulls config from MinIO, bridges openclaw.json → config.yaml + .env,
 # starts file sync, launches hermes-agent.
 set -e
 
-WORKER_NAME="${HICLAW_WORKER_NAME:?HICLAW_WORKER_NAME is required}"
-FS_ENDPOINT="${HICLAW_FS_ENDPOINT:?HICLAW_FS_ENDPOINT is required}"
-FS_ACCESS_KEY="${HICLAW_FS_ACCESS_KEY:?HICLAW_FS_ACCESS_KEY is required}"
-FS_SECRET_KEY="${HICLAW_FS_SECRET_KEY:?HICLAW_FS_SECRET_KEY is required}"
+WORKER_NAME="${AGENTTEAMS_WORKER_NAME:?AGENTTEAMS_WORKER_NAME is required}"
+FS_ENDPOINT="${AGENTTEAMS_FS_ENDPOINT:?AGENTTEAMS_FS_ENDPOINT is required}"
+FS_ACCESS_KEY="${AGENTTEAMS_FS_ACCESS_KEY:?AGENTTEAMS_FS_ACCESS_KEY is required}"
+FS_SECRET_KEY="${AGENTTEAMS_FS_SECRET_KEY:?AGENTTEAMS_FS_SECRET_KEY is required}"
 
 log() {
     echo "[hermes-worker $(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -40,21 +40,21 @@ if [ -n "${TZ}" ] && [ -f "/usr/share/zoneinfo/${TZ}" ]; then
     log "Timezone set to ${TZ}"
 fi
 
-HICLAW_ROOT="/root/hiclaw-fs"
-WORKSPACE="${HICLAW_ROOT}/agents/${WORKER_NAME}"
+AGENTTEAMS_ROOT="/root/agentteams-fs"
+WORKSPACE="${AGENTTEAMS_ROOT}/agents/${WORKER_NAME}"
 HERMES_HOME="${HOME}/.hermes"
 
 # --- Step 1: Configure mc alias for MinIO ---
 log "Configuring mc alias for local MinIO..."
-mc alias set hiclaw "${FS_ENDPOINT}" "${FS_ACCESS_KEY}" "${FS_SECRET_KEY}"
+mc alias set agentteams "${FS_ENDPOINT}" "${FS_ACCESS_KEY}" "${FS_SECRET_KEY}"
 
 # --- Step 2: Pull Worker config from MinIO ---
-mkdir -p "${WORKSPACE}" "${HICLAW_ROOT}/shared" "${HERMES_HOME}"
+mkdir -p "${WORKSPACE}" "${AGENTTEAMS_ROOT}/shared" "${HERMES_HOME}"
 
 log "Pulling Worker config from MinIO..."
-mc mirror "hiclaw/hiclaw-storage/agents/${WORKER_NAME}/" "${WORKSPACE}/" --overwrite \
+mc mirror "agentteams/agentteams-storage/agents/${WORKER_NAME}/" "${WORKSPACE}/" --overwrite \
     --exclude ".openclaw/matrix/**" --exclude ".openclaw/canvas/**" --exclude "credentials/**"
-mc mirror "hiclaw/hiclaw-storage/shared/" "${HICLAW_ROOT}/shared/" --overwrite 2>/dev/null || true
+mc mirror "agentteams/agentteams-storage/shared/" "${AGENTTEAMS_ROOT}/shared/" --overwrite 2>/dev/null || true
 
 PULL_MARKER="${WORKSPACE}/.last-pull"
 touch "${PULL_MARKER}"
@@ -69,7 +69,7 @@ while [ ! -f "${WORKSPACE}/openclaw.json" ] || [ ! -f "${WORKSPACE}/SOUL.md" ]; 
     fi
     log "Waiting for config files (attempt ${RETRY}/6)..."
     sleep 5
-    mc mirror "hiclaw/hiclaw-storage/agents/${WORKER_NAME}/" "${WORKSPACE}/" --overwrite 2>/dev/null || true
+    mc mirror "agentteams/agentteams-storage/agents/${WORKER_NAME}/" "${WORKSPACE}/" --overwrite 2>/dev/null || true
     touch "${PULL_MARKER}"
 done
 
@@ -87,7 +87,7 @@ fi
 
 # --- Step 4: Run config bridge ---
 log "Running config bridge..."
-HICLAW_WORKER_NAME="${WORKER_NAME}" bash /opt/honeybadge/init/hermes-config-bridge.sh "${WORKSPACE}/openclaw.json"
+AGENTTEAMS_WORKER_NAME="${WORKER_NAME}" bash /opt/honeybadge/init/hermes-config-bridge.sh "${WORKSPACE}/openclaw.json"
 
 # --- Step 5: Configure mcporter ---
 MCPORTER_CONFIG="${WORKSPACE}/config/mcporter.json"
@@ -104,7 +104,7 @@ fi
     while true; do
         CHANGED=$(find "${HERMES_HOME}/" -type f -newer "${PULL_MARKER}" 2>/dev/null | head -1)
         if [ -n "${CHANGED}" ]; then
-            mc mirror "${HERMES_HOME}/" "hiclaw/hiclaw-storage/agents/${WORKER_NAME}/.hermes/" \
+            mc mirror "${HERMES_HOME}/" "agentteams/agentteams-storage/agents/${WORKER_NAME}/.hermes/" \
                 --overwrite \
                 --exclude "sessions/**" --exclude ".cache/**" 2>&1 || true
         fi
@@ -116,8 +116,8 @@ log "Local->Remote sync started (PID: $!)"
 (
     while true; do
         sleep 30
-        mc mirror "hiclaw/hiclaw-storage/shared/" "${HICLAW_ROOT}/shared/" --overwrite --newer-than "2m" 2>/dev/null || true
-        mc mirror "hiclaw/hiclaw-storage/agents/${WORKER_NAME}/skills/" "${HERMES_HOME}/skills/" --overwrite 2>/dev/null || true
+        mc mirror "agentteams/agentteams-storage/shared/" "${AGENTTEAMS_ROOT}/shared/" --overwrite --newer-than "2m" 2>/dev/null || true
+        mc mirror "agentteams/agentteams-storage/agents/${WORKER_NAME}/skills/" "${HERMES_HOME}/skills/" --overwrite 2>/dev/null || true
         create_skill_symlinks
         find "${HERMES_HOME}/skills" -name '*.py' -exec chmod +x {} + 2>/dev/null || true
         find "${HERMES_HOME}/skills" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
@@ -127,7 +127,7 @@ log "Local->Remote sync started (PID: $!)"
 log "Remote->Local fallback sync started (every 30s, PID: $!)"
 
 # --- Step 7: Matrix re-login for fresh E2EE token ---
-MATRIX_PASSWORD_FILE="hiclaw/hiclaw-storage/agents/${WORKER_NAME}/credentials/matrix/password"
+MATRIX_PASSWORD_FILE="agentteams/agentteams-storage/agents/${WORKER_NAME}/credentials/matrix/password"
 MATRIX_PASSWORD=$(mc cat "${MATRIX_PASSWORD_FILE}" 2>/dev/null) || true
 if [ -n "${MATRIX_PASSWORD}" ]; then
     MATRIX_SERVER=$(jq -r '.channels.matrix.homeserver // empty' "${WORKSPACE}/openclaw.json" 2>/dev/null)

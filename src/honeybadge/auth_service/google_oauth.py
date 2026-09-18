@@ -189,4 +189,4 @@ def _sign_google_jwt(google_sub: str, email: str, display_name: str) -> str:
 
 def _get_matrix_domain() -> str:
     """Get Matrix domain from environment or default."""
-    return os.getenv("MATRIX_DOMAIN", "matrix-local.hiclaw.io")
+    return os.getenv("MATRIX_DOMAIN", "matrix-local.agentteams.io")

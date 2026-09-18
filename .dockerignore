@@ -1,0 +1,45 @@
+# Build context is the repo root (Dockerfiles under mcp-servers/, src/,
+# deploy/). Only requirements/pyproject/src/mcp-servers/prompts are ever
+# COPYed — exclude everything else, especially:
+#   deploy/docker/data/  1.2GB live NebulaGraph data (mounted volume) —
+#                        without this every image build uploads it all and
+#                        WAL reads fail with "archive/tar: write too long".
+.git
+.gitignore
+.githooks
+.github
+.claude
+.idea
+.vscode
+.pytest_cache
+.ruff_cache
+.mypy_cache
+coverage
+
+# Runtime data volumes (never bake into images)
+deploy/docker/data
+deploy/docker/logs
+
+# Node / frontend (built separately, not COPYed by backend Dockerfiles)
+frontend
+node_modules
+**/node_modules
+
+# Python artifacts
+**/__pycache__
+*.pyc
+.venv
+venv
+*.egg-info
+htmlcov
+.coverage
+
+# Test / docs / artifacts not needed in images
+tests
+eval
+docs
+openspec
+scripts
+UPGRADE-NOTES.md
+README.md
+CLAUDE.md

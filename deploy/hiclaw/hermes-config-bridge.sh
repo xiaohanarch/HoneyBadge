@@ -8,7 +8,7 @@
 # Non-bridge-owned keys are preserved across re-runs.
 set -euo pipefail
 
-OPENCLAW_JSON="${1:-${HOME}/hiclaw-fs/agents/${HICLAW_WORKER_NAME}/openclaw.json}"
+OPENCLAW_JSON="${1:-${HOME}/agentteams-fs/agents/${AGENTTEAMS_WORKER_NAME}/openclaw.json}"
 HERMES_DIR="${HOME}/.hermes"
 CONFIG_YAML="${HERMES_DIR}/config.yaml"
 ENV_FILE="${HERMES_DIR}/.env"
@@ -27,11 +27,11 @@ MATRIX_TOKEN=$(jq -r '.channels.matrix.accessToken // empty' "$OPENCLAW_JSON")
 # Derive Matrix user_id from worker name + homeserver domain
 # (openclaw.json doesn't store userId explicitly; hermes gateway needs it)
 MATRIX_DOMAIN=$(echo "$MATRIX_HOMESERVER" | sed 's|https\?://||; s|:[0-9]*||; s|/.*||')
-MATRIX_USER="@${HICLAW_WORKER_NAME}:${MATRIX_DOMAIN}"
+MATRIX_USER="@${AGENTTEAMS_WORKER_NAME}:${MATRIX_DOMAIN}"
 
 # Extract LLM provider info from openclaw.json
 # openclaw.json structure:
-#   .agents.defaults.model.primary = "hiclaw-gateway/glm-5.2"  (provider/model_id)
+#   .agents.defaults.model.primary = "agentteams-gateway/glm-5.2"  (provider/model_id)
 #   .models.providers.<provider>.baseUrl / .apiKey / .api
 MODEL_PRIMARY=$(jq -r '.agents.defaults.model.primary // empty' "$OPENCLAW_JSON")
 OC_PROVIDER="${MODEL_PRIMARY%%/*}"
@@ -147,4 +147,4 @@ TMP_ENV=$(mktemp)
 } > "$TMP_ENV"
 mv "$TMP_ENV" "$ENV_FILE"
 
-echo "[hermes-bridge] config.yaml and .env generated for ${HICLAW_WORKER_NAME} (provider: ${HERMES_PROVIDER}, model: ${LLM_MODEL})"
+echo "[hermes-bridge] config.yaml and .env generated for ${AGENTTEAMS_WORKER_NAME} (provider: ${HERMES_PROVIDER}, model: ${LLM_MODEL})"

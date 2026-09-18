@@ -44,28 +44,28 @@ Use `exec` to create the task directory, write meta.json + spec.md, and push to 
 
 ```bash
 TASK_ID="task-$(date -u '+%Y%m%d-%H%M%S')"
-TASK_DIR="/root/hiclaw-fs/shared/tasks/$TASK_ID"
+TASK_DIR="/root/agentteams-fs/shared/tasks/$TASK_ID"
 WORKER_ROOM_ID=$(python3 -c "import json; r=json.load(open('/root/workers-registry.json')); print(r['workers']['$WORKER_NAME']['room_id'])")
 mkdir -p "$TASK_DIR"
 
 # Resolve user_mxid from x-hb-auth JWT (see "User Identity Propagation" in SOUL.md)
 USER_ID="${user_id:-anonymous}"   # LLM substitutes the extracted username
-USER_MXID="@${USER_ID}:matrix-local.hiclaw.io"
+USER_MXID="@${USER_ID}:matrix-local.agentteams.io"
 
 # Resolve the user's DM room via Manager's m.direct account data.
 # This is the anchor that lets Step 6 forward the result back to the correct room.
 export USER_MXID
-# Honor HICLAW_MATRIX_URL (split topology — Tuwunel is in honeybadge-hiclaw-embedded,
-# not the Manager container). Fall back to the matrix-local.hiclaw.io alias which
+# Honor AGENTTEAMS_MATRIX_URL (split topology — Tuwunel is in honeybadge-hiclaw-embedded,
+# not the Manager container). Fall back to the matrix-local.agentteams.io alias which
 # works in both embedded and split deployments.
-export HICLAW_MATRIX_URL="${HICLAW_MATRIX_URL:-http://matrix-local.hiclaw.io:6167}"
+export AGENTTEAMS_MATRIX_URL="${AGENTTEAMS_MATRIX_URL:-http://matrix-local.agentteams.io:6167}"
 USER_ROOM_ID=$(python3 << 'RESOLVE_EOF'
 import json, urllib.request, urllib.parse, os
 cfg = json.load(open("/root/manager-workspace/openclaw.json"))
 token = cfg["channels"]["matrix"]["accessToken"]
-mgr_uid = "@manager:matrix-local.hiclaw.io"
+mgr_uid = "@manager:matrix-local.agentteams.io"
 user_mxid = os.environ.get("USER_MXID", "")
-tuwunel = os.environ.get("HICLAW_MATRIX_URL", "http://matrix-local.hiclaw.io:6167")
+tuwunel = os.environ.get("AGENTTEAMS_MATRIX_URL", "http://matrix-local.agentteams.io:6167")
 enc_mgr = urllib.parse.quote(mgr_uid, safe="")
 try:
     req = urllib.request.Request(
@@ -108,14 +108,14 @@ question: <exact question from the user>
 <describe what the worker should return>
 EOF
 
-mc cp "$TASK_DIR/meta.json" "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/meta.json"
-mc cp "$TASK_DIR/spec.md" "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/spec.md"
+mc cp "$TASK_DIR/meta.json" "agentteams/agentteams-storage/shared/tasks/$TASK_ID/meta.json"
+mc cp "$TASK_DIR/spec.md" "agentteams/agentteams-storage/shared/tasks/$TASK_ID/spec.md"
 ```
 
 ## Step 3 — Register in state.json
 
 ```bash
-bash /opt/hiclaw/agent/skills/task-management/scripts/manage-state.sh \
+bash /opt/agentteams/agent/skills/task-management/scripts/manage-state.sh \
   --action add-finite \
   --task-id "$TASK_ID" \
   --title "<1-line summary>" \
@@ -132,7 +132,7 @@ DISPATCH_SCRIPT="/opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/
 bash "$DISPATCH_SCRIPT" \
   --worker "$WORKER_NAME" \
   --task-id "$TASK_ID" \
-  --message "@${WORKER_NAME}:matrix-local.hiclaw.io Task $TASK_ID: <1-line summary>
+  --message "@${WORKER_NAME}:matrix-local.agentteams.io Task $TASK_ID: <1-line summary>
 
 Use your $SKILL_NAME skill. task-id: $TASK_ID, user_id: <username>"
 ```
@@ -152,14 +152,14 @@ When a Worker @mentions you with completion in its worker room, **你必须用 `
 
 ```bash
 FORWARD_SCRIPT="/opt/honeybadge/config/manager/agent/skills/erp-query-dispatch/scripts/forward-to-user.sh"
-TASK_DIR="/root/hiclaw-fs/shared/tasks/$TASK_ID"
+TASK_DIR="/root/agentteams-fs/shared/tasks/$TASK_ID"
 
 # Sync result.json from MinIO so forward-to-user.sh can attach the x-honeybadge
 # structured payload (trace_id, raw_data, columns, cypher) to the Matrix message.
 # Without --result-json, the message is plain text with no trace_id, and the
 # frontend cannot render the structured result panel or link to the audit trail.
 mkdir -p "$TASK_DIR"
-mc mirror "hiclaw/hiclaw-storage/shared/tasks/$TASK_ID/" "$TASK_DIR/" --overwrite 2>/dev/null || true
+mc mirror "agentteams/agentteams-storage/shared/tasks/$TASK_ID/" "$TASK_DIR/" --overwrite 2>/dev/null || true
 
 SUMMARY=$(cat << 'SUM'
 ✅ 任务 $TASK_ID 已完成

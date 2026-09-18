@@ -21,7 +21,7 @@ from tests.e2e.selectors import (
     TRACE_ID_LINK,
 )
 
-pytestmark = pytest.mark.requires_llm
+pytestmark = [pytest.mark.routing, pytest.mark.requires_llm]
 
 
 def _get_worker_logs_since(container_name: str, since: datetime) -> str:
@@ -39,10 +39,10 @@ def _get_worker_logs_since(container_name: str, since: datetime) -> str:
 
 
 @pytest.mark.e2e
-@pytest.mark.routing
 class TestWorkerRouting:
     """Verify Manager routes queries to the correct worker based on intent."""
 
+    @pytest.mark.smoke
     def test_tc1101_simple_query_routes_to_graph_worker(
         self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response,
     ):

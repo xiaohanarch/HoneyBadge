@@ -34,6 +34,8 @@ from tests.e2e.selectors import (
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:3000")
 
+pytestmark = pytest.mark.chat
+
 
 class TestChatFunctionality:
     """Test chat functionality with content verification."""
@@ -52,6 +54,7 @@ class TestChatFunctionality:
         expect(page.locator(MESSAGES_CONTAINER)).to_be_visible()
         expect(page.locator(CHAT_TEXTAREA)).to_be_visible()
 
+    @pytest.mark.smoke
     def test_tc102_send_query_receives_response_with_trace(self, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-102: Query returns response with meaningful text and trace ID."""
         page = admin_logged_in

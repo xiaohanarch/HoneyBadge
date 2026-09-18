@@ -1,10 +1,10 @@
 # Workspace Layout
 
 - Local workspace: ~/
-- Shared files: /root/hiclaw-fs/shared/
-- Worker files: /root/hiclaw-fs/agents/<worker-name>/
+- Shared files: /root/agentteams-fs/shared/
+- Worker files: /root/agentteams-fs/agents/<worker-name>/
 
-Use `${HICLAW_STORAGE_PREFIX}` for MinIO paths. Use full Matrix IDs like `@graph-worker:matrix-local.hiclaw.io`.
+Use `${AGENTTEAMS_STORAGE_PREFIX}` for MinIO paths. Use full Matrix IDs like `@graph-worker:matrix-local.agentteams.io`.
 
 # Available Workers
 

@@ -27,12 +27,13 @@ API_BASE_URL = "http://localhost:8090"
 #   2. Redis password reconciled (redis123 in both secrets.yaml and test)
 #   3. Two-stage harness wait in conftest.py handles mid-stream LLM preamble
 
-pytestmark = pytest.mark.requires_llm
+pytestmark = [pytest.mark.mcp, pytest.mark.requires_llm]
 
 
 class TestMCPServices:
     """Test MCP (Model Context Protocol) server connectivity and functionality."""
 
+    @pytest.mark.smoke
     def test_tc601_nebula_mcp_healthy(self, api_client):
         """TC-601: NebulaGraph MCP server is healthy (verified via honeybadge-server health)."""
         # MCP servers are internal Docker services, not directly exposed to host.
