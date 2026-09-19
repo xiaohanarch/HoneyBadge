@@ -157,6 +157,70 @@ class TestTicketEndpoints:
 
 
 # ---------------------------------------------------------------------------
+# Deterministic ticket extraction from raw Matrix bodies
+# (fetch-conversation-history.py --extract-ticket)
+# ---------------------------------------------------------------------------
+_FETCH_HIST_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "hiclaw", "manager", "agent", "skills",
+    "fast-query", "fetch-conversation-history.py",
+)
+
+
+def _fetch_hist_module() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("fetch_conversation_history", _FETCH_HIST_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _matrix_ev(sender: str, body: str) -> dict:
+    return {
+        "type": "m.room.message",
+        "sender": sender,
+        "content": {"msgtype": "m.text", "body": body},
+    }
+
+
+class TestMatrixTicketExtraction:
+    _USER = "@hb-admin:matrix-local.agentteams.io"
+    _MANAGER = "@manager:matrix-local.agentteams.io"
+
+    def test_extracts_marker_from_newest_user_message(self) -> None:
+        mod = _fetch_hist_module()
+        events = [  # newest first (raw /messages?dir=b order)
+            _matrix_ev(self._USER, "查询所有供应商\n\n[ticket: abc123def456]"),
+            _matrix_ev(self._MANAGER, "manager reply"),
+        ]
+        assert mod._extract_latest_ticket(events, self._USER) == "abc123def456"
+
+    def test_takes_last_marker_in_message(self) -> None:
+        mod = _fetch_hist_module()
+        events = [_matrix_ev(self._USER, "q [ticket: first] tail [ticket: second]")]
+        assert mod._extract_latest_ticket(events, self._USER) == "second"
+
+    def test_ignores_manager_messages(self) -> None:
+        mod = _fetch_hist_module()
+        events = [_matrix_ev(self._MANAGER, "[ticket: forged]")]
+        assert mod._extract_latest_ticket(events, self._USER) == ""
+
+    def test_scans_older_messages_when_newest_lacks_marker(self) -> None:
+        mod = _fetch_hist_module()
+        events = [
+            _matrix_ev(self._USER, "follow-up without marker"),
+            _matrix_ev(self._USER, "original\n\n[ticket: older789]"),
+        ]
+        assert mod._extract_latest_ticket(events, self._USER) == "older789"
+
+    def test_empty_when_no_marker_anywhere(self) -> None:
+        mod = _fetch_hist_module()
+        events = [_matrix_ev(self._USER, "plain question")]
+        assert mod._extract_latest_ticket(events, self._USER) == ""
+
+
+# ---------------------------------------------------------------------------
 # validate_and_execute_impl auth verification
 # ---------------------------------------------------------------------------
 class TestMcpAuthVerification:

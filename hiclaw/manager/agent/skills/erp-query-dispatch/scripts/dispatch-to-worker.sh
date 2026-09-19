@@ -43,6 +43,13 @@ done
 if [[ -z "$TICKET" ]]; then
     TICKET=$(cat /tmp/.last-route-auth-ticket 2>/dev/null || true)
 fi
+# Deterministic fallback: extract from the raw Matrix DM body (the LLM
+# relaying the question often drops the "[ticket: ...]" marker).
+if [[ -z "$TICKET" && -n "$USER_ID" && "$USER_ID" != "manager" ]]; then
+    FETCH_HIST="/opt/honeybadge/config/manager/agent/skills/fast-query/fetch-conversation-history.py"
+    [ -f "$FETCH_HIST" ] && TICKET=$(python3 "$FETCH_HIST" \
+        --user-id "$USER_ID" --extract-ticket 2>/dev/null | tail -1 || true)
+fi
 
 if [ -z "$WORKER_NAME" ] || [ -z "$MESSAGE" ]; then
     echo "DISPATCH_ERROR: --worker and --message are required" >&2

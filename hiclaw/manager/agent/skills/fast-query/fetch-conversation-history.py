@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -34,6 +35,9 @@ import urllib.request
 
 CHAR_BUDGET = 8000  # If history exceeds this, reduce rounds.
 MANAGER_MXID = "@manager:matrix-local.agentteams.io"
+
+# Auth-ticket marker appended by the frontend to every query body.
+TICKET_RE = re.compile(r"\[ticket:\s*([^\]\s]+)\]")
 
 
 def _load_manager_token() -> tuple[str, str]:
@@ -165,6 +169,34 @@ def _extract_qa_pairs(events: list[dict], user_mxid: str) -> list[dict[str, str]
     return pairs
 
 
+def _extract_latest_ticket(events: list[dict], user_mxid: str) -> str:
+    """Extract the auth ticket from the user's DM messages, newest first.
+
+    events: Matrix events in NEWEST-FIRST order (raw /messages?dir=b order).
+    Returns the ticket id or "".
+
+    This is the deterministic arm of the auth-ticket chain: the Manager LLM
+    relays the question text to bash scripts and may drop the trailing
+    ``[ticket: ...]`` marker — reading the raw Matrix body bypasses the LLM
+    entirely. Takes the LAST marker in a message (the frontend appends it
+    at the end); fake markers injected into a message do not resolve on the
+    server and fail closed at the MCP layer.
+    """
+    for ev in events:
+        if ev.get("type") != "m.room.message":
+            continue
+        content = ev.get("content", {}) or {}
+        if content.get("msgtype") != "m.text":
+            continue
+        if ev.get("sender", "") != user_mxid:
+            continue
+        body = content.get("body", "") or ""
+        matches = TICKET_RE.findall(body)
+        if matches:
+            return matches[-1]
+    return ""
+
+
 def _truncate(pairs: list[dict[str, str]], max_rounds: int) -> list[dict[str, str]]:
     """Keep the last ``max_rounds`` Q&A pairs; shrink if over CHAR_BUDGET."""
     rounds = max_rounds
@@ -181,6 +213,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--user-id", required=True, help="HoneyBadge user id (e.g. admin)")
     parser.add_argument("--max-rounds", type=int, default=3, help="Q&A pairs to retain")
+    parser.add_argument(
+        "--extract-ticket",
+        action="store_true",
+        help="Print the [ticket: ...] id from the user's latest DM message "
+        "(deterministic auth-ticket extraction) instead of Q&A history",
+    )
     args = parser.parse_args()
 
     try:
@@ -194,7 +232,7 @@ def main() -> int:
 
         room_id = _resolve_dm_room(base, token, user_mxid)
         if not room_id:
-            print("[]")
+            print("[]" if not args.extract_ticket else "")
             return 0
 
         # Fetch more events than needed so we can filter out non-Q&A noise
@@ -207,6 +245,12 @@ def main() -> int:
             f"/_matrix/client/v3/rooms/{encoded_room}/messages?dir=b&limit={limit}",
         )
         events = data.get("chunk", [])
+
+        if args.extract_ticket:
+            # events are newest-first here — exactly what _extract_latest_ticket wants.
+            print(_extract_latest_ticket(events, user_mxid))
+            return 0
+
         # dir=b → newest first; reverse for chronological order.
         events.reverse()
 
@@ -217,7 +261,7 @@ def main() -> int:
     except Exception as e:
         # Graceful degradation: any error → empty history, query proceeds single-turn.
         sys.stderr.write(f"fetch-conversation-history: {e}\n")
-        print("[]")
+        print("" if args.extract_ticket else "[]")
         return 0
 
 

@@ -37,6 +37,15 @@ done
 if [[ -z "$TICKET" ]]; then
   TICKET=$(printf '%s' "$QUESTION" | grep -oP '\[ticket:\s*\K[^\]]+' || true)
 fi
+if [[ -z "$TICKET" ]]; then
+  TICKET=$(cat /tmp/.last-route-auth-ticket 2>/dev/null || true)
+fi
+# Deterministic fallback: the LLM relaying the question often drops the
+# marker (observed in CI). Pull the raw Matrix DM body instead.
+if [[ -z "$TICKET" && -n "$USER_ID" && "$USER_ID" != "manager" ]]; then
+  TICKET=$(python3 "$(dirname "$0")/fetch-conversation-history.py" \
+      --user-id "$USER_ID" --extract-ticket 2>/dev/null | tail -1 || true)
+fi
 QUESTION=$(printf '%s' "$QUESTION" | sed -E 's/[[:space:]]*\[ticket:[[:space:]]*[^]]*\][[:space:]]*$//')
 
 # If --user-id was not explicitly provided but --forward-to-user-id was,

@@ -75,6 +75,14 @@ else
     # as the user-id recovery above).
     TICKET=$(cat /tmp/.last-route-auth-ticket 2>/dev/null || true)
 fi
+# Deterministic fallback: the LLM relaying the question often drops the
+# "[ticket: ...]" marker (observed in CI: glm-5.2 passes a cleaned question).
+# Pull the raw message body from the Matrix DM instead — no LLM in the loop.
+if [[ -z "$TICKET" && -n "$USER_ID" && "$USER_ID" != "manager" ]]; then
+    TICKET=$(python3 "$(dirname "$0")/fetch-conversation-history.py" \
+        --user-id "$USER_ID" --extract-ticket 2>/dev/null | tail -1 || true)
+    [[ -n "$TICKET" ]] && echo "$TICKET" > /tmp/.last-route-auth-ticket
+fi
 
 # Step 1: Route
 ROUTE=$(bash /opt/honeybadge/config/manager/agent/skills/fast-query/router.sh "$QUESTION")
