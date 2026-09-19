@@ -625,6 +625,54 @@ fixed before the chat E2E could pass:
       login + Tuwunel healthy throughout. Also propagates to k8s via the
       `hiclaw-init-scripts` ConfigMap on next `apply -k`.
 
+24. **Security remediation batch (2026-09-18)** — follow-up to the PR #208
+    merge; triggered by a project-wide problem analysis.
+    - **k8s secrets de-leaked (repo side)**: `deploy/k8s/secrets.yaml`
+      previously carried real-looking credentials in a PUBLIC repo —
+      treat every value that ever appeared there as leaked. It is now a
+      placeholder schema; `01-apply-secrets.sh` (random-generating, env-
+      driven) is the only apply path. It also now creates the previously
+      missing `HICLAW_MANAGER_PASSWORD` / `HICLAW_MANAGER_GATEWAY_KEY`
+      (manager.yaml referenced them; live values were hand-patched) and
+      `HONEYBADGE_SERVICE_TOKEN` (auth-ticket chain).
+    - **init-nebula job de-hardcoded**: the console invocation embedded
+      `-password nebula`; now reads `NEBULA_PASSWORD` from the Secret.
+    - **Legacy `deploy/docker/homeserver.yaml` deleted** (pre-Tuwunel
+      Synapse config, old `matrix.local` domain, unreferenced, carried PG
+      password + 3 secrets).
+    - **MCP identity verification added** (auth-ticket chain — see the
+      dedicated commit for the full design): `validate_and_execute` now
+      verifies a signed identity and OVERRIDES self-reported user_id;
+      `HONEYBADGE_REQUIRE_AUTH=1` is the deployment default. This closes
+      the "self-report admin at the MCP port" escalation.
+    - **ROTATION RUNBOOK (ECS — blocked on SSH access as of 2026-09-18;
+      execute when reachable, in this order)**:
+      1. Snapshot current live values:
+         `kubectl -n honeybadge get secret honeybadge-secrets -o jsonpath='{.data}'`
+         (compare against repo history — if any match, that value was
+         applied from the repo and MUST rotate).
+      2. **PostgreSQL**: `ALTER USER honeybadge WITH PASSWORD '<new>';`
+         FIRST (the PVC keeps the initialized password — changing only
+         the Secret does nothing), then update the Secret, then restart
+         postgres + server + audit-mcp.
+      3. **NebulaGraph**: enable auth properly — current graphd runs with
+         the image default (`nebula`, no `enable_authorize`); run
+         `ALTER USER root WITH PASSWORD '<new>'`, update the Secret,
+         restart graphd + server + nebula-mcp.
+      4. **Redis**: update Secret, delete the redis pod (env-based
+         `--requirepass`), restart server + cache-mcp.
+      5. **MinIO root (= HICLAW_ADMIN_PASSWORD)**: change via MinIO
+         console, update Secret, restart manager/workers/init-workers
+         job; also fix the 4 shell-script fallbacks in deploy/hiclaw/.
+      6. **JWT_SECRET**: update Secret, restart server + auth — all
+         sessions re-login.
+      7. **MATRIX_USER_SECRET**: update Secret, restart auth — ALL user
+         Matrix accounts must be re-provisioned (maintenance window).
+      8. **HICLAW_REGISTRATION_TOKEN + Grafana admin + any homeserver-era
+         values in git history**: rotate opportunistically.
+      9. Verify: `run-e2e-ecs.sh` green + a manual query through the
+         frontend with a non-admin account shows L3-filtered results.
+
 
 Also fixed a pre-existing quoting bug in `scripts/run-e2e-tests.sh:138`
 (`--env-file "$ENV_FILE up -d` missing close-quote, broken since first
