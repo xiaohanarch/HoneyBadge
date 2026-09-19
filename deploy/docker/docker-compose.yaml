@@ -650,6 +650,10 @@ services:
       - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
       # Auth
       - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
+      # Auth-ticket identity chain: guards the internal ticket-resolve
+      # endpoint used by the MCP servers. MUST match the value passed to
+      # the nebula-mcp service — empty here makes every resolution 403.
+      - HONEYBADGE_SERVICE_TOKEN=${HONEYBADGE_SERVICE_TOKEN:-}
       - SERVER_PORT=8090
       - TZ=Asia/Shanghai
     depends_on:
