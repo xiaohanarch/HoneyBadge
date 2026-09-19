@@ -770,7 +770,6 @@ services:
       - "3000:3000"
     environment:
       - VITE_API_TARGET=http://honeybadge-server:8090
-      - VITE_WS_TARGET=ws://honeybadge-server:8090
       - VITE_AUTH_URL=http://localhost:8091
       - VITE_MATRIX_HOMESERVER=http://localhost:7167
       - TZ=Asia/Shanghai
