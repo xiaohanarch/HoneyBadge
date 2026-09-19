@@ -110,16 +110,17 @@ hermes-worker image lacks `hermes-agent` + `pip3` — self-built
   `hiclaw/`, `deploy/docker/`, `deploy/hiclaw/`, `src/`, `frontend/`, `tests/`.
   Intentionally retained:
   - `deploy/k8s/**` — k8s manifests, out of scope per Summary
-  - `src/honeybadge/metrics/collectors.py` `HICLAW_METRICS` instance +
-    `HiClawMetricsCollector` class — NOT dead code. `__init__` registers 7
-    Prometheus metrics (`honeybadge_hiclaw_*`) with global REGISTRY as a
-    side effect of instantiation. `honeybadge_hiclaw_workers_active` is
+  - `src/honeybadge/metrics/collectors.py` `AGENTTEAMS_METRICS` instance +
+    `AgentTeamsMetricsCollector` class — NOT dead code. `__init__` registers 7
+    Prometheus metrics (`honeybadge_agentteams_*`) with global REGISTRY as a
+    side effect of instantiation. `honeybadge_agentteams_workers_active` is
     queried by the `NoActiveWorkers` critical alert in
     `deploy/observability/prometheus/rules/honeybadge.yml`. The Python
     instance is never called, but removing it would unregister the metrics
-    and silently break the alert. Metric names still use `hiclaw` prefix;
-    renaming to `agentteams` is a separate breaking change (dashboards +
-    historical data) and out of scope for this upgrade.
+    and silently break the alert. **Renamed from the `hiclaw` prefix on
+    2026-09-18** (collector class, alert rule, Grafana dashboard, and
+    test_observability.py updated together; historical Prometheus series
+    continuity breaks once — accepted pre-production).
   - `docs/baselines/v1.1.{0,2}/`, `docs/superpowers/{plans,specs}/` —
     historical snapshots, out of scope
 - **4.3 Docs + commit + PR** — **DONE (2026-09-18)**. Docs updated (CLAUDE.md,

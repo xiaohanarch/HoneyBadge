@@ -3,13 +3,13 @@
 Provides metrics for:
 - LLM (tokens, latency, errors)
 - NebulaGraph (query duration, connection pool)
-- HiClaw (workers, task queue, task duration)
+- AgentTeams (workers, task queue, task duration)
 - Validation (L1/L2/L3 pass/fail)
 - Query (total, end-to-end duration)
 """
 
 from honeybadge.metrics.collectors import (
-    HICLAW_METRICS,
+    AGENTTEAMS_METRICS,
     LLM_METRICS,
     NEBULA_METRICS,
     QUERY_METRICS,
@@ -19,7 +19,7 @@ from honeybadge.metrics.collectors import (
 __all__ = [
     "LLM_METRICS",
     "NEBULA_METRICS",
-    "HICLAW_METRICS",
+    "AGENTTEAMS_METRICS",
     "VALIDATION_METRICS",
     "QUERY_METRICS",
 ]
