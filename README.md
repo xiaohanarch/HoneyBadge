@@ -643,8 +643,10 @@ Room-A 与 Room-B 完全独立，@manager 在登录时已 join 两个房间
 3. 写回 `m.direct` 账户数据供下次复用
 4. 返回 `room_id` 给前端
 
-**权限上下文传递（x-hb-auth）**：
-graph-worker 从 Matrix 消息的 `x-hb-auth` 字段解码出 `{user_id, roles, org_id}`，传入 MCP 工具的 `user_context` 参数实现 L3 权限校验。
+**权限上下文传递（auth ticket 链）**：
+前端登录后持有 roles JWT。发送查询时，前端先调用 `POST /api/auth/ticket` 用 JWT 换取短时票据（10 分钟 TTL、限次使用），票据以 `[ticket: ...]` 标记附在消息体末尾。Manager/Worker 侧的脚本与 spec 模板确定性提取票据并传入 MCP 工具的 `user_context.auth_ticket`；`validate_and_execute` 向 honeybadge-server 解析票据取回 JWT 并验签（HS256），**用验签后的 username 覆盖自报的 user_id**，再按该身份执行 L3 权限校验。部署开启 `HONEYBADGE_REQUIRE_AUTH=1` 后无票据的查询直接拒绝（fail-closed）。
+
+> 历史说明：早期设计期望 Matrix 消息的 `x-hb-auth` 自定义字段携带 JWT，但 AgentTeams 运行时的消息映射器只透传 `content.body`，自定义字段在到达 agent 前即被丢弃，因此改为票据旁路方案。
 
 ### 5.4 数据入图策略
 

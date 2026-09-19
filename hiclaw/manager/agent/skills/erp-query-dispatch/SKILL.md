@@ -102,7 +102,8 @@ EOF
 
 cat > "$TASK_DIR/spec.md" << EOF
 # Task: <user's question>
-user_id: <username or "anonymous">
+user_id: <username — never "anonymous"; if unknown, ask the user to re-login>
+auth_ticket: <the [ticket: ...] value from the user's message, if present>
 question: <exact question from the user>
 ## Expected Output
 <describe what the worker should return>

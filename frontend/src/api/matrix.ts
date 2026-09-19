@@ -87,17 +87,57 @@ export async function sendQuery(
   rolesJwt: string
 ): Promise<string> {
   const traceId = generateTraceId()
+  // Exchange the roles JWT for a short ticket that rides the message body.
+  // The AgentTeams runtime's message mapper forwards only content.body to
+  // the manager agent — custom fields like x-hb-auth are dropped, so the
+  // cryptographic identity must travel as a body marker that the dispatch
+  // scripts extract and pass to the MCP layer for verification.
+  let body = question
+  const ticket = rolesJwt ? await exchangeTicket(rolesJwt) : null
+  if (ticket) {
+    body = `${question}\n\n[ticket: ${ticket}]`
+  }
   // @ts-ignore — sendEvent accepts string event types at runtime
   await client.sendEvent(roomId, 'm.room.message' as sdk.EventType, {
     msgtype: 'm.text',
-    body: question,
+    body,
     'x-honeybadge': {
       v: '1',
       contract: '001',
       trace_id: traceId,
       payload: { question },
     },
+    // Kept for protocol compatibility (used if the runtime ever forwards
+    // custom fields); the ticket above is the operative identity carrier.
     'x-hb-auth': rolesJwt,
   })
   return traceId
+}
+
+/**
+ * Exchange the roles JWT for a short-lived auth ticket via honeybadge-server.
+ * Returns null on any failure — the caller falls back to a ticketless body
+ * (queries then fail closed at the MCP layer when REQUIRE_AUTH is on).
+ */
+export async function exchangeTicket(rolesJwt: string): Promise<string | null> {
+  try {
+    const resp = await fetch('/api/auth/ticket', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${rolesJwt}`,
+        'Content-Type': 'application/json',
+      },
+    })
+    if (!resp.ok) return null
+    const envelope = await resp.json()
+    const ticket = envelope?.data?.ticket
+    return typeof ticket === 'string' && ticket.length > 0 ? ticket : null
+  } catch {
+    return null
+  }
+}
+
+/** Strip the trailing "[ticket: ...]" marker from a message body. */
+export function stripTicketMarker(body: string): string {
+  return body.replace(/\s*\[ticket:\s*[^\]]*\]\s*$/, '')
 }

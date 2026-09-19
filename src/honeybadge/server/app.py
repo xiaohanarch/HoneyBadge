@@ -31,6 +31,7 @@ from honeybadge.server.security import (
     configure_rate_limiter,
     extract_jti,
 )
+from honeybadge.server.tickets import TicketStore
 
 logger = structlog.get_logger()
 
@@ -118,6 +119,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
 
     app = FastAPI(title="HoneyBadge", version=VERSION, lifespan=lifespan)
     app.state.config = config
+    app.state.ticket_store = TicketStore()
 
     # --- Rate limiter (slowapi) ---
     limiter = configure_rate_limiter(app)
@@ -212,11 +214,13 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     from honeybadge.server.audit import router as audit_router
     from honeybadge.server.health import router as health_router
     from honeybadge.server.sessions import router as sessions_router
+    from honeybadge.server.tickets import router as tickets_router
 
     app.include_router(health_router)
     app.include_router(sessions_router)
     app.include_router(audit_router)
     app.include_router(admin_router)
+    app.include_router(tickets_router)
 
     return app
 

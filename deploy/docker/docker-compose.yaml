@@ -551,6 +551,12 @@ services:
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
       - PERMISSION_SERVICE_URL=http://honeybadge-permissions:8092
+      # Identity verification (L0): verify auth tokens with the shared
+      # JWT_SECRET and resolve short auth tickets via honeybadge-server.
+      - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
+      - HONEYBADGE_SERVER_URL=http://honeybadge-server:8090
+      - HONEYBADGE_SERVICE_TOKEN=${HONEYBADGE_SERVICE_TOKEN:-}
+      - HONEYBADGE_REQUIRE_AUTH=${HONEYBADGE_REQUIRE_AUTH:-1}
       - TZ=Asia/Shanghai
     networks:
       - honeybadge-net

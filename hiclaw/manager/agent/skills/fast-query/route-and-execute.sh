@@ -61,6 +61,21 @@ if [[ "$USER_ID" != "manager" ]]; then
     echo "$USER_ID" > /tmp/.last-route-user-id
 fi
 
+# Extract the auth ticket embedded in the message body by the frontend
+# ("...\n\n[ticket: <id>]"). It carries the user's verified identity to
+# the MCP layer (validate_and_execute verifies it and overrides any
+# self-reported user_id). Extracted here — deterministically — because
+# the AgentTeams runtime drops custom event fields (x-hb-auth) before
+# the agent sees the message.
+TICKET=$(printf '%s' "$QUESTION" | grep -oP '\[ticket:\s*\K[^\]]+' || true)
+if [[ -n "$TICKET" ]]; then
+    echo "$TICKET" > /tmp/.last-route-auth-ticket
+else
+    # Recover from the previous call if the LLM dropped it (same pattern
+    # as the user-id recovery above).
+    TICKET=$(cat /tmp/.last-route-auth-ticket 2>/dev/null || true)
+fi
+
 # Step 1: Route
 ROUTE=$(bash /opt/honeybadge/config/manager/agent/skills/fast-query/router.sh "$QUESTION")
 
@@ -72,6 +87,7 @@ case "$ROUTE" in
         exec bash /opt/honeybadge/config/manager/agent/skills/fast-query/fast-query.sh \
             --question "$QUESTION" \
             --user-id "$USER_ID" \
+            --ticket "$TICKET" \
             --task-id "fast-$(date +%s%3N)" \
             --forward-to-user-id "$USER_ID"
         ;;

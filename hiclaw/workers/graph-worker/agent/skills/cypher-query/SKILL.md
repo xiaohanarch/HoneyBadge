@@ -14,7 +14,7 @@ You call MCP tools via the `exec` tool using the `mcporter` CLI. **All MCP tools
 **nebula-mcp** (honeybadge-nebula):
 ```
 mcporter call honeybadge-nebula.generate_query --args '{"question":"...","conversation_history":[...]}'
-mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"...","user_context":{"user_id":"..."}}'
+mcporter call honeybadge-nebula.validate_and_execute --args '{"ngql":"...","user_context":{"user_id":"...","auth_ticket":"<from spec.md, if present>"}}'
 mcporter call honeybadge-nebula.get_schema --args '{"space":"honeybadge"}'
 mcporter call honeybadge-nebula.explain_ngql --args '{"ngql":"..."}'
 mcporter call honeybadge-nebula.summarize_query_results --args '{"question":"...","columns":[...],"rows":[...]}'

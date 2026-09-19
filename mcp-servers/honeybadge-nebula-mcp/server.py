@@ -18,9 +18,11 @@ _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 sys.path.insert(0, os.path.join(_project_root, "src"))
 
 import httpx
+import jwt as pyjwt
 import structlog
 from dataclasses import asdict
 from fastmcp import FastMCP
+from jwt.exceptions import InvalidTokenError
 
 from honeybadge.core.trace import generate_trace_id
 from honeybadge.db.nebula import NebulaGraphClient, NebulaQueryResult
@@ -410,6 +412,55 @@ async def generate_ngql_impl(
     }
 
 
+def _verify_auth_token(token: str) -> dict | None:
+    """Verify a HoneyBadge auth token (HS256, shared JWT_SECRET).
+
+    Accepts auth-service roles JWTs (iss=honeybadge-auth) and server
+    access tokens. Returns the claims dict on success; None on bad
+    signature, expiry, malformed input, or a missing username claim.
+    """
+    secret = os.environ.get("JWT_SECRET", "")
+    if not secret or not token:
+        return None
+    try:
+        claims = pyjwt.decode(token, secret, algorithms=["HS256"])
+    except InvalidTokenError:
+        return None
+    if not isinstance(claims, dict) or not claims.get("username"):
+        return None
+    return claims
+
+
+async def _resolve_auth_ticket(ticket: str) -> str | None:
+    """Resolve a short single-use auth ticket to the original JWT.
+
+    Tickets are issued by honeybadge-server (POST /api/auth/ticket) and
+    resolved via its internal endpoint, which requires the shared
+    HONEYBADGE_SERVICE_TOKEN. Returns None when unconfigured, unknown,
+    expired, or already used.
+    """
+    base = os.environ.get("HONEYBADGE_SERVER_URL", "").rstrip("/")
+    service_token = os.environ.get("HONEYBADGE_SERVICE_TOKEN", "")
+    if not base or not service_token or not ticket:
+        logger.warning("auth_ticket_resolution_unconfigured")
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{base}/api/internal/ticket/{ticket}",
+                headers={"X-HB-Service-Token": service_token},
+            )
+            if resp.status_code == 200:
+                data = resp.json().get("data") or {}
+                token = data.get("token")
+                return str(token) if token else None
+            logger.warning("auth_ticket_resolution_failed", status=resp.status_code)
+            return None
+    except Exception as exc:
+        logger.warning("auth_ticket_resolution_error", error=str(exc))
+        return None
+
+
 async def validate_and_execute_impl(
     nebula: NebulaGraphClient,
     validator: NgqlValidator,
@@ -425,6 +476,12 @@ async def validate_and_execute_impl(
     or ``user_id`` is empty/``"manager"``/``"anonymous"``, the query is
     rejected with ``L3_NO_USER_CONTEXT``. Set ``HONEYBADGE_L3_FAIL_OPEN=1``
     to restore the legacy fail-open behavior (dev/test only).
+
+    Identity verification: ``user_context`` may carry ``auth_token`` (a
+    signed JWT) or ``auth_ticket`` (short id resolved via the server).
+    When present it must verify; the verified username overrides the
+    self-reported ``user_id``. With ``HONEYBADGE_REQUIRE_AUTH=1`` (set by
+    compose/k8s) a token is mandatory.
 
     Ordering: L1 (syntax + write guard) runs before the identity check so
     that obviously malformed or write queries are rejected without leaking
@@ -458,13 +515,61 @@ async def validate_and_execute_impl(
             "trace_id": trace_id,
         }
 
-    # --- L0: Fail-closed user context check (hard guard) ---------------
+    # --- L0: identity — verified auth token, then fail-closed context --
     # SKILL.md says "Never omit user_context" and "Never use USER_ID=manager/anonymous".
     # Enforce this at the tool layer so LLM non-compliance cannot bypass L3.
     # Runs after L1 (syntax) so malformed/write queries are rejected without
     # revealing whether the caller is authenticated.
+    #
+    # Auth verification: user_context may carry auth_token (full JWT) or
+    # auth_ticket (short id, resolved via honeybadge-server). When either
+    # is present it MUST verify — the verified username OVERRIDES any
+    # self-reported user_id and permissions are re-fetched for the verified
+    # identity. HONEYBADGE_REQUIRE_AUTH=1 makes the token mandatory
+    # (compose/k8s set this); HONEYBADGE_L3_FAIL_OPEN only tolerates ABSENT
+    # tokens in legacy dev setups and never accepts an invalid one.
     _fail_open = os.environ.get("HONEYBADGE_L3_FAIL_OPEN", "") == "1"
+    _require_auth = os.environ.get("HONEYBADGE_REQUIRE_AUTH", "") == "1"
     _FORBIDDEN_USER_IDS = frozenset({"", "manager", "anonymous", "unknown"})
+
+    _auth_token = str(user_context.get("auth_token", "")).strip() if user_context else ""
+    _auth_ticket = str(user_context.get("auth_ticket", "")).strip() if user_context else ""
+
+    if _auth_token or _auth_ticket:
+        token = _auth_token or await _resolve_auth_ticket(_auth_ticket)
+        claims = _verify_auth_token(token) if token else None
+        if claims is None:
+            return {
+                "success": False,
+                "error": "L0_AUTH_INVALID",
+                "details": [{
+                    "code": "E304",
+                    "message": "auth_token/auth_ticket failed verification "
+                               "(unknown ticket, bad signature, or expired).",
+                }],
+                "trace_id": trace_id,
+            }
+        _verified_id = _normalize_user_id(str(claims.get("username", "")))
+        if user_context and user_context.get("user_id"):
+            _reported = _normalize_user_id(str(user_context["user_id"]))
+            if _reported != _verified_id:
+                logger.warning(
+                    "l0_user_id_overridden_by_jwt",
+                    reported=_reported, verified=_verified_id, trace_id=trace_id,
+                )
+        # Rebuild from the verified identity only; L3 re-fetches permissions.
+        user_context = {"user_id": _verified_id}
+    elif _require_auth:
+        return {
+            "success": False,
+            "error": "L0_AUTH_REQUIRED",
+            "details": [{
+                "code": "E305",
+                "message": "user_context.auth_token (or auth_ticket) is required "
+                           "on this deployment.",
+            }],
+            "trace_id": trace_id,
+        }
 
     if user_context is None:
         if _fail_open:
@@ -693,7 +798,8 @@ async def get_user_permissions(user_id: str) -> dict:
 
     Args:
         user_id: Plain username (e.g. 'admin', 'subsidiary_lead').
-                 Extract from the 'username' claim in the x-hb-auth JWT.
+                 Extract from the task's user identity (the dispatch spec
+                 or the verified auth identity).
     """
     return await get_user_permissions_impl(user_id)
 

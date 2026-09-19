@@ -80,6 +80,7 @@ jobs:
           cp .env.example .env
           export LLM_API_KEY
           export JWT_SECRET="$(openssl rand -hex 32)"
+          export HONEYBADGE_SERVICE_TOKEN="$(openssl rand -hex 16)"
           export HICLAW_MANAGER_PASSWORD="$(openssl rand -hex 16)"
           export HICLAW_MANAGER_GATEWAY_KEY="$(openssl rand -hex 16)"
           # CI uses glm-4-flash for MCP servers (nGQL generation only).
@@ -101,6 +102,7 @@ jobs:
               'LLM_API_KEY', 'LLM_MODEL', 'JWT_SECRET',
               'HICLAW_MANAGER_PASSWORD', 'HICLAW_MANAGER_GATEWAY_KEY',
               'LLM_UPSTREAM_HOST', 'LLM_UPSTREAM_PATH_PREFIX',
+              'HONEYBADGE_SERVICE_TOKEN',
           )}
           out, seen = [], set()
           for line in p.read_text().splitlines():
