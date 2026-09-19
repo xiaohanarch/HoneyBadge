@@ -60,7 +60,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install pytest pytest-playwright pytest-timeout httpx docker redis python-dotenv
+          pip install pytest pytest-playwright pytest-timeout httpx docker redis python-dotenv nebula3-python
           playwright install chromium --with-deps
 
       - name: Materialize deploy/docker/.env from template + CI secrets
@@ -144,7 +144,7 @@ jobs:
         run: docker builder prune -af || true
 
       - name: Start observability stack
-        if: false  # skipped — observability tests disabled to fit CI time budget
+        if: github.event.inputs.test_filter == '' || contains('observability', github.event.inputs.test_filter)
         run: |
           cd deploy/docker
           docker compose --env-file .env --profile observability up -d
@@ -459,25 +459,32 @@ jobs:
             --timeout=300 2>&1 | tee -a test-output.txt || true
 
       - name: Run E2E Tests - Observability
-        if: false  # skipped — observability tests disabled to fit CI time budget
+        # Re-enabled 2026-09-18: 11 tests, no LLM dependency, ~1-3 min — the
+        # old "CI time budget" constraint no longer holds (42m of a 6h limit).
+        if: github.event.inputs.test_filter == '' || contains('observability', github.event.inputs.test_filter)
         run: |
           echo "=== Running Observability Tests ==="
           pytest tests/e2e/test_09_observability.py \
             -v --tb=short --junitxml=test-results/observability.xml \
             --timeout=300 2>&1 | tee -a test-output.txt || true
 
-      - name: Fail job if any test stage reported FAILED/ERROR
+      - name: Fail job if any test stage reported FAILED/ERROR/Timeout
         if: always()
         run: |
           if [ ! -f test-output.txt ]; then
             echo "No test output captured — likely earlier stage failed; not failing here."
             exit 0
           fi
-          if grep -E "FAILED|ERROR" test-output.txt | grep -v "StatementEmpty"; then
-            echo "::error::Test failures detected in pytest output"
+          # "Timeout" catches pytest-timeout banners: a stage whose first test
+          # hangs gets its whole process killed by --timeout, which produces
+          # no PASSED/FAILED lines and previously slipped through as green
+          # (seen with Context & Routing in run 35367024483).
+          # "no tests ran" catches empty collections (exit code 5, masked by || true).
+          if grep -E "FAILED|ERROR|Timeout|no tests ran" test-output.txt | grep -v "StatementEmpty"; then
+            echo "::error::Test failures or timeouts detected in pytest output"
             exit 1
           fi
-          echo "No FAILED/ERROR lines found in test output."
+          echo "No FAILED/ERROR/Timeout lines found in test output."
 
       - name: Upload test results
         if: always()

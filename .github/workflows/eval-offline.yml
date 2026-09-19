@@ -1,0 +1,82 @@
+name: Eval Offline (LLM-as-judge)
+
+# Nightly offline eval layer: real LLM generation + LLM-as-judge scoring
+# with N-run statistics. NOT run per-PR — judge non-determinism would add
+# CI noise; the rule-based layer (Eval CI) already gates every push.
+# Generation model defaults to glm-4-flash (matches the production MCP
+# nGQL layer); the judge uses the stronger Manager-tier model.
+
+on:
+  schedule:
+    # 21:23 UTC = 05:23 Beijing (off-peak, off the :00/:30 cron marks)
+    - cron: '23 21 * * *'
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'Runs per case'
+        default: '3'
+      threshold:
+        description: 'Pass-rate threshold (0-1)'
+        default: '0.8'
+      model:
+        description: 'Generation model'
+        default: 'glm-4-flash'
+
+jobs:
+  eval-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Materialize LLM config from secrets
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_UPSTREAM_HOST: ${{ secrets.LLM_UPSTREAM_HOST }}
+          LLM_UPSTREAM_PATH_PREFIX: ${{ secrets.LLM_UPSTREAM_PATH_PREFIX }}
+        run: |
+          if [ -z "${LLM_API_KEY:-}" ]; then
+            echo "::error::secrets.LLM_API_KEY is unset — cannot run offline eval."
+            exit 1
+          fi
+          {
+            echo "LLM_ENDPOINT=https://${LLM_UPSTREAM_HOST:-open.bigmodel.cn}${LLM_UPSTREAM_PATH_PREFIX:-/api/paas/v4}"
+            echo "LLM_API_KEY=${LLM_API_KEY}"
+            echo "LLM_MODEL=${{ github.event.inputs.model || 'glm-4-flash' }}"
+            echo "JUDGE_LLM_MODEL=glm-5.2"
+          } >> "$GITHUB_ENV"
+
+      - name: Run offline eval
+        env:
+          RUNS: ${{ github.event.inputs.runs || '3' }}
+          THRESHOLD: ${{ github.event.inputs.threshold || '0.8' }}
+        run: |
+          set -o pipefail
+          python -m eval.runner --offline --runs "$RUNS" --threshold "$THRESHOLD" --report html 2>&1 | tee eval-run.log
+          # The runner does not exit non-zero below threshold — enforce it here.
+          RATE=$(grep -oP 'Eval complete: \d+/\d+ passed \(\K[0-9.]+(?=%)' eval-run.log)
+          if [ -z "$RATE" ]; then
+            echo "::error::Could not parse eval summary from output."
+            exit 1
+          fi
+          echo "Overall pass rate: ${RATE}% (threshold ${THRESHOLD})"
+          awk -v rate="$RATE" -v th="$THRESHOLD" 'BEGIN { exit (rate+0 >= th*100) ? 0 : 1 }' || {
+            echo "::error::Eval pass rate ${RATE}% below threshold ${THRESHOLD}"
+            exit 1
+          }
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-offline-report-${{ github.run_id }}
+          path: eval-report.html
+          retention-days: 30
+          if-no-files-found: warn
