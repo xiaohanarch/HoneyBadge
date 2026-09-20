@@ -4,8 +4,6 @@ on:
   workflow_run:
     workflows: ["E2E Tests"]
     types: [completed]
-    workflows:
-      - E2E Tests
 
 jobs:
   notify:
