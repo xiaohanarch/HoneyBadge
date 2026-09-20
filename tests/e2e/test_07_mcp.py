@@ -27,7 +27,7 @@ API_BASE_URL = "http://localhost:8090"
 #   2. Redis password reconciled (redis123 in both secrets.yaml and test)
 #   3. Two-stage harness wait in conftest.py handles mid-stream LLM preamble
 
-pytestmark = [pytest.mark.mcp, pytest.mark.requires_llm]
+pytestmark = [pytest.mark.mcp]
 
 
 class TestMCPServices:
@@ -74,6 +74,7 @@ class TestMCPServices:
             data = response.json()
             # Should indicate overall health including permissions
 
+    @pytest.mark.requires_llm
     def test_tc605_mcp_servers_reachable_from_workers(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-605: MCP servers are reachable from HiClaw workers."""
         page = admin_logged_in
@@ -86,6 +87,7 @@ class TestMCPServices:
         response = page.locator(MSG_ASSISTANT)
         expect(response.last).to_be_visible()
 
+    @pytest.mark.requires_llm
     def test_tc606_mcp_tool_calls_return_valid(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-606: MCP tool calls return valid responses."""
         page = admin_logged_in
@@ -99,6 +101,7 @@ class TestMCPServices:
         text = response.last.inner_text()
         assert len(text) > 5, f"Response too short: '{text}'"
 
+    @pytest.mark.requires_llm
     def test_tc607_mcp_connection_error_handling(self, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-607: MCP connection errors are handled gracefully."""
         page = admin_logged_in
@@ -111,6 +114,7 @@ class TestMCPServices:
         expect(page.locator(CHAT_TEXTAREA).first).to_be_visible()
         expect(page.locator(CHAT_TEXTAREA).first).to_be_enabled()
 
+    @pytest.mark.requires_llm
     @pytest.mark.timeout(600)
     def test_tc608_multiple_mcp_servers_sequence(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_chat_query):
         """TC-608: Multiple MCP servers can be called in sequence."""
@@ -130,6 +134,7 @@ class TestMCPServices:
         messages = page.locator(MSG_ASSISTANT)
         assert messages.count() >= 3, f"Expected >=3 assistant messages for 3 queries, got {messages.count()}"
 
+    @pytest.mark.requires_llm
     @pytest.mark.timeout(600)
     def test_tc609_nebula_mcp_functional(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-609: NebulaGraph MCP returns actual graph data."""
@@ -139,6 +144,7 @@ class TestMCPServices:
         result = send_query_and_get_response("查询供应商")
         assert result["data_row_count"] > 0, "NebulaGraph query should return data rows"
 
+    @pytest.mark.requires_llm
     @pytest.mark.timeout(600)
     def test_tc610_audit_mcp_write_verification(self, reset_manager, admin_logged_in, wait_for_chat_ready, send_query_and_get_response):
         """TC-610: Query creates audit record retrievable by trace_id."""

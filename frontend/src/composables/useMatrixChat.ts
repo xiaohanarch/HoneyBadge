@@ -7,6 +7,7 @@ import {
   createMatrixClient,
   findOrCreateManagerDmRoom,
   sendQuery,
+  stripTicketMarker,
   generateTraceId as uuidv4,
   type MatrixClient,
 } from '@/api/matrix'
@@ -34,7 +35,7 @@ function matrixEventToChatMessage(event: any): ChatMessage | null {
     return {
       id,
       role: 'user',
-      content: xhb.payload?.question || content.body || '',
+      content: xhb.payload?.question || stripTicketMarker(content.body || ''),
       message_type: 'text',
       created_at,
     }
@@ -72,7 +73,7 @@ function matrixEventToChatMessage(event: any): ChatMessage | null {
 
   // Plain text from Manager (no xhb) — text reply
   if (sender === MANAGER_USER_ID) {
-    const body = content.body || ''
+    const body = stripTicketMarker(content.body || '')
     if (!body) return null
     return {
       id,
@@ -216,7 +217,7 @@ export function useMatrixChat() {
     }
 
     if (!xhb) {
-      const body = content.body || ''
+      const body = stripTicketMarker(content.body || '')
       if (!body) return
       if (event.getSender() === MANAGER_USER_ID) {
         if (isPlaceholderEmpty()) {

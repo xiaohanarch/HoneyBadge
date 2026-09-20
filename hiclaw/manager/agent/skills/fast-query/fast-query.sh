@@ -12,6 +12,7 @@ set -euo pipefail
 
 QUESTION=""
 USER_ID=""
+TICKET=""
 TASK_ID="fast-$(date +%s)"
 FORWARD_USER_ID=""
 
@@ -23,11 +24,29 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --question)            QUESTION="$2";        shift 2 ;;
     --user-id)             USER_ID="$2";         shift 2 ;;
+    --ticket)              TICKET="$2";          shift 2 ;;
     --task-id)             TASK_ID="$2";         shift 2 ;;
     --forward-to-user-id)  FORWARD_USER_ID="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
+
+# Extract the auth ticket from the question body if not passed explicitly
+# (the frontend appends "\n\n[ticket: <id>]" to every query). Also strip
+# the marker so the LLM-facing prompt and user-facing forwards never see it.
+if [[ -z "$TICKET" ]]; then
+  TICKET=$(printf '%s' "$QUESTION" | grep -oP '\[ticket:\s*\K[^\]]+' || true)
+fi
+if [[ -z "$TICKET" ]]; then
+  TICKET=$(cat /tmp/.last-route-auth-ticket 2>/dev/null || true)
+fi
+# Deterministic fallback: the LLM relaying the question often drops the
+# marker (observed in CI). Pull the raw Matrix DM body instead.
+if [[ -z "$TICKET" && -n "$USER_ID" && "$USER_ID" != "manager" ]]; then
+  TICKET=$(python3 "$(dirname "$0")/fetch-conversation-history.py" \
+      --user-id "$USER_ID" --extract-ticket 2>/dev/null | tail -1 || true)
+fi
+QUESTION=$(printf '%s' "$QUESTION" | sed -E 's/[[:space:]]*\[ticket:[[:space:]]*[^]]*\][[:space:]]*$//')
 
 # If --user-id was not explicitly provided but --forward-to-user-id was,
 # use the forward user ID for permission checking.  The Manager LLM often
@@ -62,13 +81,21 @@ NGQL=$(echo "$NGQL_RESP" | python3 -c \
   || { echo '{"error":"nGQL generation failed"}'; exit 2; }
 
 # Step 2: 带权限执行
-if [[ -n "$USER_ID" ]]; then
-  EXEC_ARGS=$(python3 -c "import json,sys; print(json.dumps({'ngql': sys.argv[1], 'user_context': {'user_id': sys.argv[2]}}))" "$NGQL" "$USER_ID") \
-    || { echo '{"error":"query execution failed"}'; exit 3; }
-else
-  EXEC_ARGS=$(python3 -c "import json,sys; print(json.dumps({'ngql': sys.argv[1], 'user_context': {}}))" "$NGQL") \
-    || { echo '{"error":"query execution failed"}'; exit 3; }
-fi
+# user_context carries the auth ticket — validate_and_execute resolves it via
+# honeybadge-server and verifies the JWT, then OVERRIDES the self-reported
+# user_id with the verified username. Without a ticket the call fails closed
+# on deployments with HONEYBADGE_REQUIRE_AUTH=1.
+EXEC_ARGS=$(python3 -c "
+import json, sys
+ngql, user_id, ticket = sys.argv[1], sys.argv[2], sys.argv[3]
+ctx = {}
+if user_id:
+    ctx['user_id'] = user_id
+if ticket:
+    ctx['auth_ticket'] = ticket
+print(json.dumps({'ngql': ngql, 'user_context': ctx}))
+" "$NGQL" "$USER_ID" "$TICKET") \
+  || { echo '{"error":"query execution failed"}'; exit 3; }
 
 RESULT=$(mcporter --config "$MCPORTER_CFG" call honeybadge-nebula.validate_and_execute \
   --args "$EXEC_ARGS") \

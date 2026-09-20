@@ -61,6 +61,29 @@ if [[ "$USER_ID" != "manager" ]]; then
     echo "$USER_ID" > /tmp/.last-route-user-id
 fi
 
+# Extract the auth ticket embedded in the message body by the frontend
+# ("...\n\n[ticket: <id>]"). It carries the user's verified identity to
+# the MCP layer (validate_and_execute verifies it and overrides any
+# self-reported user_id). Extracted here — deterministically — because
+# the AgentTeams runtime drops custom event fields (x-hb-auth) before
+# the agent sees the message.
+TICKET=$(printf '%s' "$QUESTION" | grep -oP '\[ticket:\s*\K[^\]]+' || true)
+if [[ -n "$TICKET" ]]; then
+    echo "$TICKET" > /tmp/.last-route-auth-ticket
+else
+    # Recover from the previous call if the LLM dropped it (same pattern
+    # as the user-id recovery above).
+    TICKET=$(cat /tmp/.last-route-auth-ticket 2>/dev/null || true)
+fi
+# Deterministic fallback: the LLM relaying the question often drops the
+# "[ticket: ...]" marker (observed in CI: glm-5.2 passes a cleaned question).
+# Pull the raw message body from the Matrix DM instead — no LLM in the loop.
+if [[ -z "$TICKET" && -n "$USER_ID" && "$USER_ID" != "manager" ]]; then
+    TICKET=$(python3 "$(dirname "$0")/fetch-conversation-history.py" \
+        --user-id "$USER_ID" --extract-ticket 2>/dev/null | tail -1 || true)
+    [[ -n "$TICKET" ]] && echo "$TICKET" > /tmp/.last-route-auth-ticket
+fi
+
 # Step 1: Route
 ROUTE=$(bash /opt/honeybadge/config/manager/agent/skills/fast-query/router.sh "$QUESTION")
 
@@ -72,6 +95,7 @@ case "$ROUTE" in
         exec bash /opt/honeybadge/config/manager/agent/skills/fast-query/fast-query.sh \
             --question "$QUESTION" \
             --user-id "$USER_ID" \
+            --ticket "$TICKET" \
             --task-id "fast-$(date +%s%3N)" \
             --forward-to-user-id "$USER_ID"
         ;;

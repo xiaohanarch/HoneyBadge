@@ -110,30 +110,38 @@ hermes-worker image lacks `hermes-agent` + `pip3` — self-built
   `hiclaw/`, `deploy/docker/`, `deploy/hiclaw/`, `src/`, `frontend/`, `tests/`.
   Intentionally retained:
   - `deploy/k8s/**` — k8s manifests, out of scope per Summary
-  - `src/honeybadge/metrics/collectors.py` `HICLAW_METRICS` instance +
-    `HiClawMetricsCollector` class — NOT dead code. `__init__` registers 7
-    Prometheus metrics (`honeybadge_hiclaw_*`) with global REGISTRY as a
-    side effect of instantiation. `honeybadge_hiclaw_workers_active` is
+  - `src/honeybadge/metrics/collectors.py` `AGENTTEAMS_METRICS` instance +
+    `AgentTeamsMetricsCollector` class — NOT dead code. `__init__` registers 7
+    Prometheus metrics (`honeybadge_agentteams_*`) with global REGISTRY as a
+    side effect of instantiation. `honeybadge_agentteams_workers_active` is
     queried by the `NoActiveWorkers` critical alert in
     `deploy/observability/prometheus/rules/honeybadge.yml`. The Python
     instance is never called, but removing it would unregister the metrics
-    and silently break the alert. Metric names still use `hiclaw` prefix;
-    renaming to `agentteams` is a separate breaking change (dashboards +
-    historical data) and out of scope for this upgrade.
+    and silently break the alert. **Renamed from the `hiclaw` prefix on
+    2026-09-18** (collector class, alert rule, Grafana dashboard, and
+    test_observability.py updated together; historical Prometheus series
+    continuity breaks once — accepted pre-production).
   - `docs/baselines/v1.1.{0,2}/`, `docs/superpowers/{plans,specs}/` —
     historical snapshots, out of scope
-- **4.3 Docs + commit + PR** — partial. Docs updated (CLAUDE.md, README.md,
-  UPGRADE-NOTES.md). Commits local on `ralph/agentteams-v1.2.2-upgrade`.
-  **PR not pushed** — GitHub PAT in remote URL expired; `gh` keyring token
-  invalid. Needs `gh auth login` or new PAT.
+- **4.3 Docs + commit + PR** — **DONE (2026-09-18)**. Docs updated (CLAUDE.md,
+  README.md, UPGRADE-NOTES.md). PR #208 squash-merged to master (d47b41d)
+  with all CI checks green, including the full E2E suite.
 
 ### Remaining Work
 
 | Item | Blocker | Action |
 |------|---------|--------|
-| Phase 4.1 — E2E full regression (9 groups) | `docker compose` stack | local run |
-| Phase 4.3 — push branch + open PR | GitHub PAT expired | `gh auth login` |
 | Phase 2 — QwenPaw switch + 3 workaround removals | upstream manager image missing `/opt/venv/qwenpaw/` + `copaw_worker` | wait for upstream fix |
+
+**Closed 2026-09-18**:
+- Phase 4.1 — E2E full regression: **DONE**. All 9 groups green in CI
+  (run 35367024483, 42m40s) after routing LLM traffic through the
+  Volcengine GLM gateway (`LLM_API_KEY` / `LLM_UPSTREAM_HOST` /
+  `LLM_UPSTREAM_PATH_PREFIX` secrets; see e2e-tests.yml materialize step).
+  Previously-failing chat tests tc102/tc105/tc107 (401) and tc109
+  (timeout) all passed.
+- Phase 4.3 — push branch + open PR: **DONE**. PR #208 squash-merged to
+  master (d47b41d) after `gh auth login` replaced the expired PAT.
 
 ### 2026-09-01 — Local E2E unblocking (Phase 4.1 prep)
 
@@ -616,6 +624,54 @@ fixed before the chat E2E could pass:
       37 MiB/750 objects**; verified stable across two manager restarts,
       login + Tuwunel healthy throughout. Also propagates to k8s via the
       `hiclaw-init-scripts` ConfigMap on next `apply -k`.
+
+24. **Security remediation batch (2026-09-18)** — follow-up to the PR #208
+    merge; triggered by a project-wide problem analysis.
+    - **k8s secrets de-leaked (repo side)**: `deploy/k8s/secrets.yaml`
+      previously carried real-looking credentials in a PUBLIC repo —
+      treat every value that ever appeared there as leaked. It is now a
+      placeholder schema; `01-apply-secrets.sh` (random-generating, env-
+      driven) is the only apply path. It also now creates the previously
+      missing `HICLAW_MANAGER_PASSWORD` / `HICLAW_MANAGER_GATEWAY_KEY`
+      (manager.yaml referenced them; live values were hand-patched) and
+      `HONEYBADGE_SERVICE_TOKEN` (auth-ticket chain).
+    - **init-nebula job de-hardcoded**: the console invocation embedded
+      `-password nebula`; now reads `NEBULA_PASSWORD` from the Secret.
+    - **Legacy `deploy/docker/homeserver.yaml` deleted** (pre-Tuwunel
+      Synapse config, old `matrix.local` domain, unreferenced, carried PG
+      password + 3 secrets).
+    - **MCP identity verification added** (auth-ticket chain — see the
+      dedicated commit for the full design): `validate_and_execute` now
+      verifies a signed identity and OVERRIDES self-reported user_id;
+      `HONEYBADGE_REQUIRE_AUTH=1` is the deployment default. This closes
+      the "self-report admin at the MCP port" escalation.
+    - **ROTATION RUNBOOK (ECS — blocked on SSH access as of 2026-09-18;
+      execute when reachable, in this order)**:
+      1. Snapshot current live values:
+         `kubectl -n honeybadge get secret honeybadge-secrets -o jsonpath='{.data}'`
+         (compare against repo history — if any match, that value was
+         applied from the repo and MUST rotate).
+      2. **PostgreSQL**: `ALTER USER honeybadge WITH PASSWORD '<new>';`
+         FIRST (the PVC keeps the initialized password — changing only
+         the Secret does nothing), then update the Secret, then restart
+         postgres + server + audit-mcp.
+      3. **NebulaGraph**: enable auth properly — current graphd runs with
+         the image default (`nebula`, no `enable_authorize`); run
+         `ALTER USER root WITH PASSWORD '<new>'`, update the Secret,
+         restart graphd + server + nebula-mcp.
+      4. **Redis**: update Secret, delete the redis pod (env-based
+         `--requirepass`), restart server + cache-mcp.
+      5. **MinIO root (= HICLAW_ADMIN_PASSWORD)**: change via MinIO
+         console, update Secret, restart manager/workers/init-workers
+         job; also fix the 4 shell-script fallbacks in deploy/hiclaw/.
+      6. **JWT_SECRET**: update Secret, restart server + auth — all
+         sessions re-login.
+      7. **MATRIX_USER_SECRET**: update Secret, restart auth — ALL user
+         Matrix accounts must be re-provisioned (maintenance window).
+      8. **HICLAW_REGISTRATION_TOKEN + Grafana admin + any homeserver-era
+         values in git history**: rotate opportunistically.
+      9. Verify: `run-e2e-ecs.sh` green + a manual query through the
+         frontend with a non-admin account shows L3-filtered results.
 
 
 Also fixed a pre-existing quoting bug in `scripts/run-e2e-tests.sh:138`

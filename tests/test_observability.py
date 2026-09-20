@@ -70,12 +70,12 @@ class TestAlertRuleMetricAlignment:
         )
 
     def test_workers_metric_no_status_label(self) -> None:
-        """honeybadge_hiclaw_workers_active is a separate gauge, not a label."""
+        """honeybadge_agentteams_workers_active is a separate gauge, not a label."""
         content = _RULES_PATH.read_text(encoding="utf-8")
-        assert 'honeybadge_hiclaw_workers{status="active"}' not in content, (
-            "Should use honeybadge_hiclaw_workers_active (no label), not {status='active'}"
+        assert 'honeybadge_agentteams_workers{status="active"}' not in content, (
+            "Should use honeybadge_agentteams_workers_active (no label), not {status='active'}"
         )
-        assert "honeybadge_hiclaw_workers_active" in content
+        assert "honeybadge_agentteams_workers_active" in content
 
     def test_nebula_pool_metric_correct(self) -> None:
         """Nebula pool alert should use connection_pool_available, not pool_size{status}."""

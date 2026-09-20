@@ -551,6 +551,12 @@ services:
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
       - PERMISSION_SERVICE_URL=http://honeybadge-permissions:8092
+      # Identity verification (L0): verify auth tokens with the shared
+      # JWT_SECRET and resolve short auth tickets via honeybadge-server.
+      - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
+      - HONEYBADGE_SERVER_URL=http://honeybadge-server:8090
+      - HONEYBADGE_SERVICE_TOKEN=${HONEYBADGE_SERVICE_TOKEN:-}
+      - HONEYBADGE_REQUIRE_AUTH=${HONEYBADGE_REQUIRE_AUTH:-1}
       - TZ=Asia/Shanghai
     networks:
       - honeybadge-net
@@ -644,6 +650,10 @@ services:
       - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
       # Auth
       - JWT_SECRET=${JWT_SECRET:-honeybadge-dev-secret-change-in-prod}
+      # Auth-ticket identity chain: guards the internal ticket-resolve
+      # endpoint used by the MCP servers. MUST match the value passed to
+      # the nebula-mcp service — empty here makes every resolution 403.
+      - HONEYBADGE_SERVICE_TOKEN=${HONEYBADGE_SERVICE_TOKEN:-}
       - SERVER_PORT=8090
       - TZ=Asia/Shanghai
     depends_on:
@@ -764,7 +774,6 @@ services:
       - "3000:3000"
     environment:
       - VITE_API_TARGET=http://honeybadge-server:8090
-      - VITE_WS_TARGET=ws://honeybadge-server:8090
       - VITE_AUTH_URL=http://localhost:8091
       - VITE_MATRIX_HOMESERVER=http://localhost:7167
       - TZ=Asia/Shanghai

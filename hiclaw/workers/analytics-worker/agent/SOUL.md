@@ -108,6 +108,10 @@ mkdir -p "$TASK_DIR"
 USER_ID=$(grep '^user_id:' "$TASK_DIR/spec.md" 2>/dev/null | head -1 | sed 's/^user_id:[[:space:]]*//' || true)
 USER_ID="${USER_ID:-unknown}"
 
+# Extract the auth ticket — the user's verified identity carrier. The MCP
+# layer resolves + verifies it and OVERRIDES the self-reported user_id.
+AUTH_TICKET=$(grep '^auth_ticket:' "$TASK_DIR/spec.md" 2>/dev/null | head -1 | sed 's/^auth_ticket:[[:space:]]*//' || true)
+
 # 2a — Generate nGQL (overwrite each round; last successful response wins)
 QUESTION=$(grep '^question:' "$TASK_DIR/spec.md" 2>/dev/null | head -1 | sed 's/^question:[[:space:]]*//' || true)
 QUESTION="${QUESTION:-<QUESTION FROM SPEC>}"
@@ -116,10 +120,11 @@ mcporter call honeybadge-nebula.generate_query \
   > /tmp/mcp_generate.json
 
 # 2b — Execute (overwrite each round; last successful response wins)
-#      user_context is MANDATORY — user_id is extracted deterministically above.
+#      user_context is MANDATORY — user_id is extracted deterministically above,
+#      auth_ticket included whenever the spec provides one.
 NGQL=$(python3 -c "import json; print(json.load(open('/tmp/mcp_generate.json')).get('ngql',''))")
 mcporter call honeybadge-nebula.validate_and_execute \
-  --args "$(python3 -c "import json,sys; print(json.dumps({'ngql':sys.argv[1],'user_context':{'user_id':sys.argv[2]}}))" "$NGQL" "$USER_ID")" \
+  --args "$(python3 -c "import json,sys; ctx={'user_id':sys.argv[2]}; ctx.update({'auth_ticket':sys.argv[3]} if sys.argv[3] else {}); print(json.dumps({'ngql':sys.argv[1],'user_context':ctx}))" "$NGQL" "$USER_ID" "$AUTH_TICKET")" \
   > /tmp/mcp_execute.json
 ```
 

@@ -42,16 +42,16 @@ groups:
           summary: "LLM error rate above 10%"
           description: "The LLM error rate has exceeded 10% for the past 5 minutes."
 
-      # No active HiClaw workers
-      # Metric: honeybadge_hiclaw_workers_active (HiClawMetricsCollector, no labels)
+      # No active AgentTeams workers
+      # Metric: honeybadge_agentteams_workers_active (AgentTeamsMetricsCollector, no labels)
       - alert: NoActiveWorkers
-        expr: honeybadge_hiclaw_workers_active == 0
+        expr: honeybadge_agentteams_workers_active == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "No active HiClaw workers"
-          description: "There are no active HiClaw workers for the past 1 minute."
+          summary: "No active AgentTeams workers"
+          description: "There are no active AgentTeams workers for the past 1 minute."
 
       # NebulaGraph connection pool exhausted
       # Metric: honeybadge_nebula_connection_pool_available (NebulaMetricsCollector)

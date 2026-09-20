@@ -22,6 +22,7 @@ TASK_ID=""
 MESSAGE=""
 USER_MXID=""
 USER_ID=""
+TICKET=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -30,9 +31,25 @@ while [[ $# -gt 0 ]]; do
         --message)    MESSAGE="$2";     shift 2 ;;
         --user-mxid)  USER_MXID="$2";  shift 2 ;;
         --user-id)    USER_ID="$2";    shift 2 ;;
+        --ticket)     TICKET="$2";     shift 2 ;;
         *)            echo "DISPATCH_ERROR: Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
+
+# Recover the auth ticket from route-and-execute.sh when the LLM drops it
+# (same recovery pattern as the user_id recovery below). The ticket carries
+# the user's verified identity; the Worker passes it to the MCP layer, where
+# validate_and_execute verifies it and overrides the self-reported user_id.
+if [[ -z "$TICKET" ]]; then
+    TICKET=$(cat /tmp/.last-route-auth-ticket 2>/dev/null || true)
+fi
+# Deterministic fallback: extract from the raw Matrix DM body (the LLM
+# relaying the question often drops the "[ticket: ...]" marker).
+if [[ -z "$TICKET" && -n "$USER_ID" && "$USER_ID" != "manager" ]]; then
+    FETCH_HIST="/opt/honeybadge/config/manager/agent/skills/fast-query/fetch-conversation-history.py"
+    [ -f "$FETCH_HIST" ] && TICKET=$(python3 "$FETCH_HIST" \
+        --user-id "$USER_ID" --extract-ticket 2>/dev/null | tail -1 || true)
+fi
 
 if [ -z "$WORKER_NAME" ] || [ -z "$MESSAGE" ]; then
     echo "DISPATCH_ERROR: --worker and --message are required" >&2
@@ -138,6 +155,7 @@ with open(sys.argv[2], 'w') as f:
         cat > "$TASK_META_DIR/spec.md" << SPECEOF
 # Task: $TASK_ID
 user_id: $USER_ID
+auth_ticket: $TICKET
 question: $MESSAGE
 ## Expected Output
 Query results with L3 permission filtering applied for user "$USER_ID".

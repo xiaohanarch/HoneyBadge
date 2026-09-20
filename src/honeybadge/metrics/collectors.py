@@ -249,53 +249,53 @@ class NebulaMetricsCollector:
 
 
 # =============================================================================
-# HiClaw Metrics
+# AgentTeams Metrics
 # =============================================================================
 
-class HiClawMetricsCollector:
+class AgentTeamsMetricsCollector:
     """
-    HiClaw agent orchestration Prometheus metrics.
+    AgentTeams agent orchestration Prometheus metrics.
 
     Metrics:
-    - hiclaw_workers_total: Total workers (gauge, labels: group)
-    - hiclaw_workers_active: Active workers (gauge, labels: group)
-    - hiclaw_task_queue_size: Task queue depth (gauge, labels: group)
-    - hiclaw_task_duration_seconds: Task execution time histogram
-    - hiclaw_task_total: Total tasks processed (counter)
-    - hiclaw_task_errors_total: Task errors (counter)
+    - agentteams_workers_total: Total workers (gauge, labels: group)
+    - agentteams_workers_active: Active workers (gauge, labels: group)
+    - agentteams_task_queue_size: Task queue depth (gauge, labels: group)
+    - agentteams_task_duration_seconds: Task execution time histogram
+    - agentteams_task_total: Total tasks processed (counter)
+    - agentteams_task_errors_total: Task errors (counter)
     """
 
     def __init__(self, registry: CollectorRegistry | None = None) -> None:
-        """Initialize HiClaw metrics collectors."""
+        """Initialize AgentTeams metrics collectors."""
         self._registry = registry or REGISTRY
 
         # Worker counts
         self.workers_total = Gauge(
-            "honeybadge_hiclaw_workers_total",
-            "Total number of HiClaw workers",
+            "honeybadge_agentteams_workers_total",
+            "Total number of AgentTeams workers",
             ["group"],
             registry=self._registry,
         )
 
         self.workers_active = Gauge(
-            "honeybadge_hiclaw_workers_active",
-            "Number of active HiClaw workers",
+            "honeybadge_agentteams_workers_active",
+            "Number of active AgentTeams workers",
             ["group"],
             registry=self._registry,
         )
 
         # Task queue
         self.task_queue_size = Gauge(
-            "honeybadge_hiclaw_task_queue_size",
-            "HiClaw task queue depth",
+            "honeybadge_agentteams_task_queue_size",
+            "AgentTeams task queue depth",
             ["group", "priority"],
             registry=self._registry,
         )
 
         # Task duration
         self.task_duration_seconds = Histogram(
-            "honeybadge_hiclaw_task_duration_seconds",
-            "HiClaw task duration in seconds",
+            "honeybadge_agentteams_task_duration_seconds",
+            "AgentTeams task duration in seconds",
             ["group", "task_type"],
             buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
             registry=self._registry,
@@ -303,24 +303,24 @@ class HiClawMetricsCollector:
 
         # Task counter
         self.task_total = Counter(
-            "honeybadge_hiclaw_task_total",
-            "Total HiClaw tasks processed",
+            "honeybadge_agentteams_task_total",
+            "Total AgentTeams tasks processed",
             ["group", "task_type", "status"],
             registry=self._registry,
         )
 
         # Task errors
         self.task_errors_total = Counter(
-            "honeybadge_hiclaw_task_errors_total",
-            "Total HiClaw task errors",
+            "honeybadge_agentteams_task_errors_total",
+            "Total AgentTeams task errors",
             ["group", "task_type", "error_type"],
             registry=self._registry,
         )
 
         # Message throughput
         self.message_throughput = Counter(
-            "honeybadge_hiclaw_messages_total",
-            "Total HiClaw messages processed",
+            "honeybadge_agentteams_messages_total",
+            "Total AgentTeams messages processed",
             ["group", "message_type"],
             registry=self._registry,
         )
@@ -698,7 +698,7 @@ class ResilienceMetricsCollector:
 
 LLM_METRICS = LLMMetricsCollector()
 NEBULA_METRICS = NebulaMetricsCollector()
-HICLAW_METRICS = HiClawMetricsCollector()
+AGENTTEAMS_METRICS = AgentTeamsMetricsCollector()
 VALIDATION_METRICS = ValidationMetricsCollector()
 QUERY_METRICS = QueryMetricsCollector()
 ETL_METRICS = ETLMetricsCollector()

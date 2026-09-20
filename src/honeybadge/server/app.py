@@ -1,7 +1,5 @@
 """FastAPI application factory for HoneyBadge backend server."""
 
-import json
-import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -33,6 +31,7 @@ from honeybadge.server.security import (
     configure_rate_limiter,
     extract_jti,
 )
+from honeybadge.server.tickets import TicketStore
 
 logger = structlog.get_logger()
 
@@ -120,6 +119,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
 
     app = FastAPI(title="HoneyBadge", version=VERSION, lifespan=lifespan)
     app.state.config = config
+    app.state.ticket_store = TicketStore()
 
     # --- Rate limiter (slowapi) ---
     limiter = configure_rate_limiter(app)
@@ -214,115 +214,13 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     from honeybadge.server.audit import router as audit_router
     from honeybadge.server.health import router as health_router
     from honeybadge.server.sessions import router as sessions_router
+    from honeybadge.server.tickets import router as tickets_router
 
     app.include_router(health_router)
     app.include_router(sessions_router)
     app.include_router(audit_router)
     app.include_router(admin_router)
-
-    # --- WebSocket endpoint ---
-    from fastapi import WebSocket, WebSocketDisconnect
-
-    from honeybadge.server.websocket import build_query_response, process_query
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket) -> None:
-        """WebSocket endpoint for query processing with full metadata.
-
-        Authentication is enforced BEFORE the handshake completes: a valid
-        JWT must be supplied via the ``token`` query parameter. Anonymous
-        connections are rejected with close code 1008 (policy violation).
-        """
-        from honeybadge.server.auth import decode_token
-
-        token = websocket.query_params.get("token", "")
-        if not token:
-            await websocket.close(code=1008)
-            return
-        payload = decode_token(token, config.jwt_secret)
-        if not payload:
-            await websocket.close(code=1008)
-            return
-        if payload.get("type") != "access" and payload.get("iss") != "honeybadge-auth":
-            await websocket.close(code=1008)
-            return
-
-        user_id = payload.get("username", payload.get("sub", "anonymous"))
-        org_id: int | None = payload.get("org_id")
-        roles: list[str] = payload.get("roles", [])
-
-        await websocket.accept()
-
-        try:
-            while True:
-                # Receive message
-                data = await websocket.receive_text()
-                try:
-                    msg = json.loads(data)
-                except json.JSONDecodeError:
-                    await websocket.send_text(json.dumps({"type": "error", "payload": {"message": "Invalid JSON"}}))
-                    continue
-
-                msg_type = msg.get("type")
-                payload = msg.get("payload", {})
-
-                if msg_type == "query":
-                    question = payload.get("question", "")
-                    session_id = payload.get("session_id", "")
-
-                    # Get clients from app state
-                    nebula = websocket.app.state.nebula
-                    pg = websocket.app.state.pg
-                    llm = getattr(websocket.app.state, "llm", None)
-
-                    if not nebula or not pg:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "payload": {"message": "Server not fully initialized"},
-                        }))
-                        continue
-
-                    if not llm:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "payload": {"message": "LLM not configured"},
-                        }))
-                        continue
-
-                    # Process query
-                    result = await process_query(
-                        question=question,
-                        session_id=session_id,
-                        nebula=nebula,
-                        pg=pg,
-                        llm_adapter=llm,
-                        user_id=user_id,
-                        org_id=org_id,
-                        roles=roles,
-                    )
-
-                    # Send response
-                    response = build_query_response(result)
-                    await websocket.send_text(json.dumps(response))
-
-                elif msg_type == "heartbeat":
-                    await websocket.send_text(json.dumps({"type": "heartbeat", "timestamp": int(time.time() * 1000)}))
-
-        except WebSocketDisconnect:
-            logger.info("ws_client_disconnected")
-        except Exception as e:
-            logger.error("ws_error", error=str(e), exc_info=True)
-            try:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "payload": {
-                        "message": "An internal error occurred",
-                        "code": "INTERNAL_ERROR",
-                        "trace_id": get_trace_id(),
-                    },
-                }))
-            except Exception:
-                pass
+    app.include_router(tickets_router)
 
     return app
 

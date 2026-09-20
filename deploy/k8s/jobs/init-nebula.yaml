@@ -29,12 +29,18 @@ spec:
       containers:
         - name: init-nebula
           image: vesoft/nebula-console:v3.8.0
+          env:
+            - name: NEBULA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: honeybadge-secrets
+                  key: NEBULA_PASSWORD
           command:
             - sh
             - -c
             - |
               set -e
-              CONSOLE="nebula-console -addr nebula-graphd -port 9669 -user root -password nebula"
+              CONSOLE="nebula-console -addr nebula-graphd -port 9669 -user root -password $NEBULA_PASSWORD"
 
               echo "=== Adding storaged host ==="
               echo "ADD HOSTS nebula-storaged-0.nebula-storaged.honeybadge.svc.cluster.local:9779;" | $CONSOLE

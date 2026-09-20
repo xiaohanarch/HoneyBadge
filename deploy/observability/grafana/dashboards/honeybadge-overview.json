@@ -109,7 +109,7 @@
       "gridPos": {"x": 0, "y": 4, "w": 4, "h": 4},
       "targets": [
         {
-          "expr": "sum(honeybadge_hiclaw_workers{status='active'})",
+          "expr": "sum(honeybadge_agentteams_workers_active)",
           "legendFormat": "Active Workers"
         }
       ],
